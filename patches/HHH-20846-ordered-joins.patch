@@ -196,7 +196,7 @@ index df41222..e555a73 100644
  		}
  		// The transformer only rewrites when at least one root contributes a
 diff --git a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
-index cced2c0..ea5a4e6 100644
+index cced2c0..45e24a5 100644
 --- a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
 +++ b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
 @@ -2212,6 +2212,11 @@ else if ( isPercentFetch( sqmQueryPart ) && !canRenderPercentFetchInSubquery() )
@@ -211,7 +211,7 @@ index cced2c0..ea5a4e6 100644
  			else if ( ordersByPluralFetchBeforeOwner( (SqmQuerySpec<?>) sqmQueryPart ) ) {
  				// When a query orders by a collection element before the owner,
  				// pushing the owner table into a paginated subquery is not safe,
-@@ -2281,6 +2286,39 @@ private static void collectPaths(SqmFrom<?, ?> from, HashSet<SqmPath<?>> paths,
+@@ -2281,6 +2286,40 @@ private static void collectPaths(SqmFrom<?, ?> from, HashSet<SqmPath<?>> paths,
  		}
  	}
  
@@ -225,7 +225,8 @@ index cced2c0..ea5a4e6 100644
 +			return false;
 +		}
 +		for ( var root : sqmQuerySpec.getFromClause().getRoots() ) {
-+			if ( root.getOrderedJoins() != null ) {
++			final var orderedJoins = root.getOrderedJoins();
++			if ( orderedJoins != null && orderedJoins.stream().anyMatch( fetchedPaths::contains ) ) {
 +				// Ordered joins form a SQL table-group chain, not the SQM parent tree.
 +				// Moving a collection can also move an independent join, or leave
 +				// the collection behind a non-fetched group the transformer skips.
