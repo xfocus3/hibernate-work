@@ -1,0 +1,53 @@
+{
+  "issue": "HHH-20846",
+  "head": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "run": "https://github.com/xfocus3/hibernate-work/actions/runs/39069123398",
+  "observedAt": "2026-10-17T22:02:40Z",
+  "passed": [
+    "mysql",
+    "postgis",
+    "edb",
+    "hsqldb",
+    "mssql",
+    "mariadb",
+    "h2",
+    "db2",
+    "spanner",
+    "Jakarta Data TCK 1.1/postgresql",
+    "Jakarta Data TCK 1.1/h2",
+    "Jakarta Persistence TCK 4.0/postgresql",
+    "Static code analysis"
+  ],
+  "failed": [
+    {
+      "name": "sybase",
+      "jobId": 117502862093,
+      "tests": 25704,
+      "failed": 1,
+      "skipped": 3199,
+      "reason": "New safe-subquery test unconditionally asserts a derived table on a dialect without the required capability. Pagination result assertions passed. Correction pending."
+    },
+    {
+      "name": "Prepare build bundle for Sonar scanner",
+      "jobId": 117515309466,
+      "reason": "Private repository checkout failed: Repository not found. Access/configuration failure, not a test result."
+    }
+  ],
+  "cancelled": [
+    {
+      "name": "spannerpgsql",
+      "jobId": 117502862067,
+      "reason": "Reached 60-minute job limit; locking failures also present in unchanged baseline job 117479915750. New regression test not reached in available log."
+    },
+    {
+      "name": "oracle",
+      "jobId": 117502862203,
+      "reason": "Reached 60-minute job limit; incomplete coverage."
+    }
+  ],
+  "skipped": [
+    "GraalVM 25"
+  ],
+  "baselineRun": "https://github.com/xfocus3/hibernate-work/actions/runs/39061388572",
+  "decision": "Keep PR #2 draft. Do not classify the matrix as passing. Retest corrected assertion and reconcile baseline/infrastructure gaps."
+}
