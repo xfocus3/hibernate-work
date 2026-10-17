@@ -23,7 +23,7 @@ permissions:
   contents: read
 jobs:
   verify:
-    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@e9934c6bccca949f3f911ecfa8e66a84ece35f71
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@13e1155af20e0777b06513d1fdf530b549973fc5
     with:
       target_sha: ${{ inputs.target_sha }}
       patch_ref: ${{ inputs.patch_ref }}
