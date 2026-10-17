@@ -1,0 +1,15 @@
+{
+  "id": "9e569941-d552-40c1-aec6-0b6d31f87417",
+  "requestHash": "a181690895997196b49d750d151fcc6bf2274bbf834517310232fbceadf16d1f",
+  "runId": "39069185564",
+  "runAttempt": "1",
+  "head": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "resultHead": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java",
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPredicatePaginationTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Resumed the existing prepared work rather than implementing again. Commit 3e19e730c5616ddf1c62b4d339387455c3e8ccd2 has tree bb977ee42f942271be424e3c1ff3fc19c2709836, identical to the actual tested tree in Actions run 39068454226. Java 25 / H2: 55 tests, 54 passed, 1 skipped (HHH9965Test.testHHH9965); all 6 new tests passed. formatChecks passed. Exact commands: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.pagination.*' -Pdb=h2 formatChecks. RED run 39065445956: requested pagination returned all four roots instead of two; GREEN run 39066009439 passed both initial tests. RED run 39066763901 reproduced FN1_0.ENABLED not found for the independent Flag join; a reversed-order control then exposed ignored pagination in run 39067672384. Final run 39068454226 passes both join orders, zero/nonzero offset, the unpaginated control and a safe subquery preserving SQL pagination. Fix shares the dependency precondition between SQL conversion and runtime fallback. No new abstractions beyond the shared internal predicate. No other databases were tested with this patch. The prepared source is durably available on HHH-20846-prepared; the implementation branch has not been pushed by dot and no PR has been created by dot. The workflow may apply this verified commit and continue its existing push/draft-PR stages. Do not claim upstream publication, merge, or DCO certification.\n<promise>COMPLETE</promise>"
+}
