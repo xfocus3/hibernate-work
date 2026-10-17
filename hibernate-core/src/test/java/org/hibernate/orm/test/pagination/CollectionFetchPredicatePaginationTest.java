@@ -18,7 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.hibernate.dialect.sql.ast.spi.SubquerySupport.Feature.OFFSET;
 
 @DomainModel(annotatedClasses = {
 		CollectionFetchPredicatePaginationTest.RootNode.class,
@@ -138,7 +138,9 @@ public class CollectionFetchPredicatePaginationTest {
 			).setFirstResult( 0 ).setMaxResults( 1 ).list();
 			assertEquals( List.of( 2L ), roots.stream().map( root -> root.id ).toList() );
 			assertEquals( 2, roots.get( 0 ).parent.children.size() );
-			assertTrue( sql.getSqlQueries().get( 0 ).toLowerCase().contains( "from (select" ) );
+			assertEquals( scope.getSessionFactory().getJdbcServices().getDialect()
+					.getSubquerySupport().supports( OFFSET ),
+					sql.getSqlQueries().get( 0 ).toLowerCase().contains( "from (select" ) );
 		} );
 	}
 
