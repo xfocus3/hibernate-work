@@ -1,0 +1,11 @@
+{
+  "id": "926c3fa3-986f-4f45-bfb3-b6179206c9a4",
+  "requestHash": "230017cacab7975bbbb9f4c032f64aba1a702e4d6a7d76c92c1b930f3e149aa5",
+  "runId": "39070627676",
+  "runAttempt": "1",
+  "head": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "resultHead": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed commit 3e19e730c5616ddf1c62b4d339387455c3e8ccd2 against the complete linked issue and current diff. No further code changes were warranted. The shared guard keeps SQL conversion and runtime pagination decisions aligned. The ordered-join fallback matches consumeJoins' last-table-group chain; predicate paths are checked through their LHS ancestry. This preserves the existing in-memory semantics rather than relocating predicates across the limit. The helper reuses existing SQM traversal with no new abstraction layer.\n\nVerified Actions evidence at tree bb977ee42f942271be424e3c1ff3fc19c2709836: pagination suite and formatChecks passed on JDK 25/H2 in run 39068454226: 54 passed, 1 skipped (HHH9965Test.testHHH9965), all 6 new tests passed. The existing nonFetchJoinPlusFetchJoin and nonFetchJoinPlusFetchJoin2 controls also passed. RED runs 39065445956 and 39066763901 establish ignored-pagination and missing-alias failures before the fix. The exact reporter-provided workaround variant was not separately executed; existing association-join controls cover the related safe path. Other database matrix checks are still running in run 39069123398; do not describe them as passed. The approval-gated linter and upstream licensing confirmation remain separate publication gates.\n\nNo human review threads require replies. No new commit was made.\n<promise>COMPLETE</promise>"
+}
