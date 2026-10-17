@@ -2,13 +2,38 @@ name: Implement private issue
 on:
   issues:
     types: [labeled]
+  workflow_run:
+    workflows: [Explore private issues]
+    types: [completed]
 permissions:
   contents: write
   issues: write
   pull-requests: write
 jobs:
+  queue:
+    if: (github.event_name == 'issues' && github.event.label.name == 'agent:implement') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    outputs:
+      issues: ${{ steps.queue.outputs.issues }}
+      count: ${{ steps.queue.outputs.count }}
+    steps:
+      - id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          issues=$(gh issue list --state open --label agent:implement --limit 100 --json number,title)
+          if [ "$EVENT_NAME" = issues ]; then
+            issues=$(jq --argjson n "$ISSUE_NUMBER" '[.[] | select(.number == $n)]' <<< "$issues")
+          fi
+          echo "issues=$(jq -c . <<< "$issues")" >> "$GITHUB_OUTPUT"
+          echo "count=$(jq length <<< "$issues")" >> "$GITHUB_OUTPUT"
   sync:
-    if: github.event.label.name == 'agent:implement'
+    needs: queue
+    if: needs.queue.outputs.count != '0'
     uses: xfocus3/sandcastle/.github/workflows/sync-upstream.yml@0e3a0d3ff732c705f6d4f68cd67f63f7d9f77fce
     secrets:
       upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
@@ -17,11 +42,16 @@ jobs:
       upstream_branch: main
       baseline_branch: upstream-main
   implement:
-    needs: sync
+    needs: [queue, sync]
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(needs.queue.outputs.issues) }}
     uses: xfocus3/sandcastle/.github/workflows/agent-implement-target.yml@5b1ec8bb09169218c49e1b57bb86e4a6f78700a7
     with:
-      issue_number: ${{ github.event.issue.number }}
-      issue_title: ${{ github.event.issue.title }}
+      issue_number: ${{ matrix.issue.number }}
+      issue_title: ${{ matrix.issue.title }}
       base_sha: ${{ needs.sync.outputs.sha }}
       base_ref: upstream-main
       tool_ref: 5b1ec8bb09169218c49e1b57bb86e4a6f78700a7
