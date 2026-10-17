@@ -1,0 +1,11 @@
+{
+  "id": "e612d68e-e5ed-46cd-a9ed-1ad4bdcf7327",
+  "requestHash": "ddaffb845ec5f1782f08fcdc19b605b7702820104db4d08a760239bc4d21dab6",
+  "runId": "39063893433",
+  "runAttempt": "1",
+  "head": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "resultHead": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 1,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"**easy-call** — scoped pagination regression; source supports the fetched-child alias hypothesis, but runtime reproduction is still required.\\n\\nChecked revision: 14f32ec5d5df1e70f7c138b243e097bfdfb6d034. Medium difficulty; internal query handling and regression tests, with no intended public API or schema change.\\n\\nThe transformer moves fetched plural joins outside the paginated derived table, but its absorption collector does not traverse WHERE. BaseSqmToSqlAstConverter guards unsafe collection ordering, not analogous predicate references. SelectionQueryImpl mirrors those preconditions to decide whether to paginate in memory; both decisions must remain synchronized.\\n\\n**Two-way door:** a narrow internal guard/fallback and tests are reversible.\\n\\nRelevant locations: BaseSqmToSqlAstConverter.canPushPaginationDown; SelectionQueryImpl.isPaginationPushedToDerivedTable; CollectionFetchPaginationTest. CollectionFetchPaginationQueryTransformer contains the join movement itself.\\n\\nFirst add the reported fetched-child predicate regression, with deterministic ordering, nonzero offset and an unpaginated control. Run RED in Actions before the production fix, then GREEN and relevant formatting/pagination tests. Do not move WHERE outside the derived table if that changes which roots are selected.\\n\\nExisting nonFetchJoinPlusFetchJoin tests cover association-join filtering remaining inner; the reported ad-hoc Flag join needs separate verification and may already work. Preserve safe SQL pagination and filtered collection semantics.\\n\\nOpen checks: both exact reported shapes on current main; correlated predicate scopes; offset/limit and collection contents. No Java build/tests were run during this read-only exploration. No bug fix has been committed. No duplicates in this batch.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
