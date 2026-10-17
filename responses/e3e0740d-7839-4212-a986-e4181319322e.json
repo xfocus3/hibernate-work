@@ -1,0 +1,11 @@
+{
+  "id": "e3e0740d-7839-4212-a986-e4181319322e",
+  "requestHash": "77fb5ebd0241598863ff218f32582319ba79ae4a722527ab3cdcd09a8b476fef",
+  "runId": "39064313954",
+  "runAttempt": "1",
+  "head": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "resultHead": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Not complete. First tracer bullet passed both tests and formatChecks in run 39066009439. Expanded coverage run 39066763901: 54 tests, 1 failure, 1 skipped, 52 passed. The second reported ad-hoc Flag join reproduces SQLGrammarException: FN1_0.ENABLED not found. Preserve prepared patch at b51d84e6fc73908f72fe017f36c11baabea009b8:patches/HHH-20846-coverage.patch and test evidence artifact 12113696699. Tested tree cdfff17d616c70209a963389b8e0c6a1d5f01114. Do not create a PR or report implementation complete. Continue the second tracer bullet from these durable artifacts, then retry through the original label-driven implementation stage after reconciliation."
+}
