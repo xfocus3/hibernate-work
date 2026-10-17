@@ -4,11 +4,12 @@ on:
     types: [labeled]
 permissions:
   contents: write
+  issues: read
   pull-requests: write
 jobs:
   pipeline:
     if: (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:update-branch')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@e560364a2f252a501244a3bbd1a4f96c4141629b
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@2ca344c1eadb78f4e096423ca18e04bad178696f
     with:
       mode: update-branch
       pr_number: ${{ github.event.pull_request.number || 0 }}
