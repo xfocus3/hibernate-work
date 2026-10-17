@@ -1,0 +1,27 @@
+name: Implement private issue
+on:
+  issues:
+    types: [labeled]
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+jobs:
+  sync:
+    if: github.event.label.name == 'agent:implement'
+    uses: xfocus3/sandcastle/.github/workflows/sync-upstream.yml@0e3a0d3ff732c705f6d4f68cd67f63f7d9f77fce
+    secrets:
+      upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
+    with:
+      upstream_repository: hibernate/hibernate-orm
+      upstream_branch: main
+      baseline_branch: upstream-main
+  implement:
+    needs: sync
+    uses: xfocus3/sandcastle/.github/workflows/agent-implement-target.yml@5b1ec8bb09169218c49e1b57bb86e4a6f78700a7
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      issue_title: ${{ github.event.issue.title }}
+      base_sha: ${{ needs.sync.outputs.sha }}
+      base_ref: upstream-main
+      tool_ref: 5b1ec8bb09169218c49e1b57bb86e4a6f78700a7
