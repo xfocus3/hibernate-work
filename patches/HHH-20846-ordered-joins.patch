@@ -1,0 +1,253 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPredicatePaginationTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPredicatePaginationTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPredicatePaginationTest.java
+@@ -0,0 +1,178 @@
++package org.hibernate.orm.test.pagination;
++
++import java.util.ArrayList;
++import java.util.List;
++
++import jakarta.persistence.CascadeType;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.OneToMany;
++
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++@DomainModel(annotatedClasses = {
++		CollectionFetchPredicatePaginationTest.RootNode.class,
++		CollectionFetchPredicatePaginationTest.ParentNode.class,
++		CollectionFetchPredicatePaginationTest.ChildNode.class,
++		CollectionFetchPredicatePaginationTest.FlagNode.class
++})
++@SessionFactory(useCollectingStatementObserver = true)
++@JiraKey("HHH-20846")
++public class CollectionFetchPredicatePaginationTest {
++	private static final String QUERY = "select r from RootNode r "
++			+ "join fetch r.parent p join fetch p.children c "
++			+ "where r.childKey = cast(c.id as string) order by r.id";
++
++	@BeforeEach
++	void setUp(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			for ( long id = 1; id <= 4; id++ ) {
++				final ParentNode parent = new ParentNode();
++				parent.id = id;
++				for ( long childId = id * 10; childId < id * 10 + 2; childId++ ) {
++					final ChildNode child = new ChildNode();
++					child.id = childId;
++					child.parent = parent;
++					parent.children.add( child );
++				}
++				session.persist( parent );
++				final RootNode root = new RootNode();
++				root.id = id;
++				root.childKey = Long.toString( id * 10 );
++				root.parent = parent;
++				session.persist( root );
++				final FlagNode flag = new FlagNode();
++				flag.id = id;
++				flag.parent = parent;
++				flag.enabled = id % 2 == 0;
++				session.persist( flag );
++			}
++		} );
++	}
++
++	@AfterEach
++	void tearDown(SessionFactoryScope scope) {
++		scope.getSessionFactory().getSchemaManager().truncate();
++	}
++
++	@Test
++	void fetchedChildPredicateWithoutPagination(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<RootNode> roots = session.createSelectionQuery( QUERY, RootNode.class ).list();
++			assertEquals( List.of( 1L, 2L, 3L, 4L ), roots.stream().map( root -> root.id ).toList() );
++			for ( RootNode root : roots ) {
++				assertEquals( 1, root.parent.children.size() );
++				assertEquals( root.childKey, Long.toString( root.parent.children.get( 0 ).id ) );
++			}
++		} );
++	}
++
++	@Test
++	void fetchedChildPredicateWithPagination(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<RootNode> roots = session.createSelectionQuery( QUERY, RootNode.class )
++					.setFirstResult( 1 ).setMaxResults( 2 ).list();
++			assertEquals( List.of( 2L, 3L ), roots.stream().map( root -> root.id ).toList() );
++			for ( RootNode root : roots ) {
++				assertEquals( 1, root.parent.children.size() );
++				assertEquals( root.childKey, Long.toString( root.parent.children.get( 0 ).id ) );
++			}
++		} );
++	}
++
++	@Test
++	void fetchedChildPredicateWithZeroOffset(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<RootNode> roots = session.createSelectionQuery( QUERY, RootNode.class )
++					.setFirstResult( 0 ).setMaxResults( 2 ).list();
++			assertEquals( List.of( 1L, 2L ), roots.stream().map( root -> root.id ).toList() );
++		} );
++	}
++
++	@Test
++	void independentJoinPredicateWithPagination(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<RootNode> roots = session.createSelectionQuery(
++					"select r from RootNode r join fetch r.parent p left join fetch p.children "
++							+ "join FlagNode f on f.parent = p where f.enabled = true order by r.id",
++					RootNode.class
++			).setFirstResult( 0 ).setMaxResults( 1 ).list();
++			assertEquals( List.of( 2L ), roots.stream().map( root -> root.id ).toList() );
++			assertEquals( 2, roots.get( 0 ).parent.children.size() );
++		} );
++	}
++
++	@Test
++	void independentJoinBeforeCollectionFetchWithPagination(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<RootNode> roots = session.createSelectionQuery(
++					"select r from RootNode r join fetch r.parent p join FlagNode f on f.parent = p "
++							+ "left join fetch p.children where f.enabled = true order by r.id",
++					RootNode.class
++			).setFirstResult( 0 ).setMaxResults( 1 ).list();
++			assertEquals( List.of( 2L ), roots.stream().map( root -> root.id ).toList() );
++			assertEquals( 2, roots.get( 0 ).parent.children.size() );
++		} );
++	}
++
++	@Test
++	void independentSubqueryPredicateWithPagination(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var sql = scope.getCollectingStatementObserver();
++			sql.clear();
++			final List<RootNode> roots = session.createSelectionQuery(
++					"select r from RootNode r join fetch r.parent p left join fetch p.children "
++							+ "where exists (select f.id from FlagNode f where f.parent = p and f.enabled = true) "
++							+ "order by r.id",
++					RootNode.class
++			).setFirstResult( 0 ).setMaxResults( 1 ).list();
++			assertEquals( List.of( 2L ), roots.stream().map( root -> root.id ).toList() );
++			assertEquals( 2, roots.get( 0 ).parent.children.size() );
++			assertTrue( sql.getSqlQueries().get( 0 ).toLowerCase().contains( "from (select" ) );
++		} );
++	}
++
++	@Entity(name = "FlagNode")
++	public static class FlagNode {
++		@Id
++		long id;
++		@ManyToOne
++		ParentNode parent;
++		boolean enabled;
++	}
++
++	@Entity(name = "RootNode")
++	public static class RootNode {
++		@Id
++		long id;
++		String childKey;
++		@ManyToOne
++		ParentNode parent;
++	}
++
++	@Entity(name = "ParentNode")
++	public static class ParentNode {
++		@Id
++		long id;
++		@OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
++		List<ChildNode> children = new ArrayList<>();
++	}
++
++	@Entity(name = "ChildNode")
++	public static class ChildNode {
++		@Id
++		long id;
++		@ManyToOne
++		ParentNode parent;
++	}
++}
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
+index df41222..e555a73 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
+@@ -1397,7 +1397,8 @@ protected boolean isPaginationPushedToDerivedTable() {
+ 				return false;
+ 			}
+ 		}
+-		if ( BaseSqmToSqlAstConverter.ordersByPluralFetchBeforeOwner( spec ) ) {
++		if ( BaseSqmToSqlAstConverter.hasCollectionFetchJoinDependencies( spec )
++				|| BaseSqmToSqlAstConverter.ordersByPluralFetchBeforeOwner( spec ) ) {
+ 			return false;
+ 		}
+ 		// The transformer only rewrites when at least one root contributes a
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
+index cced2c0..ea5a4e6 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
+@@ -2212,6 +2212,11 @@ else if ( isPercentFetch( sqmQueryPart ) && !canRenderPercentFetchInSubquery() )
+ 				// fallback rather than emit unsupported SQL.
+ 				return false;
+ 			}
++			else if ( hasCollectionFetchJoinDependencies( (SqmQuerySpec<?>) sqmQueryPart ) ) {
++				// A predicate cannot stay inside the paginated subquery if its
++				// fetched collection is moved outside. Use the in-memory fallback.
++				return false;
++			}
+ 			else if ( ordersByPluralFetchBeforeOwner( (SqmQuerySpec<?>) sqmQueryPart ) ) {
+ 				// When a query orders by a collection element before the owner,
+ 				// pushing the owner table into a paginated subquery is not safe,
+@@ -2281,6 +2286,39 @@ private static void collectPaths(SqmFrom<?, ?> from, HashSet<SqmPath<?>> paths,
+ 		}
+ 	}
+ 
++	public static boolean hasCollectionFetchJoinDependencies(SqmQuerySpec<?> sqmQuerySpec) {
++		final var fetchedPaths = new HashSet<SqmPath<?>>();
++		for ( var root : sqmQuerySpec.getFromClause().getRoots() ) {
++			collectPaths( root, fetchedPaths, false );
++		}
++		fetchedPaths.removeAll( collectNonPluralPaths( sqmQuerySpec.getFromClause() ) );
++		if ( fetchedPaths.isEmpty() ) {
++			return false;
++		}
++		for ( var root : sqmQuerySpec.getFromClause().getRoots() ) {
++			if ( root.getOrderedJoins() != null ) {
++				// Ordered joins form a SQL table-group chain, not the SQM parent tree.
++				// Moving a collection can also move an independent join, or leave
++				// the collection behind a non-fetched group the transformer skips.
++				return true;
++			}
++		}
++		final var whereClause = sqmQuerySpec.getWhereClause();
++		if ( whereClause == null || whereClause.getPredicate() == null ) {
++			return false;
++		}
++		final var referencedPaths = new ArrayList<SqmPath<?>>();
++		whereClause.getPredicate().accept( new SqmPathVisitor( referencedPaths::add ) );
++		for ( var referencedPath : referencedPaths ) {
++			for ( SqmPath<?> path = referencedPath; path != null; path = path.getLhs() ) {
++				if ( fetchedPaths.contains( path ) ) {
++					return true;
++				}
++			}
++		}
++		return false;
++	}
++
+ 	public static boolean ordersByPluralFetchBeforeOwner(SqmQuerySpec<?> sqmQuerySpec) {
+ 		final var allowedPaths = collectNonPluralPaths( sqmQuerySpec.getFromClause() );
+ 		final var referencedPaths = new ArrayList<SqmPath<?>>();
