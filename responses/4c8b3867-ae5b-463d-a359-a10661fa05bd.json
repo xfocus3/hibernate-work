@@ -1,0 +1,11 @@
+{
+  "id": "4c8b3867-ae5b-463d-a359-a10661fa05bd",
+  "requestHash": "90b7cce3a986c28b3be4e8d44908f30e68e41fba7e91f6c757c0c40a33d8e9db",
+  "runId": "39069574165",
+  "runAttempt": "1",
+  "head": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "resultHead": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Review input is incomplete: it identifies linked issue #1 but supplies an empty linked-issue body/title. The shared context loader silently suppresses issue-fetch failures, and the review job lacks issues:read. Preserve PR #2 at 3e19e730c5616ddf1c62b4d339387455c3e8ccd2 and existing verified test evidence. Correct the context loader and workflow permissions, then retry the review stage with complete issue context. Do not mark the review complete or PR ready from this incomplete handoff."
+}
