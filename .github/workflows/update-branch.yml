@@ -1,0 +1,14 @@
+name: Update private PR branch
+on:
+  pull_request_target:
+    types: [labeled]
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  pipeline:
+    if: (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:update-branch')
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@e560364a2f252a501244a3bbd1a4f96c4141629b
+    with:
+      mode: update-branch
+      pr_number: ${{ github.event.pull_request.number || 0 }}
