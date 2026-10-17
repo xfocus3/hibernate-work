@@ -3,16 +3,18 @@ on:
   pull_request_target:
     types: [labeled]
   workflow_run:
-    workflows: [Implement private issue, Implement private PR]
+    workflows: [Implement private issue, Implement private PR, GH Actions CI, GitHub Actions linter]
     types: [completed]
 permissions:
   contents: write
+  actions: read
   issues: read
   pull-requests: write
 jobs:
   pipeline:
     if: (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@2ca344c1eadb78f4e096423ca18e04bad178696f
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@2d2651764c69b447c04d686cdafd4e34144d6aff
     with:
+      verification_workflows: '[".github/workflows/ci.yml", ".github/workflows/actionlint.yml"]'
       mode: review
       pr_number: ${{ github.event.pull_request.number || 0 }}
