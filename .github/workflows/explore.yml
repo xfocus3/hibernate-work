@@ -6,14 +6,23 @@ on:
     paths: [.github/workflows/explore.yml]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   issues: write
 jobs:
-  explore:
+  sync:
     if: github.event_name != 'issues' || github.event.label.name == 'agent:explore'
-    uses: xfocus3/sandcastle/.github/workflows/agent-explore-target.yml@5f3b071e10aad4b15e14354e8bd8d954f4698843
+    uses: xfocus3/sandcastle/.github/workflows/sync-upstream.yml@0e3a0d3ff732c705f6d4f68cd67f63f7d9f77fce
+    secrets:
+      upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
     with:
       upstream_repository: hibernate/hibernate-orm
-      target_ref: main
-      tool_ref: 5f3b071e10aad4b15e14354e8bd8d954f4698843
-      dry_run: true
+      upstream_branch: main
+      baseline_branch: upstream-main
+  explore:
+    needs: sync
+    uses: xfocus3/sandcastle/.github/workflows/agent-explore-target.yml@74a9bb7adf4e34bb1e0393664c0dc161d3220765
+    with:
+      upstream_repository: ${{ github.repository }}
+      target_ref: ${{ needs.sync.outputs.sha }}
+      tool_ref: 74a9bb7adf4e34bb1e0393664c0dc161d3220765
+      dry_run: false
