@@ -1,0 +1,13 @@
+{
+  "id": "a88a2f6f-5bc0-429c-b2d0-c4bba3a7b4f1",
+  "requestHash": "65c109b2dcd11cf4caa63c29f72263a339b2ecaf90af610dc74be6efac814c60",
+  "runId": "39072756357",
+  "runAttempt": "1",
+  "head": "3e19e730c5616ddf1c62b4d339387455c3e8ccd2",
+  "resultHead": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "changedPaths": [
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPredicatePaginationTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Addressed the actionable Sybase portability finding in commit 7f87908aa25ce29b706a649c7b894a6124f2da30. The safe-subquery control now expects derived-table SQL only when the dialect supports OFFSET in a subquery, matching the converter/runtime prerequisite. All row and collection assertions still execute on every dialect; no test is skipped and production code is unchanged.\n\nActions run 39073017875 compiled and verified the pagination suite and formatChecks on JDK 25/H2: 54 passed, 1 skipped, zero failures. The resulting commit exactly matches tested tree 7ed18d8bcd114b832ec787d6010f09a8a39717e1. Sybase revalidation and a full matrix on the new head remain pending. Keep PR #2 draft; the new verification gate must prevent review/ready until configured exact-head checks succeed. The inherited linter still requires user approval. No human review threads require replies.\n<promise>COMPLETE</promise>"
+}
