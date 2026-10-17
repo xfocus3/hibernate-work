@@ -1,0 +1,11 @@
+{
+  "id": "ffe7987e-6456-42e9-b8c9-2bd307bebaa1",
+  "requestHash": "cbf3c6f301b2f4720b832753cef1da3a7acfd4f97b75f54a01f22abdd300a8ae",
+  "runId": "39072756357",
+  "runAttempt": "1",
+  "head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "resultHead": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"threadReplies\": [],\n  \"newInlineComments\": [],\n  \"topLevelComments\": [\n    {\n      \"body\": \"Corrected the SQL-shape assertion in 7f87908aa25ce29b706a649c7b894a6124f2da30 to match the dialect's OFFSET-in-subquery capability. Row and collection assertions remain unconditional, and production code is unchanged.\\n\\n[Actions verification](https://github.com/xfocus3/hibernate-work/actions/runs/39073017875): JDK 25/H2, 54 passed, 1 skipped, all six new tests passed, formatChecks passed. The commit matches tested tree 7ed18d8bcd114b832ec787d6010f09a8a39717e1. Sybase and full exact-head revalidation remain pending; keep this PR draft until verification and the subsequent review finish.\"\n    }\n  ]\n}\n</output>"
+}
