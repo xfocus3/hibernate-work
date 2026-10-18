@@ -7,13 +7,18 @@ on:
         type: string
         required: true
       patch_ref:
-        description: Exact private commit containing the prepared patch
+        description: Optional exact commit containing a prepared patch
         type: string
-        required: true
+        required: false
       patch_path:
-        description: Repository-relative patch path
+        description: Optional repository-relative patch path
         type: string
-        required: true
+        required: false
+      database:
+        description: Test database (match the -Pdb argument)
+        type: choice
+        default: h2
+        options: [h2, oracle, mssql, spanner, spannerpgsql, sybase]
       arguments:
         description: Gradle argument JSON array
         type: string
@@ -23,11 +28,13 @@ permissions:
   contents: read
 jobs:
   verify:
-    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@13e1155af20e0777b06513d1fdf530b549973fc5
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
     with:
       target_sha: ${{ inputs.target_sha }}
       patch_ref: ${{ inputs.patch_ref }}
       patch_path: ${{ inputs.patch_path }}
       arguments: ${{ inputs.arguments }}
+      database: ${{ inputs.database }}
+      setup_script: ${{ inputs.database != 'h2' && 'ci/database-start.sh' || '' }}
       java_version: '25'
       build_tool: gradle
