@@ -1,0 +1,16 @@
+{
+  "id": "d144f3fd-ce31-40ec-8d38-2ea00e5261a6",
+  "requestHash": "14fc7d2deb4bdaf1b6daf41174bbd3ca5718f57b9955658be0814f4731230c27",
+  "runId": "39163123361",
+  "runAttempt": "1",
+  "head": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "resultHead": "a3060bba4703cb98421762e011d25e3108df2599",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/jpa/spi/NativeQueryListTransformer.java",
+    "hibernate-core/src/main/java/org/hibernate/sql/results/internal/RowTransformerListImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/ImplicitInstantiationTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/ListResultTransformerTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20328 in HQL and native List.class result transformation. Null elements are accepted; unmodifiable behavior and shallow backing-array independence are preserved, with no new production abstraction. Tracer bullet 1: Actions39163315034 reproduced HQL List.of NPE (12 passed,1failed,0skipped); minimal HQL fix then Actions39163976455 passed13tests andformatChecks. Tracer bullet 2: Actions39164652792 reproduced three NativeQueryListTransformer NPE failures (15passed,3failed,0skipped); minimal nativefix then finalActions39165301590 passed40tests across five neighboring classes,0failures,0skips,andformatChecks. Exacttestedhead a3060bba4703cb98421762e011d25e3108df2599 tree282274bdc397615c89ce6abdf81e008b8e6eb513 verified.patch empty. Six new query regressions and two ownership/immutability tests. All execution was GitHub Actions/H2/JDK25. Other databases and fullsuite unrun. Source checkpoints are published separately for the handoff; the target task branch has not been pushed. Ready for workflow-owned draft creation and gated review.\n<promise>COMPLETE</promise>"
+}
