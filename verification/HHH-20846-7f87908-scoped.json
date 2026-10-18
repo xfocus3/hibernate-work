@@ -1,0 +1,28 @@
+{
+  "issue": "HHH-20846",
+  "head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "tree": "7ed18d8bcd114b832ec787d6010f09a8a39717e1",
+  "workflow": "https://github.com/xfocus3/hibernate-work/actions/runs/39134248058",
+  "run_attempt": 1,
+  "controller_commit": "1953b95329833a7b842b869d822cf69aa5d84e16",
+  "command": "./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.pagination.*' -Pdb=h2 formatChecks",
+  "counts": {
+    "passed": 54,
+    "skipped": 1,
+    "failed": 0
+  },
+  "new_tests": {
+    "passed": 6,
+    "skipped": 0,
+    "failed": 0
+  },
+  "skip": "org.hibernate.orm.test.pagination.hhh9965.HHH9965Test.testHHH9965(SessionFactoryScope)",
+  "formatting": "passed",
+  "artifact": {
+    "id": 12139218169,
+    "sha256": "126979a329b98944677b07fa1912111907bcc734cae5a8223aaa929235fd6deb"
+  },
+  "source_changed": false,
+  "review": "https://github.com/xfocus3/hibernate-work/pull/2#pullrequestreview-5563272191",
+  "coverage": "Focused H2 pagination suite; broader full matrix limitations remain in prior report. Upstream publication has not occurred."
+}
