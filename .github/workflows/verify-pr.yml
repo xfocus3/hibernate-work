@@ -1,0 +1,26 @@
+name: Verify private PR
+on:
+  pull_request_target:
+    types: [labeled]
+  workflow_run:
+    workflows: [Implement private issue, Implement private PR, Update private PR branch]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open private PR number (0 scans the review queue)
+        type: number
+        default: 0
+permissions:
+  contents: read
+  actions: write
+  issues: write
+  pull-requests: read
+jobs:
+  pipeline:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@f3882b8dc00d9c335517908e5b99269a7f75d127
+    with:
+      verification_workflows: '[".github/workflows/ci.yml"]'
+      tool_ref: f3882b8dc00d9c335517908e5b99269a7f75d127
+      pr_number: ${{ github.event.pull_request.number || inputs.pr_number || 0 }}
