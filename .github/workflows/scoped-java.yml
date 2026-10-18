@@ -1,0 +1,22 @@
+name: Scoped Java checks
+run-name: 'Sandcastle Java checks: ${{ inputs.target_sha }}'
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact PR source revision
+        type: string
+        required: true
+      pr_number:
+        description: PR with a focused verification plan
+        type: number
+        required: true
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-pr-verification.yml@ae1f47ae953dabf64e0a1bccfd70b57b7068ca2b
+    with:
+      target_sha: ${{ inputs.target_sha }}
+      pr_number: ${{ fromJSON(format('{0}', inputs.pr_number)) }}

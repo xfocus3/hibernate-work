@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.pagination.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-20846 changes collection-fetch pagination. Run the complete neighboring pagination package, including all six regression/control cases, and repository formatting; Gradle compiles the required production and test sources. RED proof and broader database evidence are linked in PR #2. Full all-module/all-database CI remains upstream coverage, not this private review prerequisite."
+}

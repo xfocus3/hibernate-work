@@ -9,7 +9,7 @@ on:
   pull_request_target:
     types: [labeled]
   workflow_run:
-    workflows: [Implement private issue, Implement private PR, GH Actions CI, GitHub Actions linter]
+    workflows: [Implement private issue, Implement private PR, Scoped Java checks]
     types: [completed]
 permissions:
   contents: write
@@ -19,9 +19,8 @@ permissions:
 jobs:
   pipeline:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@2f95ef490da1bda6182f28ab322a9b68097c634e
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@ae1f47ae953dabf64e0a1bccfd70b57b7068ca2b
     with:
-      verification_workflows: '[".github/workflows/ci.yml", ".github/workflows/actionlint.yml"]'
-      review_exception: '{"repository":"xfocus3/hibernate-work","pr_number":2,"head":"7f87908aa25ce29b706a649c7b894a6124f2da30","reason":"Draft review approved after all six new tests passed on twelve databases. Full CI has documented baseline failures, database memory exhaustion and 60-minute timeouts; these results remain unsuccessful.","evidence":["https://github.com/xfocus3/hibernate-work/actions/runs/39109082865","https://github.com/xfocus3/hibernate-work/actions/runs/39113426020","https://github.com/xfocus3/hibernate-work/blob/85731401079efc8b7aaefdda62c22b46aa155962/verification/HHH-20846-7f87908-oracle.json","https://github.com/xfocus3/hibernate-work/blob/cbde9d9cc4579eb53f79c48ba7557d440dc588ba/verification/HHH-20846-7f87908-matrix.json"],"runs":[{"id":39109082865,"attempt":1,"path":".github/workflows/ci.yml","conclusion":"cancelled","classification":"timeout"}]}'
+      verification_workflows: '[{"path":".github/workflows/scoped-java.yml","source":"target-sha","ref":"main"}]'
       mode: review
       pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}
