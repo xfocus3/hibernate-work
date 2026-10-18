@@ -1,0 +1,301 @@
+{
+  "issue": "HHH-20846",
+  "head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "testedTree": "7ed18d8bcd114b832ec787d6010f09a8a39717e1",
+  "sourceUnchanged": true,
+  "run": "https://github.com/xfocus3/hibernate-work/actions/runs/39113426020",
+  "artifactId": 12131134065,
+  "artifactSha256": "ad71465b3b5b17693cdc3227a4ec18ee6c7b15b43b71e6e0c3c0cf42d917da0e",
+  "artifactExpires": "2026-10-25T09:06:36Z",
+  "database": "oracle",
+  "java": "25",
+  "command": "./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.pagination.*' -Pdb=oracle formatChecks",
+  "tests": 55,
+  "passed": 54,
+  "skipped": 1,
+  "failed": 0,
+  "formatChecks": "passed",
+  "newRegressions": {
+    "passed": 6,
+    "failed": 0,
+    "skipped": 0
+  },
+  "cases": [
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationAdvancedTest",
+      "name": "fetchJoinWithSecondaryTable(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationAdvancedTest",
+      "name": "fetchJoinWithPolymorphicSubclassRoot(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationAdvancedTest",
+      "name": "fetchJoinWithJoinedInheritanceRoot(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationCollectionShapesTest",
+      "name": "fetchJoinWithElementCollectionOfEmbeddable(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationCollectionShapesTest",
+      "name": "fetchJoinWithElementCollectionOfBasic(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationCollectionShapesTest",
+      "name": "fetchJoinWithSiblingPluralFetches(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationCollectionShapesTest",
+      "name": "fetchJoinWithMapByKey(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationEdgeCasesTest",
+      "name": "sqlRestrictionOnFetchedCollection(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationEdgeCasesTest",
+      "name": "nestedPluralUnderSingularFetchPaginates(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationEdgeCasesTest",
+      "name": "orderColumnOnFetchedList(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationEdgeCasesTest",
+      "name": "chainedPluralFetches(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationFormulaTest",
+      "name": "formulaSelectableUsesSafeAliasInPaginatedCollectionFetch(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+      "name": "parallelInnerFetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+      "name": "serialFetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+      "name": "fetchLeftJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+      "name": "fetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+      "name": "parallelLeftFetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationOrderItemTest",
+      "name": "fetchLeftJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationOrderItemTest",
+      "name": "fetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationStreamInterleavingTest",
+      "name": "streamWithInterleavedCollectionRows(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationStreamInterleavingTest",
+      "name": "scrollWithInterleavedCollectionRows(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMultipleRootsAndPositionalExpressionOrderBy(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "nonFetchJoinPlusFetchJoin2(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithCollectionOrderMaxResultsAsStream(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMultipleRoots(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "selectDistinctWithFetchAndLimit(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithExplicitLimitClause(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "nonFetchJoinPlusFetchJoin(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithInMemoryLimitHintAsScroll(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "pageOrderedByFetchedSingularAttribute(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "entityGraphWithCollectionFetchAndMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMaxResultsAsStream(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMultipleRootsAndPositionalOrderBy(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithFirstAndMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithMaxResultsAndRootPredicate(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "innerFetchJoinWithMaxResults(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithInMemoryLimitHint(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPaginationTest",
+      "name": "fetchJoinWithSingularFetchToo(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "independentSubqueryPredicateWithPagination(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "fetchedChildPredicateWithZeroOffset(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "independentJoinBeforeCollectionFetchWithPagination(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "independentJoinPredicateWithPagination(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "fetchedChildPredicateWithoutPagination(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest",
+      "name": "fetchedChildPredicateWithPagination(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionWithOrderByFetchPaginationStreamInterleavingTest",
+      "name": "scrollWithInterleavedOrderedCollectionRows(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.CollectionWithOrderByFetchPaginationStreamInterleavingTest",
+      "name": "streamWithInterleavedOrderedCollectionRows(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.DistinctSelectTest",
+      "name": "testDistinctSelectWithJoin(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.FetchClausePaginationTest",
+      "name": "testFetchWithTies(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.PaginationTest",
+      "name": "testLimit(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.PaginationTest",
+      "name": "testLimitOffset(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.PaginationTest",
+      "name": "testOffset(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.SubqueryPaginationTest",
+      "name": "testLimitInSubquery(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.SubqueryPaginationTest",
+      "name": "testLimitAndOffsetInSubquery(SessionFactoryScope)",
+      "status": "passed"
+    },
+    {
+      "class": "org.hibernate.orm.test.pagination.hhh9965.HHH9965Test",
+      "name": "testHHH9965(SessionFactoryScope)",
+      "status": "skipped"
+    }
+  ],
+  "fullMatrixGate": "still blocked; baseline-aware final review awaits user decision"
+}
