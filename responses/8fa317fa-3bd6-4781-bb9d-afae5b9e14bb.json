@@ -1,0 +1,11 @@
+{
+  "id": "8fa317fa-3bd6-4781-bb9d-afae5b9e14bb",
+  "requestHash": "c3da0d5e2d41123d4f89bff971cebf9c1f3c1f097246a64bc4f92348f7b3c40f",
+  "runId": "39167232111",
+  "runAttempt": "1",
+  "head": "a3060bba4703cb98421762e011d25e3108df2599",
+  "resultHead": "a3060bba4703cb98421762e011d25e3108df2599",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"No blocking findings. Both List result transformers now preserve null values while retaining ordered, unmodifiable results and independent backing storage. The change is limited to two implementation expressions and regression coverage; no new abstraction or API-signature change. No code changes or human-thread replies were needed.\\n\\nHQL and native RED runs reproduced the intended NPEs before each fix. Exact-head verification passed 40 tests with no failures or skips, plus formatChecks: https://github.com/xfocus3/hibernate-work/actions/runs/39166785846 . Coverage includes six query regressions, two copying/immutability tests and neighboring instantiation tests. Verified on H2/JDK 25; other databases and the full suite remain unrun.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
