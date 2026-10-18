@@ -5,6 +5,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Tuple;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 @DomainModel(
 		annotatedClasses = {
@@ -205,6 +207,18 @@ public class ImplicitInstantiationTest {
 		);
 	}
 
+
+	@Test
+	@JiraKey( "HHH-20328" )
+	public void testListInstantiationWithNullValues(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			List<?> result = session.createSelectionQuery( "select null, null", List.class )
+					.getSingleResult();
+			assertEquals( 2, result.size() );
+			assertNull( result.get( 0 ) );
+			assertNull( result.get( 1 ) );
+		} );
+	}
 
 	@Entity(name = "Thing")
 	@Table(name = "thingy_table")
