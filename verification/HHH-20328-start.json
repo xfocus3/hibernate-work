@@ -1,0 +1,16 @@
+{
+  "issue": "HHH-20328",
+  "privateIssue": "https://github.com/xfocus3/hibernate-work/issues/3",
+  "baseline": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "implementationRun": "39163123361",
+  "requestId": "d144f3fd-ce31-40ec-8d38-2ea00e5261a6",
+  "requestHash": "14fc7d2deb4bdaf1b6daf41174bbd3ca5718f57b9955658be0814f4731230c27",
+  "requestArtifact": 12149641357,
+  "stageArtifact": 12149452124,
+  "expectedBranch": "agent/issue-3-hhh-20328-preserve-null-values-in-list-query-resul",
+  "requestExpiresAt": "2026-10-18T21:11:06.049Z",
+  "redCheckpoint": "27c73b4145de5e962fee29feb4d1fddc13b85ace",
+  "redRun": "39163315034",
+  "nextAction": "Observe genuine HQL regression failure, then minimal HQL fix and GREEN before native tracer bullet.",
+  "note": "Inherited upstream CI push trigger started full matrix39163190326 on initial checkpoint; cancelled. Later checkpoints use skip-ci commit marker; explicit focused dispatch remains required. No test outcome inferred."
+}
