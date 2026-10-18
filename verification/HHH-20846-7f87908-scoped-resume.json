@@ -23,10 +23,20 @@
     "sha256": "6eb47f8eec46af106abeac956a8471db6db8cd2a738f1ef29328d365b404f2f1"
   },
   "source_changed": false,
-  "review": "https://github.com/xfocus3/hibernate-work/pull/2#pullrequestreview-5563272191",
+  "review": "https://github.com/xfocus3/hibernate-work/pull/2#pullrequestreview-5563391233",
   "coverage": "Focused H2 pagination suite; broader full matrix limitations remain in prior report. Upstream publication has not occurred.",
   "automatic_review_run": "https://github.com/xfocus3/hibernate-work/actions/runs/39135997720",
   "automatic_resume_job": 117700490595,
   "review_response_id": "b1d6d4df-97a0-495b-adfb-7b301f4879aa",
-  "review_workflow_outcome": "pending"
+  "review_workflow_outcome": "success",
+  "private_pr_draft": false,
+  "readback_head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "tool_commit": "dcc5025e8955caf21bce72a594c1d565c7416e83",
+  "tool_ci": "https://github.com/xfocus3/sandcastle/actions/runs/39135094948",
+  "tool_tests": {
+    "passed": 1529,
+    "skipped": 2,
+    "failed": 0
+  },
+  "publication": "private evaluation PR only; no upstream PR created"
 }
