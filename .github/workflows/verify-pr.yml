@@ -23,4 +23,4 @@ jobs:
     with:
       verification_workflows: '[".github/workflows/ci.yml"]'
       tool_ref: f3882b8dc00d9c335517908e5b99269a7f75d127
-      pr_number: ${{ github.event.pull_request.number || inputs.pr_number || 0 }}
+      pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}
