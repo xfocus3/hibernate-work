@@ -1,0 +1,53 @@
+{
+  "issue": "HHH-20328",
+  "privatePR": "https://github.com/xfocus3/hibernate-work/pull/4",
+  "head": "a3060bba4703cb98421762e011d25e3108df2599",
+  "testedTree": "282274bdc397615c89ce6abdf81e008b8e6eb513",
+  "implementationRun": "39163123361",
+  "implementationConclusion": "success",
+  "tests": [
+    {
+      "run": "39163315034",
+      "head": "27c73b4145de5e962fee29feb4d1fddc13b85ace",
+      "passed": 12,
+      "failed": 1,
+      "skipped": 0,
+      "purpose": "HQL RED; NPE at List.of in RowTransformerListImpl"
+    },
+    {
+      "run": "39163976455",
+      "head": "823a98e994c57ce9a1219e6ffc187b399df865ee",
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "formatChecks": "passed"
+    },
+    {
+      "run": "39164652792",
+      "head": "d920ab303c48ce7e3dafb98e654239eddd6bc22c",
+      "passed": 15,
+      "failed": 3,
+      "skipped": 0,
+      "purpose": "Native RED; three NPEs at List.of in NativeQueryListTransformer"
+    },
+    {
+      "run": "39165301590",
+      "artifact": 12150383066,
+      "head": "a3060bba4703cb98421762e011d25e3108df2599",
+      "passed": 40,
+      "failed": 0,
+      "skipped": 0,
+      "formatChecks": "passed",
+      "verifiedPatchBytes": 0
+    }
+  ],
+  "independentReview": "No blocking findings; preserved defensive copying, unmodifiable behavior and null support. H2-only execution; other databases/fullsuite unrun.",
+  "automaticReviewGate": {
+    "run": "39165763606",
+    "status": "blocked",
+    "reason": "GitHub billing/spending limit: runner never started; zero job steps. Account included Actions allowance exhausted, observed 2026-10-18T21:01Z.",
+    "planCommit": "53695718930e7f95ff7754e6b38e74fb62c428d4",
+    "nextAction": "After account limit is resolved, reconcile current PR head and rerun scoped verification from current main, then service review handoff. Do not infer success or remove gate."
+  },
+  "upstreamPublished": false
+}
