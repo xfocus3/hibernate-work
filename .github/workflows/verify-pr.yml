@@ -14,13 +14,13 @@ on:
 permissions:
   contents: read
   actions: write
-  issues: write
-  pull-requests: read
+  issues: read
+  pull-requests: write
 jobs:
   pipeline:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@f3882b8dc00d9c335517908e5b99269a7f75d127
+    uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@20b3ead12f855eacfa2b384d1a5bb6973391cabd
     with:
       verification_workflows: '[".github/workflows/ci.yml"]'
-      tool_ref: f3882b8dc00d9c335517908e5b99269a7f75d127
+      tool_ref: 20b3ead12f855eacfa2b384d1a5bb6973391cabd
       pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}
