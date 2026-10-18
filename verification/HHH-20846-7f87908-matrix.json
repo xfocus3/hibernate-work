@@ -1,0 +1,162 @@
+{
+  "issue": "HHH-20846",
+  "head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "run": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865",
+  "outcome": "cancelled",
+  "jobs": [
+    {
+      "id": 117621124176,
+      "name": "Static code analysis",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124176"
+    },
+    {
+      "id": 117621124234,
+      "name": "OpenJDK 25 - Jakarta Data TCK 1.1 (postgresql)",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124234"
+    },
+    {
+      "id": 117621124255,
+      "name": "OpenJDK 25 - mysql",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124255"
+    },
+    {
+      "id": 117621124282,
+      "name": "OpenJDK 25 - Jakarta Data TCK 1.1 (h2)",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124282"
+    },
+    {
+      "id": 117621124302,
+      "name": "OpenJDK 25 - mssql",
+      "conclusion": "cancelled",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124302"
+    },
+    {
+      "id": 117621124316,
+      "name": "OpenJDK 25 - sybase",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124316"
+    },
+    {
+      "id": 117621124319,
+      "name": "OpenJDK 25 - postgis",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124319"
+    },
+    {
+      "id": 117621124336,
+      "name": "OpenJDK 25 - spannerpgsql",
+      "conclusion": "cancelled",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124336"
+    },
+    {
+      "id": 117621124344,
+      "name": "OpenJDK 25 - Jakarta Persistence TCK 4.0 (postgresql)",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124344"
+    },
+    {
+      "id": 117621124364,
+      "name": "OpenJDK 25 - oracle",
+      "conclusion": "cancelled",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124364"
+    },
+    {
+      "id": 117621124367,
+      "name": "OpenJDK 25 - mariadb",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124367"
+    },
+    {
+      "id": 117621124368,
+      "name": "OpenJDK 25 - h2",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124368"
+    },
+    {
+      "id": 117621124383,
+      "name": "OpenJDK 25 - hsqldb",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124383"
+    },
+    {
+      "id": 117621124386,
+      "name": "OpenJDK 25 - edb",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124386"
+    },
+    {
+      "id": 117621124415,
+      "name": "OpenJDK 25 - spanner",
+      "conclusion": "cancelled",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124415"
+    },
+    {
+      "id": 117621124455,
+      "name": "OpenJDK 25 - db2",
+      "conclusion": "success",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621124455"
+    },
+    {
+      "id": 117621125074,
+      "name": "GraalVM 25 - ${{ matrix.rdbms }}",
+      "conclusion": "skipped",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117621125074"
+    },
+    {
+      "id": 117632687464,
+      "name": "Prepare build bundle for Sonar scanner",
+      "conclusion": "skipped",
+      "url": "https://github.com/xfocus3/hibernate-work/actions/runs/39109082865/job/117632687464"
+    }
+  ],
+  "regressionTests": {
+    "passed": 66,
+    "failed": 0,
+    "skipped": 0,
+    "databases": [
+      "h2",
+      "hsqldb",
+      "mysql",
+      "mariadb",
+      "postgis",
+      "edb",
+      "db2",
+      "sybase",
+      "mssql",
+      "spanner",
+      "spannerpgsql"
+    ],
+    "oracle": "not reached before 60-minute timeout"
+  },
+  "baselineComparison": {
+    "run": 39061388572,
+    "spannerpgsql": {
+      "baselineJob": 117479915750,
+      "currentJob": 117621124336,
+      "matchingFailedCases": 27
+    },
+    "mssql": {
+      "baselineJob": 117479915641,
+      "currentJob": 117621124302,
+      "classification": "database resource exhaustion",
+      "evidence": "Insufficient system memory in resource pool default also appears on unchanged baseline; current failure is in native cleanup DELETE"
+    }
+  },
+  "skippedChecks": [
+    "OracleTestPilot requires upstream self-hosted infrastructure",
+    "Sonar bundle skipped after matrix cancellation"
+  ],
+  "decision": "Keep draft and exact-head review gate blocked; complete focused Oracle coverage; do not count cancelled jobs as successful",
+  "handoff": {
+    "dispatchRun": 39109070436,
+    "recoveryAttempt": 2,
+    "recoveryJob": 117625123341,
+    "decision": "existing-run",
+    "duplicateCiRuns": 0
+  },
+  "checkedAt": "2026-10-18T08:54:00Z"
+}
