@@ -1,0 +1,11 @@
+{
+  "id": "1a2a3f55-2685-42a8-b146-d1633faf4b62",
+  "requestHash": "6f4f5cd57d12afdd53f6bca2ef64dcb53e03faf6083310c1b75c31d8c5b13f09",
+  "runId": "39162716014",
+  "runAttempt": "1",
+  "head": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "resultHead": "14f32ec5d5df1e70f7c138b243e097bfdfb6d034",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "easy-call: nullable List.class query results reach List.of, which rejects null elements.\n\nThe same defect exists in RowTransformerListImpl (HQL) and NativeQueryListTransformer (native SQL). Existing ImplicitInstantiationTest and ImplicitInstantiationTest2 provide query integration seams for both paths.\n\nTwo-way door: a small internal transformation fix, with no schema change or new public API. Preserve list ordering, unmodifiable behavior and independent backing storage while allowing null values; an unmodifiable wrapper around a cloned array-backed list meets those constraints.\n\nSingle issue in this batch; no duplicate. Current main 14f32ec5d5df1e70f7c138b243e097bfdfb6d034 and the maintained 7.4 line still contain the failing construction. Jira is unresolved/unassigned, and issue-key/class-name PR searches found no matching fix.\n\nImplementation should demonstrate RED/GREEN in Actions for HQL first, then the native path using nullable mapped columns. Cover mixed/all-null and single-null selections, non-null controls, immutability and source-array isolation. Run neighboring instantiation tests and formatting on the final revision. No tests have been executed during this read-only exploration.\n\n<promise>COMPLETE</promise>"
+}
