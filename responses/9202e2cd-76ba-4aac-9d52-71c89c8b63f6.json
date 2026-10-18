@@ -1,0 +1,11 @@
+{
+  "id": "9202e2cd-76ba-4aac-9d52-71c89c8b63f6",
+  "requestHash": "ac4191fb79cf6a8a5cd7d0fca7b5c5907ccd8b044c0111a2b1c17ca4a839efb9",
+  "runId": "39133414267",
+  "runAttempt": "1",
+  "head": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "resultHead": "7f87908aa25ce29b706a649c7b894a6124f2da30",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed exact head 7f87908aa25ce29b706a649c7b894a6124f2da30. No additional code changes are needed for the reported shapes. The same dependency guard is used by SQL conversion and runtime pagination; fetched-child predicates and ordered entity-join chains use the existing in-memory fallback. The independent-subquery control retains SQL pagination on supporting dialects. The corrected SQL-shape assertion respects dialect capability without skipping row or collection assertions.\\n\\nVerification: all six new regression/control tests passed across twelve databases. The focused Oracle pagination suite passed 54 tests with one existing HHH9965 skip and formatting passed: https://github.com/xfocus3/hibernate-work/actions/runs/39113426020 . H2 focused suite and formatting also passed. The broader matrix finished with twelve successful jobs and four timeouts: https://github.com/xfocus3/hibernate-work/actions/runs/39109082865 . Spanner PostgreSQL's 27 failures match baseline; SQL Server reported database-memory exhaustion also observed on baseline. These limitations are not counted as passes.\\n\\nTradeoff: the conservative fallback can read more rows before slicing. The reporter's exact extra non-fetch-join workaround was not separately executed; existing neighboring controls passed. No unresolved human review threads required replies. Draft code review is complete; full-suite success and upstream publication are not claimed.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
