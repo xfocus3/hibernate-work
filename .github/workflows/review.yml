@@ -2,6 +2,10 @@ name: Review private PR
 on:
   workflow_dispatch:
     inputs:
+      verification_run_id:
+        description: Verification run that must finish before review
+        type: number
+        default: 0
       pr_number:
         description: PR to review
         type: number
@@ -9,7 +13,7 @@ on:
   pull_request_target:
     types: [labeled]
   workflow_run:
-    workflows: [Implement private issue, Implement private PR, Scoped Java checks]
+    workflows: [Implement private issue, Implement private PR]
     types: [completed]
 permissions:
   contents: write
@@ -19,8 +23,9 @@ permissions:
 jobs:
   pipeline:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@ff275024be582b9e7553795e87926135020ccf1c
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@dcc5025e8955caf21bce72a594c1d565c7416e83
     with:
       verification_workflows: '[{"path":".github/workflows/scoped-java.yml","source":"target-sha","ref":"main"}]'
+      verification_run_id: ${{ fromJSON(format('{0}', inputs.verification_run_id || 0)) }}
       mode: review
       pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}

@@ -13,10 +13,12 @@ on:
         required: true
 permissions:
   contents: read
+  actions: write
   pull-requests: read
 jobs:
   verify:
-    uses: xfocus3/sandcastle/.github/workflows/java-pr-verification.yml@ae1f47ae953dabf64e0a1bccfd70b57b7068ca2b
+    uses: xfocus3/sandcastle/.github/workflows/java-pr-verification.yml@dcc5025e8955caf21bce72a594c1d565c7416e83
     with:
+      resume_workflow: review.yml
       target_sha: ${{ inputs.target_sha }}
       pr_number: ${{ fromJSON(format('{0}', inputs.pr_number)) }}
