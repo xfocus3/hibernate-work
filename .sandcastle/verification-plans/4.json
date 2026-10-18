@@ -1,0 +1,19 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.ImplicitInstantiationTest*",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.ListResultTransformerTest",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.DynamicInstantiationTests",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.DynamicMapInstantiationTest",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-20328 changes HQL and native List result transformation. Run nullable projection regressions, copy/immutability tests and neighboring implicit/dynamic instantiation tests, plus formatting. HQL RED39163315034 and native RED39164652792 establish failure-before-fix; final tracer run39165301590 passed40tests with0skips at a3060bba4703cb98421762e011d25e3108df2599. Other databases and the fullsuite remain unrun; do not treat them as passed."
+}
