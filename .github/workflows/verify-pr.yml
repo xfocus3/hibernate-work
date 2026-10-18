@@ -19,8 +19,8 @@ permissions:
 jobs:
   pipeline:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@ae1f47ae953dabf64e0a1bccfd70b57b7068ca2b
+    uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@ff275024be582b9e7553795e87926135020ccf1c
     with:
       verification_workflows: '[{"path":".github/workflows/scoped-java.yml","source":"target-sha","ref":"main"}]'
-      tool_ref: ae1f47ae953dabf64e0a1bccfd70b57b7068ca2b
+      tool_ref: ff275024be582b9e7553795e87926135020ccf1c
       pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}
