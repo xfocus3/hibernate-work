@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.function.srf.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-21005 changes H2 generate_series result mapping for nonliteral expressions. Run GenerateSeriesTest's seven new regressions/controls and existing series coverage, neighboring set-returning-function tests, and formatChecks. RED run39225714305 proves wrong values before the fix; extended RED39227646339 confirms five cast-expression cases. Final tracer run39228377718 passed 17 tests with 4 existing dialect-restricted skips at2b5a0988095ab6808e144322993794c273a15777. H2 only; other databases and full suite remain unrun."
+}
