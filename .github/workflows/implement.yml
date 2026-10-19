@@ -11,8 +11,9 @@ permissions:
   pull-requests: write
 jobs:
   pipeline:
-    uses: xfocus3/sandcastle/.github/workflows/agent-implement-queue.yml@28594be1012591935ec0fd7bb54d969c3d9039d5
+    uses: xfocus3/sandcastle/.github/workflows/agent-implement-queue.yml@4308bb149ece0ac9669c491791f6685318a55746
     secrets:
       upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
     with:
+      allow_public_workspace: true
       upstream_repository: hibernate/hibernate-orm
