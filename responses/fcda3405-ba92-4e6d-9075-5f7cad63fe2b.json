@@ -1,0 +1,11 @@
+{
+  "id": "fcda3405-ba92-4e6d-9075-5f7cad63fe2b",
+  "requestHash": "68d738bcf115746d0d9d5f3d544c94a0d61700692b6b1e9c871e773c19e2654b",
+  "runId": "39231919892",
+  "runAttempt": "1",
+  "head": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "resultHead": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"threadReplies\": [],\n  \"newInlineComments\": [],\n  \"topLevelComments\": [\n    {\n      \"body\": \"Removed the redundant array clones from both List transformers, as discussed upstream. The direct tests now check null acceptance and unmodifiable results without requiring a defensive-copy contract.\\n\\n[Verification](https://github.com/xfocus3/hibernate-work/actions/runs/39232513783) passed on 8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1: 40 tests passed, 0 failed, 0 skipped, plus formatting. H2/JDK 25; other databases and the full suite remain unrun. Independent code review found no blockers.\"\n    }\n  ]\n}\n</output>"
+}
