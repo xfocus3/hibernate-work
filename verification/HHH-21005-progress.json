@@ -1,0 +1,35 @@
+{
+  "issue": "HHH-21005",
+  "work_issue": 5,
+  "state": "implementation-in-progress",
+  "request_id": "4876c6d3-4999-498e-9830-a62d81599706",
+  "request_run": 39225335916,
+  "base": "715ff0b5ac153a5520b989c039eec36677f2ede9",
+  "branch": "agent/issue-5-hhh-21005-correct-h2-generate-series-values-for-ca",
+  "red": {
+    "head": "51bbf1a423b0b851f7b061cef2df77d8c12b9721",
+    "run": 39225714305,
+    "artifact": 12173453238,
+    "tests": 11,
+    "passed": 10,
+    "failed": 1,
+    "skipped": 0,
+    "failure": "Expected [5,6,7], actual [1,2,3]"
+  },
+  "first_green": {
+    "head": "6292139ed6a57196af3c0efa72ad1c33fd463dae",
+    "tree": "0e66e8eb0f47f27de64701bfb48698b98f7a5ef0",
+    "run": 39226364844,
+    "artifact": 12173637756,
+    "tests": 11,
+    "passed": 11,
+    "failed": 0,
+    "skipped": 0,
+    "formatChecks": "passed"
+  },
+  "coverage_red_head": "0d734fe7c622ead074fa477de779f069208a5a48",
+  "database": "H2",
+  "java": 25,
+  "other_databases": "not run",
+  "publication": "not published"
+}
