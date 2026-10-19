@@ -9,6 +9,7 @@ import org.hibernate.testing.orm.domain.StandardDomainModel;
 import org.hibernate.testing.orm.domain.library.Book;
 import org.hibernate.testing.orm.junit.DialectFeatureChecks;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.RequiresDialectFeature;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
@@ -56,6 +57,22 @@ public class GenerateSeriesTest {
 			assertEquals( 2, resultList.size() );
 			assertEquals( 1, resultList.get( 0 ) );
 			assertEquals( 2, resultList.get( 1 ) );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastParameters(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(cast(:min as Integer), cast(:max as Integer)) e order by e",
+							Integer.class
+					)
+					.setParameter( "min", 5 )
+					.setParameter( "max", 7 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 6, 7 ), resultList );
 		} );
 	}
 
