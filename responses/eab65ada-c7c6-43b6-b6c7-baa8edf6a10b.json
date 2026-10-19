@@ -1,0 +1,15 @@
+{
+  "id": "eab65ada-c7c6-43b6-b6c7-baa8edf6a10b",
+  "requestHash": "0b69402d67a31aaedf37c7abbc0cd908ab2855b84f65945351917a5d1ec95d14",
+  "runId": "39231919892",
+  "runAttempt": "1",
+  "head": "a3060bba4703cb98421762e011d25e3108df2599",
+  "resultHead": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/jpa/spi/NativeQueryListTransformer.java",
+    "hibernate-core/src/main/java/org/hibernate/sql/results/internal/RowTransformerListImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/ListResultTransformerTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Addressed the upstream clone feedback in both List result transformers. StandardRowReader allocates a fresh array for each row and does not reuse it after transformation, so cloning is unnecessary. Null values, ordering and unmodifiable-list behavior remain intact.\n\nRemoved the direct tests' manual input-array mutation/copy expectations and renamed those tests to describe unmodifiable results. All original query regressions and neighboring tests remain unchanged.\n\nActions run 39232513783 passed on 8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1: 40 tests passed, 0 failed, 0 skipped, plus formatChecks. H2 and JDK 25. Tested tree 1004d8e5c8ce1cfe410084edb2bfe3ff1cba03d8 is unchanged; verified.patch is empty. Artifact 12178107629. Other databases and the full suite were not run. Original pre-fix null-regression evidence remains preserved.\n\nThe description's independent-copy claims must be removed before publishing this follow-up. No upstream code push or completion reply has occurred yet.\n\n<promise>COMPLETE</promise>"
+}
