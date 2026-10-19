@@ -1,0 +1,11 @@
+{
+  "id": "c9b2a9e1-3c11-495c-aed7-5ae0ef151442",
+  "requestHash": "7770ff6a4dc7fdc6f180b43c708d89130169efc388896bb8f1108178c82d9acd",
+  "runId": "39230558745",
+  "runAttempt": "1",
+  "head": "2b5a0988095ab6808e144322993794c273a15777",
+  "resultHead": "2b5a0988095ab6808e144322993794c273a15777",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"No blocking findings at 2b5a0988095ab6808e144322993794c273a15777; no additional changes were needed. The H2 resolver now uses the same existing emulation predicate as rendering and query transformation, including optional step expressions. The two-file patch adds no abstraction or public API/schema change.\\n\\nSeven tests cover cast bounds, individually cast start/stop, positive and negative cast steps, typed Criteria parameters and ordinality. The reported query failed before the fix with [1, 2, 3] instead of [5, 6, 7]; five cast-expression cases were verified failing on the original mapping. The parameter control uses explicit Criteria types rather than expanding the fix into unrelated HQL type inference.\\n\\nFinal tracer run 39228377718 and scoped PR run 39229193819 passed on the exact head and unchanged tree: 17 tests passed, 0 failed, and 4 existing dialect-restricted tests skipped on H2. Formatting passed with JDK 25. Other databases and the full suite were not run. Independent code review found no blockers; there are no human review threads requiring a reply.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
