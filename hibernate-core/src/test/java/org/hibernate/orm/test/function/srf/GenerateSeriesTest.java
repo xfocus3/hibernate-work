@@ -141,10 +141,9 @@ public class GenerateSeriesTest {
 	public void testGenerateSeriesParameters(SessionFactoryScope scope) {
 		scope.inSession( session -> {
 			final List<Integer> resultList = session.createQuery(
-							"select e from generate_series(:min, :max, :step) e order by e",
+							"select e from generate_series(5, :max, :step) e order by e",
 							Integer.class
 					)
-					.setParameter( "min", 5 )
 					.setParameter( "max", 9 )
 					.setParameter( "step", 2 )
 					.getResultList();
