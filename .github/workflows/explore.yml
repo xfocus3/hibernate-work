@@ -11,7 +11,7 @@ permissions:
 jobs:
   sync:
     if: github.event_name != 'issues' || github.event.label.name == 'agent:explore'
-    uses: xfocus3/sandcastle/.github/workflows/sync-upstream.yml@f6409150ffee1ebc76d383af477309b438072dae
+    uses: xfocus3/sandcastle/.github/workflows/sync-upstream.yml@80f457b2b99f5b417d15425c97a953eba87e4ee8
     secrets:
       upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
     with:
