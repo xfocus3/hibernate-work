@@ -1,0 +1,41 @@
+{
+  "issue": "HHH-20328",
+  "work_pr": "https://github.com/xfocus3/hibernate-work/pull/4",
+  "upstream_pr": "https://github.com/hibernate/hibernate-orm/pull/13712",
+  "request": "Remove redundant result-array clones after upstream review",
+  "request_url": "https://github.com/hibernate/hibernate-orm/pull/13712#discussion_r4312029832",
+  "reply_url": "https://github.com/hibernate/hibernate-orm/pull/13712#discussion_r4312555597",
+  "implementation": "completed",
+  "publication": "published",
+  "merge": "not merged",
+  "work_head": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "public_head": "684b74e44a1047162ba796d6a8ced4331cf3521e",
+  "previous_public_head": "5991980d28030ad97c8b2be64674f128385efd39",
+  "tested_tree": "1004d8e5c8ce1cfe410084edb2bfe3ff1cba03d8",
+  "verification": {
+    "tracer_run": 39232513783,
+    "scoped_run": 39233492773,
+    "artifact": 12178546380,
+    "passed": 40,
+    "failed": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "database": "H2",
+    "jdk": 25,
+    "other_databases": "not run",
+    "full_suite": "not run"
+  },
+  "implementation_run": 39231919892,
+  "review_run": 39234205629,
+  "contribution_check": {
+    "id": 118001632803,
+    "conclusion": "success"
+  },
+  "upstream_ci": {
+    "linter": 39234729501,
+    "ci": 39234728929,
+    "state": "action_required",
+    "owner": "Hibernate maintainers"
+  },
+  "checked_at": "2026-10-19T10:07:00Z"
+}
