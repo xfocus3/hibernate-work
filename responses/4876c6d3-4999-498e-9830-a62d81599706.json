@@ -1,0 +1,14 @@
+{
+  "id": "4876c6d3-4999-498e-9830-a62d81599706",
+  "requestHash": "4616b81393e7285247f695c1df6790b55ef33edf3ab90f3f42e5dea63c2c67c4",
+  "runId": "39225335916",
+  "runAttempt": "1",
+  "head": "715ff0b5ac153a5520b989c039eec36677f2ede9",
+  "resultHead": "2b5a0988095ab6808e144322993794c273a15777",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/dialect/function/H2GenerateSeriesFunction.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/function/srf/GenerateSeriesTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-21005: align H2 generate_series return-value mapping with the existing emulation condition for start, stop and step expressions. No new abstraction or public API change.\n\nTracer bullet RED: run39225714305 at51bbf1a423b0b851f7b061cef2df77d8c12b9721 ran11tests,10passed/1failed/0skipped. Reported cast-bound query returned[1,2,3] instead of[5,6,7]. GREEN39226364844 at6292139ed6a57196af3c0efa72ad1c33fd463dae passed11tests andformatChecks.\n\nExtended RED39227006009 and39227646339 demonstrated five cast-expression wrong-value failures. An added bare-HQL-parameter control also failed type resolution before SQL; it was corrected to use explicitly typed Criteria parameters rather than broadening production scope.\n\nFinal verification39228377718 at2b5a0988095ab6808e144322993794c273a15777: GenerateSeriesTest17passed,0failed,0skipped; neighboringCustomSetReturningFunctionTest4skipped byexistingdialectrestrictions excludingH2. formatChecks passed. Verified tree14000d5bdcedb2db0168f22c2d7ac30a19bbdadf unchanged; verified.patch empty. JDK25/H2. Other databases andfullsuite unrun. Artifact12175602031.\n\nAdded seven tests: castbounds,caststart,caststop,castpositive/negativestep,typedplainparametercontrol,castboundsordinality. Existing literal,temporal,correlation,empty-range,same-bound testsremainpassing. Await independent final review before upstreampublication.\n\n<promise>COMPLETE</promise>"
+}
