@@ -77,6 +77,103 @@ public class GenerateSeriesTest {
 	}
 
 	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastStartParameter(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(cast(:min as Integer), 7) e order by e",
+							Integer.class
+					)
+					.setParameter( "min", 5 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 6, 7 ), resultList );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastStopParameter(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(5, cast(:max as Integer)) e order by e",
+							Integer.class
+					)
+					.setParameter( "max", 7 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 6, 7 ), resultList );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastStepParameter(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(5, 9, cast(:step as Integer)) e order by e",
+							Integer.class
+					)
+					.setParameter( "step", 2 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 7, 9 ), resultList );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastNegativeStepParameter(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(9, 5, cast(:step as Integer)) e order by e",
+							Integer.class
+					)
+					.setParameter( "step", -2 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 7, 9 ), resultList );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesParameters(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Integer> resultList = session.createQuery(
+							"select e from generate_series(:min, :max, :step) e order by e",
+							Integer.class
+					)
+					.setParameter( "min", 5 )
+					.setParameter( "max", 9 )
+					.setParameter( "step", 2 )
+					.getResultList();
+
+			assertEquals( List.of( 5, 7, 9 ), resultList );
+		} );
+	}
+
+	@Test
+	@JiraKey("HHH-21005")
+	public void testGenerateSeriesCastParametersOrdinality(SessionFactoryScope scope) {
+		scope.inSession( session -> {
+			final List<Tuple> resultList = session.createQuery(
+							"select index(e), e from generate_series(cast(:min as Integer), cast(:max as Integer)) e order by index(e)",
+							Tuple.class
+					)
+					.setParameter( "min", 5 )
+					.setParameter( "max", 7 )
+					.getResultList();
+
+			assertEquals( 3, resultList.size() );
+			for ( int i = 0; i < resultList.size(); i++ ) {
+				assertEquals( (long) i + 1, resultList.get( i ).get( 0 ) );
+				assertEquals( i + 5, resultList.get( i ).get( 1 ) );
+			}
+		} );
+	}
+
+	@Test
 	public void testNodeBuilderGenerateSeries(SessionFactoryScope scope) {
 		scope.inSession( em -> {
 			final NodeBuilder cb = (NodeBuilder) em.getCriteriaBuilder();
