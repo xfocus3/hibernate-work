@@ -1,0 +1,11 @@
+{
+  "id": "ba160432-8d21-4403-ba2f-6fcb5da780cb",
+  "requestHash": "7e56085712043c9c829c5802df26816c24f21ab1b00f75e69592d57674cb69b9",
+  "runId": "39224781297",
+  "runAttempt": "1",
+  "head": "715ff0b5ac153a5520b989c039eec36677f2ede9",
+  "resultHead": "715ff0b5ac153a5520b989c039eec36677f2ede9",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "easy-call: H2 generate_series uses emulation for cast expressions but exposes the raw iteration counter as the result.\n\nSingle-issue group; no duplicates. At upstream main 715ff0b5ac153a5520b989c039eec36677f2ede9, H2GenerateSeriesFunction rendering and query transformation use needsEmulation(start/stop/step), while its return-type resolver only switches to iteration-value mapping for column references, ordinality or temporal results. Cast parameters therefore select x instead of start + step * (x - 1).\n\nTwo-way door: a narrow internal H2 mapping correction, with no schema or public API change. Align the return-type resolver with the existing emulation condition; reuse the existing helpers rather than adding abstractions. Preserve literal/direct-parameter fast paths and existing ordinality/temporal behavior.\n\nUse GenerateSeriesTest for the first tracer bullet: cast min/max parameters 5 and 7 must return [5, 6, 7]. Prove the reported wrong values in Actions before changing production code, then make the smallest fix and re-run. Extend coverage for separately cast start, stop and positive/negative step, ordinary parameter controls and ordinality as relevant. Run focused neighboring H2 tests and formatChecks at the final head.\n\nJira is unresolved/unassigned and the reporter branch is only a reproducer; all-state upstream searches found no overlapping fix. No tests were executed during this read-only exploration. Actual RED/GREEN remains implementation work.\n\n<promise>COMPLETE</promise>"
+}
