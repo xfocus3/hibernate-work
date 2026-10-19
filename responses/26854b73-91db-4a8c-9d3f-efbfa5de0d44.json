@@ -1,0 +1,11 @@
+{
+  "id": "26854b73-91db-4a8c-9d3f-efbfa5de0d44",
+  "requestHash": "9f6696380240035c4f1f6d37e406c172ec8fc2cc778e79b42236553f7f50f813",
+  "runId": "39234205629",
+  "runAttempt": "1",
+  "head": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "resultHead": "8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"No blocking findings at 8facf2aee1f2085caf8ba5ce5aa6b79d2f0246a1. Both redundant clones have been removed, matching the upstream review. StandardRowReader supplies a fresh array for each result, so the returned unmodifiable lists do not need defensive array copies. The direct tests correctly retain null, order and set/add/remove checks without imposing a separate snapshot contract. No further source changes were needed.\\n\\nExact-head tracer run 39232513783 and automatically dispatched scoped run 39233492773 passed: 40 tests passed, 0 failed, 0 skipped, plus formatting on H2/JDK 25. Tested tree 1004d8e5c8ce1cfe410084edb2bfe3ff1cba03d8 was unchanged. Independent review found no blockers. Original pre-fix NPE evidence remains valid; other databases and the full suite are unrun. The work PR description no longer promises independent copies.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
