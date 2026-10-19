@@ -1,0 +1,38 @@
+{
+  "issue": "HHH-21005",
+  "work_pr": "https://github.com/xfocus3/hibernate-work/pull/6",
+  "upstream_pr": "https://github.com/hibernate/hibernate-orm/pull/13713",
+  "implementation": "completed",
+  "publication": "published",
+  "merge": "not merged",
+  "work_head": "2b5a0988095ab6808e144322993794c273a15777",
+  "public_head": "af6bfa44d59c968cde3edba43c07518ec77a65e0",
+  "tested_tree": "14000d5bdcedb2db0168f22c2d7ac30a19bbdadf",
+  "base": "715ff0b5ac153a5520b989c039eec36677f2ede9",
+  "verification": {
+    "tracer_run": 39228377718,
+    "scoped_run": 39229193819,
+    "artifact": 12176732589,
+    "passed": 17,
+    "failed": 0,
+    "skipped": 4,
+    "skip_reason": "CustomSetReturningFunctionTest excludes H2 by existing dialect restrictions",
+    "formatChecks": "passed",
+    "database": "H2",
+    "jdk": 25,
+    "other_databases": "not run",
+    "full_suite": "not run"
+  },
+  "review_run": 39230558745,
+  "contribution_check": {
+    "id": 117990605865,
+    "conclusion": "success"
+  },
+  "upstream_ci": {
+    "linter": 39231450115,
+    "ci": 39231449491,
+    "state": "action_required",
+    "owner": "Hibernate maintainers"
+  },
+  "checked_at": "2026-10-19T09:39:00Z"
+}
