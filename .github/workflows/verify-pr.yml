@@ -22,5 +22,5 @@ jobs:
     uses: xfocus3/sandcastle/.github/workflows/agent-verification-queue.yml@ff275024be582b9e7553795e87926135020ccf1c
     with:
       verification_workflows: '[{"path":".github/workflows/scoped-java.yml","source":"target-sha","ref":"main"}]'
-      tool_ref: ff275024be582b9e7553795e87926135020ccf1c
+      tool_ref: 1b447693eb568012c9a9fbb3bd23f3b49ae01413
       pr_number: ${{ fromJSON(format('{0}', github.event.pull_request.number || inputs.pr_number || 0)) }}

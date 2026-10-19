@@ -15,5 +15,5 @@
     "-Pdb=h2",
     "formatChecks"
   ],
-  "reason": "HHH-20328 changes HQL and native List result transformation. Run nullable projection regressions, copy/immutability tests and neighboring implicit/dynamic instantiation tests, plus formatting. HQL RED39163315034 and native RED39164652792 establish failure-before-fix; final tracer run39165301590 passed40tests with0skips at a3060bba4703cb98421762e011d25e3108df2599. Other databases and the fullsuite remain unrun; do not treat them as passed."
+  "reason": "HHH-20328 changes HQL and native List result transformation. The maintainer follow-up removes redundant array clones while preserving null acceptance, order and unmodifiable results. Run the six nullable query regressions, direct null/immutability checks and neighboring implicit/dynamic instantiation tests, plus formatting. Original HQL and native RED evidence is preserved. Verify this PR's exact current head; other databases and the full suite remain unrun."
 }
