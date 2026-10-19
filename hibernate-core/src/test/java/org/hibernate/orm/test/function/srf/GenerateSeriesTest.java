@@ -140,10 +140,17 @@ public class GenerateSeriesTest {
 	@JiraKey("HHH-21005")
 	public void testGenerateSeriesParameters(SessionFactoryScope scope) {
 		scope.inSession( session -> {
-			final List<Integer> resultList = session.createQuery(
-							"select e from generate_series(5, :max, :step) e order by e",
-							Integer.class
-					)
+			final NodeBuilder cb = (NodeBuilder) session.getCriteriaBuilder();
+			final JpaCriteriaQuery<Integer> query = cb.createQuery( Integer.class );
+			final JpaFunctionRoot<Integer> root = query.from( cb.generateSeries(
+					cb.parameter( Integer.class, "min" ),
+					cb.parameter( Integer.class, "max" ),
+					cb.parameter( Integer.class, "step" )
+			) );
+			query.select( root );
+			query.orderBy( cb.asc( root ) );
+			final List<Integer> resultList = session.createQuery( query )
+					.setParameter( "min", 5 )
 					.setParameter( "max", 9 )
 					.setParameter( "step", 2 )
 					.getResultList();
