@@ -1,0 +1,11 @@
+{
+  "id": "2b3f6c45-483f-4b72-9508-d8d048a76949",
+  "requestHash": "9c706e90f5aa358c0eb8cf5df8d35623f2ac8b5b56bcb128920cc4b1a840633a",
+  "runId": "39498531187",
+  "runAttempt": "1",
+  "head": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "resultHead": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Approved. No remaining blocking findings; no edits or commit needed.\\n\\nReconciled the fresh review prompt, prior findings, and clean checkout at head 6816ccd0ac77ea593c74f686c19336c2e52598a2, tree 8d5a50e1da4ee8c36740c077a918ae2960f0fea9. All four changed files match the independently reviewed correction. No unresolved human review threads require a response. Subtype cleanup, null-array handling, root ownership, cache invalidation, uninitialized-wrapper behavior, listener cleanup, and protected Reactive signatures remain satisfactory.\\n\\nCurrent-head Actions run 39497492508 reverified JDK 25/H2 compilation, testClasses, repository formatChecks, and the stateless package: 122 discovered, 119 passed, three expected MySQL/MariaDB-only skips, zero failures/errors; all 20 regression invocations passed. Exact head/tree provenance and an empty verification patch were inspected independently. Command: ./gradlew hibernate-core:test --tests 'org.hibernate.orm.test.stateless.*' -Pdb=h2 formatChecks. Full database matrix and Hibernate Reactive integration remain deferred.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
