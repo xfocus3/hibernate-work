@@ -1,0 +1,16 @@
+{
+  "id": "6aa057b6-0d63-4e24-920f-cb1fd120937f",
+  "requestHash": "e28a63ca5a46197c4616fdee8cfc2b6a8a5f45827c47ec311b5f7a314c088db2",
+  "runId": "39470391613",
+  "runAttempt": "1",
+  "head": "30bd89fb9ef8bec6b4d3fe2c87f5670ff3957310",
+  "resultHead": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/event/internal/DefaultPersistEventListener.java",
+    "hibernate-core/src/main/java/org/hibernate/event/internal/EventListenerLogging.java",
+    "hibernate-core/src/main/java/org/hibernate/event/internal/UnscheduledDeletionLogging.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPaginationSingleTableTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Independent actual review accepted the final source tree with no blocking findings. Removed one redundant setParameter binding in the limit-one regression. Integrated unchanged upstream commit24e81f56cf9a136ab2f65d9151752ebae7fbec2c through the existing baseline refresh, retaining the review request head as an ancestor. The three event/internal files are solely that unrelated upstream deletion-logging commit, not changes for HHH-20942. Relative to refreshed upstream, the final tree changes only the transformer and its new regression class.\n\nVerified mapping traversal includes inherited/current attributes and descendant-declared mappings; explicit identifier/version/discriminator handling, primary-table filtering, formula selection, deduplication and joined-inheritance absorption remain intact. No mapping metadata mutation or unnecessary copies. Relevant contribution/classification guidance and Hibernate review checklist applied; no API/SPI classification changes.\n\nIndependent review checked original RED commit ancestry and artifact trees: test-only source on3f7f439 failed with CHANNEL_ID; expanded test-only RED included four missing-QUALITY failures. Unrestricted intermediate-subclass Video pagination remains genuine descendant-projection coverage. The ID-predicated PremiumVideo leaf lookup tests inherited state only. A separate pre-existing unrestricted leaf discriminator-filtering defect was observed and is not changed or claimed fixed.\n\nRefreshed JDK25/H2 focused run39471376007 at bf4fd5f43a28c6aea91c299a3d5ec50e0eacea5d passed46tests across9classes, zero failures/errors/skips. Arguments [\"hibernate-core:test\",\"--tests\",\"org.hibernate.orm.test.pagination.CollectionFetchPagination*\",\"-Pdb=h2\",\"formatChecks\"]. compileJava, compileTestJava, testClasses, repository formatChecks and BUILD SUCCESSFUL evidenced. Artifact source tree=tested_tree=2b7b6461164b2306f969f0cd29f52d5d8fd8676d, empty verified.patch. Final result e0ffd4db80e5af4a7ff1176e715fd63a769bf88f has exactly that full tested tree. Independently verified final commit/tree and clean diff. PostgreSQL/live databases and broader upstream matrix remain deferred. No human review threads required replies.\n<promise>COMPLETE</promise>"
+}
