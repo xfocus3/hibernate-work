@@ -1,0 +1,11 @@
+{
+  "id": "a859a72f-effc-4e93-a734-123c8d82715d",
+  "requestHash": "6b3a30333f6441c38066091daf39148ed61f894621c4ed5ff7726cf3dad0a249",
+  "runId": "39429184497",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 16,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: preserve the explicit inner-join locking flag in the parameterized factory.\\n\\nThe change is localized to StandardLockingSupports.parameterized and database-free public-factory tests in hibernate-core. Its seven-argument constructor call currently interprets the supplied boolean as legacy read-wait metadata and forces supportsInnerJoins=true; the existing eight-argument constructor accepts both independently. AltibaseDialect passes false, and QueryLockingManagedEntityTest consumes the flag for streamed joins.\\n\\nTwo-way: a narrow constructor-selection correction without new API, schema changes or broader concurrency redesign. Pass supportsInnerJoins twice to correct join support while retaining the prior observable legacy read-wait value. Keep the resolver object, other metadata, omitted-flag default and deprecated overload behavior unchanged.\\n\\nThis continues the prepared HHH-20980 fix. Reuse its six contract tests and five compatibility tests, but do not treat earlier isolated results as current-project verification. Establish RED against pinned upstream 4cabe417c868b343fa458a6e42b1da7a4813ec52, then GREEN with the same tests and one-line fix. Run locking-unit neighbors, QueryLockingManagedEntityTest on H2 and formatChecks using focused JDK 25 Actions. No full-matrix or Altibase-runtime claim.\\n\\nRepository contribution and classification guidance and the scoped maintainer checklist were read. Apply explicit option coverage and the smallest responsible-layer fix. No duplicates or source edits in this read-only exploration. Current-project test outcomes and actual review remain open implementation work.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
