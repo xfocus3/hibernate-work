@@ -1,0 +1,45 @@
+{
+  "issue": "HHH-20942",
+  "official_pr": "https://github.com/hibernate/hibernate-orm/pull/13737",
+  "work_pr": "https://github.com/xfocus3/hibernate-work/pull/19",
+  "state": "published-ready",
+  "official_head": "6709f762bf82303e4c3f756538830ac0975dbcae",
+  "upstream_base": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "work_head": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "reviewed_tested_published_tree": "2b7b6461164b2306f969f0cd29f52d5d8fd8676d",
+  "source_files": 2,
+  "source_commits": 1,
+  "verification_run": 39473000124,
+  "review_run": 39473889812,
+  "review_id": 5589667609,
+  "tests": {
+    "total": 46,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "jdk": 25,
+    "database": "h2",
+    "compilation": "passed",
+    "formatChecks": "passed"
+  },
+  "official_draft": false,
+  "contribution_rules": "success",
+  "generated_tasks": "both checked",
+  "jira": {
+    "status": "Waiting for review",
+    "assigned": false,
+    "resolution": null,
+    "fix_versions": []
+  },
+  "upstream_ci": {
+    "jenkins": "in_progress",
+    "build_reports": "in_progress",
+    "quarkus": "skipped"
+  },
+  "limitations": [
+    "PostgreSQL and broader dialect/integration checks remain upstream CI responsibilities.",
+    "Separate baseline unrestricted leaf discriminator-filtering defect is outside this projection fix and retained for independent qualification."
+  ],
+  "active_handoffs": [],
+  "checked_at": "2026-10-20T18:27:00Z"
+}
