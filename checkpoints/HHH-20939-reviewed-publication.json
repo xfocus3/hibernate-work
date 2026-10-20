@@ -1,0 +1,37 @@
+{
+  "issue": "HHH-20939",
+  "upstreamBase": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "reviewedHead": "406b945fbd25a0b14c633f72df5299cde555a3ab",
+  "testedTree": "5e52e0d3282954a3201896bcc7935dccd0f95f9f",
+  "finalVerification": {
+    "run": 39403035581,
+    "status": "success",
+    "tests": 19,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "formatterPatchEmpty": true
+  },
+  "review": {
+    "run": 39403510996,
+    "status": "success",
+    "requestId": "78cf3e73-24ed-4728-956f-f66d91f1f7e6",
+    "extractionId": "f8d737e9-5a59-49d2-9519-dc793e62cee8",
+    "url": "https://github.com/xfocus3/hibernate-work/pull/8#pullrequestreview-5583492583",
+    "findings": []
+  },
+  "publication": {
+    "repository": "xfocus3/hibernate-orm",
+    "branch": "HHH-20939-sandcastle",
+    "head": "3961be55176e87d66b7f96aa27ff886fa984c32d",
+    "tree": "5e52e0d3282954a3201896bcc7935dccd0f95f9f",
+    "upstreamPullRequestCreated": false,
+    "olderBranchPreserved": "fix-HHH-20939-comparable-restriction-bounds"
+  },
+  "caveats": [
+    "Classification validation failed with 5609 identical baseline/candidate diagnostics; unchanged production files.",
+    "Full upstream build and non-H2 matrix not run.",
+    "Targetless var inference may narrow; explicit target or type witness remedies documented.",
+    "Published commit metadata/history differs from tested commit; complete source tree identical."
+  ]
+}
