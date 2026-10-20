@@ -1,0 +1,27 @@
+HHH-21009 bounded qualification
+
+Source issue: https://hibernate.atlassian.net/browse/HHH-21009
+Reporter and reproducer: Marián Ligocký; hibernate-refresh-template.zip.
+Current source baseline: 4cabe417c868b343fa458a6e42b1da7a4813ec52
+Diagnostic test-only commit: 10beb449acd50e63cf93d0c1e8c5a9ad01d12859
+Diagnostic tree: 0b9c205599fcbdc05a145624b9dc31f505e5bb4b
+Exact tested tree: 0b9c205599fcbdc05a145624b9dc31f505e5bb4b
+Verified patch size: 0 bytes
+Run: https://github.com/xfocus3/hibernate-work/actions/runs/39427422499
+JDK: 25; H2: 2.5.252; Gradle wrapper: 9.7.1.
+Command arguments: hibernate-core:test --tests org.hibernate.orm.test.refresh.NestedCascadeRefreshTest --tests org.hibernate.orm.test.refresh.CascadeRefreshToManyTest -Pdb=h2
+Main compilation: FROM-CACHE. Test compilation/testClasses: successful.
+
+JUnit totals: 6 tests, 1 failure, 0 errors, 0 skips.
+FAIL: NestedCascadeRefreshTest.refreshInitializedNestedCollection: expected label new but actual old.
+PASS: CascadeRefreshToManyTest.refreshCollectionViaQuery
+PASS: CascadeRefreshToManyTest.refreshManyToOneDoesNotRefreshAssociationIndividually
+PASS: CascadeRefreshToManyTest.refreshToOneViaQuery
+PASS: CascadeRefreshToManyTest.refreshInitializedCollectionDoesNotRefreshEachChildIndividually
+PASS: CascadeRefreshToManyTest.refreshUninitializedCollectionRefreshesManagedChildren
+
+Runtime SQL after refresh reads root and first-level parent only; no child SELECT occurs. No production source was changed. No GREEN, fix review, formatChecks, full suite, cache/cycle/depth matrix or other database validation is claimed.
+
+Stopped because no safe bounded correction was qualified. Reusing a nonjoin collection wrapper skips the necessary secondary load, but naive eviction needs deliberate handling of L2 invalidation, membership/snapshot state, cascade reachability, secondary-loader propagation and repeated/cyclic traversal. No speculative loader-context redesign was attempted.
+
+Original stage outcome: https://github.com/xfocus3/hibernate-work/actions/runs/39426873824 is terminal failure after consuming the explicit blocked response. Push, draft PR creation and automated review were skipped. Issue #15 has only agent:blocked, with no task branch or PR created.
