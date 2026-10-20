@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.restriction.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Typed LocalDate restriction and range regressions plus neighboring restriction tests. Test compilation is included. Other databases and the full upstream suite are not claimed."
+}
