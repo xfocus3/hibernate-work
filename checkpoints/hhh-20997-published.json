@@ -1,0 +1,51 @@
+{
+  "issue": "HHH-20997",
+  "officialPullRequest": "https://github.com/hibernate/hibernate-orm/pull/13738",
+  "officialHead": "5b3796d9a7c438d40d25a596028f487106d2cf08",
+  "officialBase": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "tree": "8d5a50e1da4ee8c36740c077a918ae2960f0fea9",
+  "commits": 1,
+  "files": 4,
+  "draft": false,
+  "maintainerCanModify": false,
+  "contribution": {
+    "checkRun": 118894106912,
+    "conclusion": "success",
+    "reproducerTask": true,
+    "noBreakingChangeTask": true,
+    "licenseVerified": true
+  },
+  "workPullRequest": 21,
+  "workHead": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "review": {
+    "run": "39498531187",
+    "id": 5591853493,
+    "conclusion": "success",
+    "allRequestsConsumed": true
+  },
+  "verification": {
+    "focusedRun": "39496386848",
+    "currentHeadRun": "39497492508",
+    "tests": 122,
+    "passed": 119,
+    "skipped": 3,
+    "failures": 0,
+    "errors": 0,
+    "jdk": "25",
+    "database": "H2",
+    "format": "passed",
+    "exactTree": true
+  },
+  "jira": {
+    "status": "Waiting for review",
+    "assignee": null,
+    "resolution": null,
+    "fixVersions": []
+  },
+  "limits": [
+    "Full database matrix and Hibernate Reactive integration deferred",
+    "Upstream CI still running; maintainer approval required for some workflows"
+  ],
+  "activeHandoffs": [],
+  "next": "Monitor official contribution and CI status; continue next issue selection without waiting for merge."
+}
