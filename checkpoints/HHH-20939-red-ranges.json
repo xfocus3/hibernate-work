@@ -1,0 +1,9 @@
+{
+  "sha": "3dc3c0b2d1775f7ba92e14d99b0f6010500b81e1",
+  "run": 39394956822,
+  "attempt": 1,
+  "result": "Expected compileTestJava failure: ten LocalDate generic-bound compilation errors in the remaining Restriction and Range APIs; no runtime tests executed.",
+  "tree": "cf8e02cee8091eb3e71d50e722f934a76d523891",
+  "testedTree": "cf8e02cee8091eb3e71d50e722f934a76d523891",
+  "formatterPatchEmpty": true
+}
