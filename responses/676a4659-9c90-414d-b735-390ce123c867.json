@@ -1,0 +1,11 @@
+{
+  "id": "676a4659-9c90-414d-b735-390ce123c867",
+  "requestHash": "38c1b805f50e1288312b2317e50ac491d46ea976bef4dccb29280bf7b8692b73",
+  "runId": "39415568862",
+  "runAttempt": "1",
+  "head": "5e17db4d748e59c16ae06443d09539a26c454d79",
+  "resultHead": "5e17db4d748e59c16ae06443d09539a26c454d79",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Independent review found no blocking issues and no changes were needed. The fix is confined to stateless materialization: the existing protected internalLoadGet hook uses find so nullable rows reach association-specific handling, while mandatory missing rows retain EntityNotFoundException. Public get/find semantics, the load-count bracket, and the three-argument Hibernate Reactive hook remain unchanged. Reactive source inspection confirmed preserved CompletionStage dispatch; asynchronous runtime behavior and the separate pre-existing lazy-proxy path are not claimed as fixed.\\n\\nThe test faithfully adapts Markus Westergren’s shared-primary-key reproduction and adds mandatory, explicit NotFound, existing-row, and public API controls. Independent artifact inspection confirmed that the test-only expanded baseline produces exactly the three expected failures with six controls passing. Final exact-head verification for 5e17db4d748e59c16ae06443d09539a26c454d79 passed on JDK 25/H2: 53 suites, 251 tests, zero failures/errors, three existing MySQL/MariaDB-specific skips, and all nine new tests passing. Production/test compilation and formatChecks passed; tested tree 88311e50ca1e30a94429680a469d8406f0f9d186 matches the reviewed tree and verified.patch is empty. Verification: https://github.com/xfocus3/hibernate-work/actions/runs/39414868269 .\\n\\nNo full upstream build, non-H2 database matrix, Hibernate Reactive runtime suite, or repository-wide classification validators were run; these remain explicitly unclaimed. No signatures or classification annotations changed, and no unresolved human review threads required replies.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
