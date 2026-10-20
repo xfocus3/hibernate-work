@@ -1,0 +1,11 @@
+{
+  "id": "a78d7936-61a5-49e8-b8e9-708b75a1d950",
+  "requestHash": "5abaf56c96fdaeb03dca0fc04a1758bfefe779f04023376eab3b226b076e9eeb",
+  "runId": "39464765379",
+  "runAttempt": "1",
+  "head": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+  "resultHead": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"issues\":[{\"number\":18,\"tag\":\"easy-call\",\"duplicate_of\":null,\"comment\":\"**easy-call** — Root-table subtype selections are omitted when the pagination transformer rebuilds the inner projection.\\n\\nThis is a localized hibernate-core SQL-generation correction in `CollectionFetchPaginationQueryTransformer`, using existing subtype mapping traversal in `AbstractEntityPersister`. No public API or schema change is needed.\\n\\n**Two-way door:** a narrow projection correction and regression tests are straightforward to revert.\\n\\nAt baseline `3f7f439`, `addPrimaryTableSelections()` uses `primaryEntity.forEachSelectable()`, which walks the current attribute mappings rather than subtype-declared attributes. The outer selections are retained, while the root alias is excluded from absorption. `visitSubTypeAttributeMappings()` supplies an existing traversal of current and subtype-declared attributes. Preserve explicit identifier/discriminator/version handling, primary-table filtering and selection deduplication.\\n\\nAdd a SINGLE_TABLE regression for the reported nested source/tags fetch. Cover limit-two membership, nonzero offset, limit-one lookup, subclass values and complete collections, with plan caching disabled and unlimited/in-memory controls. Retain subtype formula and inherited-state behavior. Existing Advanced and Formula pagination tests provide neighboring coverage.\\n\\nNo duplicate was identified. The production change appears small; verification is the main work. No compilation or tests ran in this triage. Obtain fresh current-main RED, then focused JDK 25/H2 GREEN plus `formatChecks`, before accepting the implementation.\"}],\"patterns\":\"\"}</output>"
+}
