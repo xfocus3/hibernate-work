@@ -1,0 +1,18 @@
+{
+  "id": "857e1aad-3b17-43da-9d35-0dfdce53828d",
+  "requestHash": "9dd3449e2ee354e4203f72daf169262042e86d59cee54084d0d19f739aaecbf0",
+  "runId": "39393372027",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/range/Interval.java",
+    "hibernate-core/src/main/java/org/hibernate/query/range/LowerBound.java",
+    "hibernate-core/src/main/java/org/hibernate/query/range/Range.java",
+    "hibernate-core/src/main/java/org/hibernate/query/range/UpperBound.java",
+    "hibernate-core/src/main/java/org/hibernate/query/restriction/Restriction.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/restriction/RestrictionTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20939 in clean commit 0c22fe364eb2d3a756cff3c967a39a5f7c431bfe on upstream 4cabe417c868b343fa458a6e42b1da7a4813ec52. Widened 15 comparable bounds across Restriction, Range, LowerBound, UpperBound and Interval to Comparable<? super U>, without casts or predicate changes. Added typed LocalDate coverage for all six restriction comparison factories and all six range factories.\n\nGenuine Actions tracer evidence on JDK 25 and the repository Gradle wrapper:\n- RED 39393787966, revision 94d6931f4eed5b297edd1f3701702d1e9baf451e: new greaterThan regression failed compileTestJava with incompatible LocalDate/ChronoLocalDate bounds.\n- GREEN 39394312706, revision c60cf972e0c485a158603c28d55d34d68ef5c698: one greaterThan regression passed, zero failures/errors/skips.\n- RED 39394956822, revision 3dc3c0b2d1775f7ba92e14d99b0f6010500b81e1: expanded range/comparison regressions produced ten expected generic-bound compilation errors.\n- GREEN 39395916662, revision e653cb0d79d8439e069285cc8ddae76c251c38d9: ./gradlew hibernate-core:test --tests 'org.hibernate.orm.test.query.restriction.*' -Pdb=h2 formatChecks passed. RestrictionTest six tests and JakartaDataRestrictionTest eight tests, total14, zero failures/errors/skips. Formatter patch empty; exact tested tree edd3e179bc007e31d4ba351544cd234e43ca8a72 is identical to the clean result commit tree.\n\nClassification verification is NOT green: 39396698744 on the clean result commit generated metadata/reports, but validateClassifications failed. Baseline diagnostic run39397986606 also failed with5609 findings; candidate diagnostic run39398041049 is still being compared. Do not treat these failures as a pass or publish as fully validated. Diagnostic-only scripts live solely on separate checkpoint branches, not in this result. Final exact-head focused verification and independent review must still run. Full upstream build and non-H2 database matrix are deferred, not claimed.\n\nImplementation code and focused regression cycle are complete; classification triage and independent review remain explicitly open.\n<promise>COMPLETE</promise>"
+}
