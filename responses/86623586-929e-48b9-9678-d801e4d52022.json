@@ -1,0 +1,16 @@
+{
+  "id": "86623586-929e-48b9-9678-d801e4d52022",
+  "requestHash": "1f264de1918909245f764ebb2e1f7916d832570cb8bb5813e244730eb39eda71",
+  "runId": "39492778906",
+  "runAttempt": "1",
+  "head": "e1f7373582987ad84ee3bda80bc0c212ba96c9da",
+  "resultHead": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/internal/StatelessSessionImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/stateless/StatelessEmbeddedArrayTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/stateless/StatelessEmbeddedCollectionTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/stateless/StatelessPolymorphicEmbeddedCollectionTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Approved after independent review and corrections. No remaining blocking findings.\n\nFixed stale collection rows and delete failures after an embeddable subtype change by traversing non-current roles as null, without accessing sibling properties. Fixed null array handling by wrapping a typed empty array without changing the entity or component. Added subtype and array regressions, a warmed READ_WRITE cache check, populated/null wrapper owner assertions, and listener/cache cleanup. Root-entity ownership, protected Reactive signatures, and existing inverse, cache, and uninitialized-wrapper leaf handling are preserved.\n\nBehavioral evidence: subtype RED run 39493566010 had three failures and one passing sibling-insert control. Array RED run 39493952059 had five failures; unchanged-upstream direct-array deletion control run 39494030241 passed. Intermediate candidate run 39495447163 failed three array cases and was corrected, not counted as passing.\n\nFinal reviewed/tested head 6816ccd0ac77ea593c74f686c19336c2e52598a2, tree 8d5a50e1da4ee8c36740c077a918ae2960f0fea9. Actions run 39496386848 passed compilation, testClasses, and repository formatChecks with JDK 25/H2: ./gradlew hibernate-core:test --tests 'org.hibernate.orm.test.stateless.*' -Pdb=h2 formatChecks. XML reports 122 discovered, 119 passed, three expected MySQL/MariaDB-only skips, zero failures/errors; all 20 new/expanded regression invocations passed. Tested-tree metadata is exact and verification patch is empty. Full database matrix and Hibernate Reactive integration remain untested and deferred.\n\n<promise>COMPLETE</promise>"
+}
