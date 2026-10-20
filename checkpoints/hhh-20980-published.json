@@ -1,0 +1,123 @@
+{
+  "stage": "Published and ready for review",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "finalBase": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+  "red": {
+    "run": 39430472963,
+    "sha": "bdb3b97390ce3104e5c94639bc853819b738ce5d",
+    "tree": "1da371feede029ae57095e46646ac6b58a726685",
+    "tests": 11,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "controlsPassed": 10,
+    "expectedFailure": "explicitFalseDisablesInnerJoinLocking: expected false, actual true",
+    "verifiedPatchBytes": 0
+  },
+  "green": {
+    "run": 39431264872,
+    "sha": "7a8b328267c1e2ea8d30e21b9330ec49dc2332f4",
+    "tree": "05dfae3dd4cd0e65a9f18a4a211e5724e517ce0b",
+    "tests": 134,
+    "passed": 128,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6,
+    "skips": "SybaseSkipLockedRenderingTest requires Sybase; H2 run",
+    "regressions": 11,
+    "regressionSkips": 0,
+    "formatChecks": "passed",
+    "verifiedPatchBytes": 0
+  },
+  "refreshedGreen": {
+    "run": 39446578207,
+    "tests": 134,
+    "passed": 128,
+    "skipped": 6,
+    "failures": 0,
+    "errors": 0,
+    "formatChecks": "passed",
+    "verifiedPatchBytes": 0
+  },
+  "exactHeadResult": {
+    "run": 39447666665,
+    "head": "4e60051989907278984b4e94d25a18820e4769e1",
+    "tree": "b34a11726e3a3dd0385bee52cdd94e84d414d01e",
+    "tests": {
+      "tests": 134,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 6
+    },
+    "formatChecks": "passed",
+    "verifiedPatchBytes": 0
+  },
+  "review": {
+    "run": 39448561257,
+    "conclusion": "success",
+    "responseConsumed": true,
+    "extractionConsumed": true,
+    "reviewId": 5587544507,
+    "reviewState": "COMMENTED",
+    "noFindings": true,
+    "workPrDraft": false
+  },
+  "fork": {
+    "repository": "xfocus3/hibernate-orm",
+    "branch": "HHH-20980-parameterized-inner-join-locking",
+    "head": "5505f690276865f0f90f5a8ed6f88b21c96e64f6",
+    "base": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+    "tree": "b34a11726e3a3dd0385bee52cdd94e84d414d01e",
+    "files": 3,
+    "commits": 1
+  },
+  "licenseTailExact": true,
+  "activeHandoff": false,
+  "officialPRCreated": true,
+  "official": {
+    "url": "https://github.com/hibernate/hibernate-orm/pull/13728",
+    "number": 13728,
+    "head": "5505f690276865f0f90f5a8ed6f88b21c96e64f6",
+    "base": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+    "state": "open",
+    "draft": false,
+    "title": "HHH-20980 Preserve parameterized inner-join locking metadata",
+    "maintainerCanModify": false,
+    "files": 3,
+    "commits": 1,
+    "sanitizedBodyPreserved": true,
+    "licenseTailExact": true,
+    "contributionTasksChecked": 2,
+    "checks": [
+      {
+        "name": "📋 Build reports",
+        "status": "in_progress",
+        "conclusion": null
+      },
+      {
+        "name": "Contribution rules",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "Quarkus",
+        "status": "completed",
+        "conclusion": "skipped"
+      },
+      {
+        "name": "Jenkins CI (hibernate-orm-pipeline)",
+        "status": "in_progress",
+        "conclusion": null
+      }
+    ]
+  },
+  "jira": {
+    "key": "HHH-20980",
+    "type": "Bug",
+    "status": "Waiting for review",
+    "assigned": false,
+    "checkedAt": "2026-10-20T15:41:38Z"
+  },
+  "ownershipComplete": true,
+  "completedAt": "2026-10-20T15:42:00Z"
+}
