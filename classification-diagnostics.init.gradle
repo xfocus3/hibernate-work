@@ -1,0 +1,12 @@
+gradle.projectsEvaluated {
+    def documentation = gradle.rootProject.project(':documentation')
+    def diagnostics = documentation.tasks.register('printClassificationDiagnostics') {
+        doLast {
+            def report = documentation.layout.buildDirectory.file('orm/reports/classification-validation.txt').get().asFile
+            println 'CLASSIFICATION_DIAGNOSTICS_BEGIN'
+            if (report.exists()) { println report.text } else { println 'Classification report missing' }
+            println 'CLASSIFICATION_DIAGNOSTICS_END'
+        }
+    }
+    documentation.tasks.named('validateClassifications') { finalizedBy(diagnostics) }
+}
