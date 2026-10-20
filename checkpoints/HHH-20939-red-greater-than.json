@@ -1,0 +1,27 @@
+{
+  "sha": "94d6931f4eed5b297edd1f3701702d1e9baf451e",
+  "run": 39393787966,
+  "attempt": 1,
+  "result": "Expected compile-time failure: incompatible equality constraints ChronoLocalDate,LocalDate in greaterThan(SingularAttribute<Book,LocalDate>,LocalDate). Runtime tests did not execute.",
+  "sourceTree": "a1dfbbef4191ec3244fbb36cc43e992d63d31342",
+  "testedTree": "a1dfbbef4191ec3244fbb36cc43e992d63d31342",
+  "formatterChanges": false,
+  "command": [
+    "./gradlew",
+    "--no-daemon",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.restriction.RestrictionTest.testLocalDateGreaterThan",
+    "-Pdb=h2"
+  ],
+  "next": {
+    "run": 39394312706,
+    "sha": "c60cf972e0c485a158603c28d55d34d68ef5c698",
+    "state": "pending exact-source GREEN verification"
+  },
+  "implementation": {
+    "run": 39393372027,
+    "request": "857e1aad-3b17-43da-9d35-0dfdce53828d",
+    "expiresAt": "2026-10-20T09:13:09.582Z"
+  }
+}
