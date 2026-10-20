@@ -1,0 +1,14 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:testClasses",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.temporal.Temporal*",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify temporal collection key metadata and neighboring temporal behavior on H2, including inferred keys and history-table controls. Native dialect execution and full database matrix remain deferred to upstream CI."
+}
