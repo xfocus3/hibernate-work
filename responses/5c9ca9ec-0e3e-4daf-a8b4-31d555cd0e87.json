@@ -1,0 +1,11 @@
+{
+  "id": "5c9ca9ec-0e3e-4daf-a8b4-31d555cd0e87",
+  "requestHash": "67dd1cc9e4ff184afbd56e7391a76eefb59532b81ebb3873580bc559e23d1db5",
+  "runId": "39509122246",
+  "runAttempt": "1",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Implementation is blocked by interrupted assistant execution. No GitHub permission denial was identified. No production fix, completed implementation, or successful resume is claimed. A test-only diagnostic commit is preserved at 7918b45c01f5a1e530a1b418c934f551e7d4dd5c on diagnostic/hhh-20755-conflict-target-red, tree 78d837b8847000a1975f1e42f3a2e3d5103bb091. Focused verification https://github.com/xfocus3/hibernate-work/actions/runs/39509602666 executed one H2 regression with one failure and zero skips: SemanticException: Could not interpret path expression 'id', in SemanticQueryBuilder.visitConflictClause. The artifact records the exact tested tree above. GREEN, criteria coverage, formatting verification and independent review remain incomplete. This blocked response leaves the implementation result at its original upstream head; diagnostic test code is not applied as a completed fix. Reconcile terminal workflow status and supported recovery metadata before any later authorized resumption."
+}
