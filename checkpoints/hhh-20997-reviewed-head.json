@@ -1,0 +1,29 @@
+{
+  "issue": "HHH-20997",
+  "workPullRequest": 21,
+  "head": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "tree": "8d5a50e1da4ee8c36740c077a918ae2960f0fea9",
+  "review": {
+    "run": "39492778906",
+    "reviewId": 5591708333,
+    "requestConsumed": true,
+    "extractionConsumed": true,
+    "approval": "No blocking findings after corrections",
+    "terminal": "failure at Mark PR ready; remains draft"
+  },
+  "focusedVerification": {
+    "run": "39496386848",
+    "status": "success",
+    "tests": 122,
+    "passed": 119,
+    "skipped": 3,
+    "failures": 0,
+    "errors": 0,
+    "format": "passed"
+  },
+  "currentHeadGate": {
+    "run": "39497492508",
+    "status": "in_progress"
+  },
+  "next": "Verify current-head gate, then resume existing review trigger if not automatically resumed. Do not bypass draft gate."
+}
