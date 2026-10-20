@@ -1,0 +1,11 @@
+{
+  "id": "b571759c-d982-4d92-a4cc-8b936f637478",
+  "requestHash": "541ee9a68733979386a3eb32ed707fab11de6fa29804f02818db499d1c0b343d",
+  "runId": "39409400014",
+  "runAttempt": "1",
+  "head": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+  "resultHead": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Independent review completed against the original review prompt and clean snapshot. Verdict: approve; no findings. The two-file diff satisfies HHH-20987. ImplicitResultClassBuilder compares its sole immutable suppliedResultClass with matching hashCode, preserves distinct classes, and safely returns itself as cacheKeyInstance. Existing mapping-collection and query-space snapshots remain intact. Parameter-identity handling is unchanged; this does not conflate HHH-20443. Six integration tests verify correct results, reuse across separately created queries and changed values, Long/Integer discrimination, and inferred/explicit/named/entity controls. Contribution/classification guidance was read; no API/SPI boundary change. CONTEXT.md and .sandcastle/CODING_STANDARDS.md are absent from the checkout. Reporter diagnosis/reproduction is explicitly attributed in the prepared description. Independently inspected RED XML (correct IDs, expected one miss versus actual three), GREEN XML, and both focused artifact sets (110 tests, 109 passed, one MySQL-only skip, zero failures/errors; all six new tests pass). Exact-head run 39408596691 binds reviewed commit to tree 860ab7a9d565171f7cd8541ab3284ad780ebe4ee with empty verified.patch. Its job 118580588884 log independently confirms JDK 25, main/test compilation, scoped H2 tests and formatChecks, BUILD SUCCESSFUL. Checkout clean and diff --check passes. Full upstream build, non-H2 matrix, and classification validators were not run. No edits or commit warranted, no review threads required replies. <promise>COMPLETE</promise>"
+}
