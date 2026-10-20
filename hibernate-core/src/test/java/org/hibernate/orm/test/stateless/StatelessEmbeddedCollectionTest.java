@@ -4,14 +4,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.hibernate.Hibernate;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.cfg.AvailableSettings;
 import org.hibernate.event.spi.EventType;
 import org.hibernate.event.spi.PostCollectionRecreateEventListener;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.JiraKey;
+import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import jakarta.persistence.CollectionTable;
 import jakarta.persistence.ElementCollection;
@@ -29,12 +36,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 		StatelessEmbeddedCollectionTest.Employee.class,
 		StatelessEmbeddedCollectionTest.ProfileOwner.class
 })
-@SessionFactory
+@ServiceRegistry(settings = @Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "true"))
+@SessionFactory(generateStatistics = true)
 @JiraKey("HHH-20997")
 class StatelessEmbeddedCollectionTest {
 	@AfterEach
 	void cleanup(SessionFactoryScope scope) {
 		scope.dropData();
+		scope.getSessionFactory().getCache().evictAllRegions();
 	}
 
 	@Test
@@ -117,22 +126,59 @@ class StatelessEmbeddedCollectionTest {
 	}
 
 	@Test
-	void testCollectionEventOwner(SessionFactoryScope scope) {
+	void testUpdateInvalidatesCollectionCache(SessionFactoryScope scope) {
+		final var owner = new ProfileOwner();
+		owner.profile.tags.add( "original" );
+		scope.inTransaction( session -> session.persist( owner ) );
+		scope.inTransaction( session -> assertThat( session.find( ProfileOwner.class, owner.id ).profile.tags )
+				.containsExactly( "original" ) );
+		final var factory = scope.getSessionFactory();
+		assertThat( factory.getCache().containsCollection( ProfileOwner.class.getName() + ".profile.tags", owner.id ) )
+				.isTrue();
+		factory.getStatistics().clear();
+		scope.inTransaction( session -> assertThat( session.find( ProfileOwner.class, owner.id ).profile.tags )
+				.containsExactly( "original" ) );
+		assertThat( factory.getStatistics().getSecondLevelCacheHitCount() ).isEqualTo( 1 );
+		owner.profile.tags = new ArrayList<>( List.of( "updated" ) );
+		scope.inStatelessTransaction( session -> session.update( owner ) );
+		scope.inTransaction( session -> assertThat( session.find( ProfileOwner.class, owner.id ).profile.tags )
+				.containsExactly( "updated" ) );
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void testCollectionEventOwner(boolean nullComponent, SessionFactoryScope scope) {
 		final var employee = new Employee();
-		employee.skillSet.skills.add( new Skill( "Java", 3 ) );
+		if ( nullComponent ) {
+			employee.skillSet = null;
+		}
+		else {
+			employee.skillSet.skills.add( new Skill( "Java", 3 ) );
+		}
 		final var owners = new ArrayList<Object>();
 		final var collectionOwners = new ArrayList<Object>();
 		final var registry = scope.getSessionFactory().getEventListenerRegistry();
+		final var group = registry.getEventListenerGroup( EventType.POST_COLLECTION_RECREATE );
+		final var originalListeners = new ArrayList<PostCollectionRecreateEventListener>();
+		group.listeners().forEach( originalListeners::add );
 		final PostCollectionRecreateEventListener listener = event -> {
 			if ( event.getAffectedOwnerOrNull() == employee ) {
+				assertThat( event.getCollection().wasInitialized() ).isTrue();
+				assertThat( event.getCollection().empty() ).isEqualTo( nullComponent );
 				owners.add( event.getAffectedOwnerOrNull() );
 				collectionOwners.add( event.getCollection().getOwner() );
 			}
 		};
-		registry.getEventListenerGroup( EventType.POST_COLLECTION_RECREATE ).appendListener( listener );
-		scope.inStatelessTransaction( session -> session.insert( employee ) );
-		assertThat( owners ).containsExactly( employee );
-		assertThat( collectionOwners ).containsExactly( employee );
+		group.appendListener( listener );
+		try {
+			scope.inStatelessTransaction( session -> session.insert( employee ) );
+			assertThat( owners ).containsExactly( employee );
+			assertThat( collectionOwners ).containsExactly( employee );
+		}
+		finally {
+			registry.setListeners( EventType.POST_COLLECTION_RECREATE,
+					originalListeners.toArray( PostCollectionRecreateEventListener[]::new ) );
+		}
 	}
 
 	private static Employee seed(SessionFactoryScope scope) {
@@ -188,6 +234,7 @@ class StatelessEmbeddedCollectionTest {
 		NestedSkillSet skillSet = new NestedSkillSet();
 
 		@ElementCollection
+		@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 		List<String> tags = new ArrayList<>();
 	}
 

@@ -1187,9 +1187,9 @@ public class StatelessSessionImpl
 			final var embeddable = attribute.asEmbeddedAttributeMapping().getEmbeddableTypeDescriptor();
 			final var subtype = value == null ? null : embeddable.findSubtypeBySubclass( value.getClass().getName() );
 			embeddable.forEachAttributeMapping( subAttribute -> {
-				if ( subtype == null || subtype.declaresAttribute( subAttribute ) ) {
-					forEachOwnedCollection( entity, value, key, subAttribute, action );
-				}
+				// Treat attributes of other subtypes as null to remove rows left by a subtype change.
+				final Object subContainer = subtype == null || subtype.declaresAttribute( subAttribute ) ? value : null;
+				forEachOwnedCollection( entity, subContainer, key, subAttribute, action );
 			} );
 		}
 	}
@@ -1197,6 +1197,12 @@ public class StatelessSessionImpl
 	private PersistentCollection<?> wrapOrInstantiateCollection(
 			Object entity, Object key, Object value, CollectionPersister descriptor) {
 		if ( value == null ) {
+			if ( descriptor.isArray() ) {
+				// Initializing an empty array holder writes through the owner's property accessor.
+				// Wrap an empty array instead, without changing the entity or its component.
+				return wrap( descriptor,
+						descriptor.getCollectionSemantics().instantiateWithElements( 0, descriptor, List.of() ), entity );
+			}
 			final var collection = instantiateEmpty( key, descriptor );
 			collection.initializeEmptyCollection( descriptor );
 			collection.setOwner( entity );
