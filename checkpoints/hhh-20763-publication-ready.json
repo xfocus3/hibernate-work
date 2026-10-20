@@ -1,0 +1,27 @@
+{
+  "issue": "HHH-20763",
+  "status": "publication-ready",
+  "workPr": "https://github.com/xfocus3/hibernate-work/pull/14",
+  "workHead": "d91c2f681d4b3674d8145d5320f98dc1b75d2c04",
+  "forkBranch": "HHH-20763-primary-key-foreign-key",
+  "forkHead": "b4c3da8724b7d01ee55871930827c2075c4daebd",
+  "tree": "c09f4421518e7c8180e7a7c4d598403552ee2fa1",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "verificationRun": "https://github.com/xfocus3/hibernate-work/actions/runs/39422930218",
+  "reviewRun": "https://github.com/xfocus3/hibernate-work/actions/runs/39423738013",
+  "review": "https://github.com/xfocus3/hibernate-work/pull/14#pullrequestreview-5585142621",
+  "testCounts": {
+    "tests": 58,
+    "passed": 56,
+    "skipped": 2,
+    "failures": 0,
+    "errors": 0,
+    "newTestsPassed": 8
+  },
+  "limits": [
+    "Full upstream build not run",
+    "Non-H2 databases not run",
+    "Existing container resolution semantics unchanged"
+  ],
+  "officialPrCreated": false
+}
