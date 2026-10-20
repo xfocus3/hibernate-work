@@ -1196,9 +1196,13 @@ public class StatelessSessionImpl
 
 	private PersistentCollection<?> wrapOrInstantiateCollection(
 			Object entity, Object key, Object value, CollectionPersister descriptor) {
-		return value == null
-				? instantiateEmpty( key, descriptor )
-				: wrap( descriptor, value, entity );
+		if ( value == null ) {
+			final var collection = instantiateEmpty( key, descriptor );
+			collection.initializeEmptyCollection( descriptor );
+			collection.setOwner( entity );
+			return collection;
+		}
+		return wrap( descriptor, value, entity );
 	}
 
 	// Hibernate Reactive calls this
