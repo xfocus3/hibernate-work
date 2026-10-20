@@ -1,0 +1,16 @@
+{
+  "candidate": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+  "initialRun": 39396698744,
+  "baselineDiagnosticRevision": "473f12f66816080cda319d571d0a53c291fce1ba",
+  "baselineRun": 39397986606,
+  "candidateDiagnosticRevision": "aa63acadcf0bbf23fad9a6ea6cc11760d1476052",
+  "candidateRun": 39398041049,
+  "result": "Both fail with identical normalized diagnostic fields",
+  "diagnostics": 5609,
+  "forbiddenCategoryDependencies": 5606,
+  "unclassifiedDeclarations": 1,
+  "internalIncubation": 2,
+  "changedPackageFindings": 0,
+  "normalization": "Remove Actions timestamps/BOM and interleaved build-progress text; compare title, count and every diagnostic type, source, target, edge, roles, message, path, allowlist and remediation in order.",
+  "scriptsExcludedFromFinalCandidate": true
+}
