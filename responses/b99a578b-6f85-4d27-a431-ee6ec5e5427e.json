@@ -1,0 +1,11 @@
+{
+  "id": "b99a578b-6f85-4d27-a431-ee6ec5e5427e",
+  "requestHash": "38089ff30691832cc4f04b8f06069afb5ba67d4bbf1e40bfb725d4da8742bfa3",
+  "runId": "39426133377",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 15,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: qualify and correct the nested collection refresh loading gap.\\n\\nThe likely change belongs in the collection-loading layer, with focused hibernate-core refresh tests. CascadingActions.REFRESH intentionally avoids old entity recursion; LoaderSelectBuilder joins only the first plural cascade, leaving a nested bag to SelectEagerCollectionInitializer. AbstractNonJoinCollectionInitializer reuses existing initialized collections without scheduling a secondary load. A child without a result row cannot be refreshed by EntityInitializerImpl. This is a source-traced hypothesis, not runtime proof.\\n\\nTwo-way: an internal loader correction is reversible and need not change public contracts or persisted formats. Marián Ligocký supplied the attached three-entity H2 reproducer. Reported older-version outcomes remain reporter results.\\n\\nEstablish RED first on current main 4cabe417c868b343fa458a6e42b1da7a4813ec52. Stop if it does not reproduce or requires broad redesign. Preserve existing shallow one-query tests, managed identity, lazy cascade semantics, and no-cascade boundaries. Do not revert merged PR #12265 or reuse the rejected behavior from closed PR #13160.\\n\\nUse the smallest responsible-loader fix, current maintainer checklist, focused JDK 25/H2 regression and refresh neighbors plus formatChecks. No full-matrix claim. No duplicates; no runtime tests or code changes during exploration. The exact repair and runtime verification remain open implementation work.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
