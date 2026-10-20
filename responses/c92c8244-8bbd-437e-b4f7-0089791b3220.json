@@ -1,0 +1,11 @@
+{
+  "id": "c92c8244-8bbd-437e-b4f7-0089791b3220",
+  "requestHash": "04a4077ccbebe0a6fb4a34cd43a7fadeaa30882a152f756eca9f2f55e2dd6c68",
+  "runId": "39473889812",
+  "runAttempt": "1",
+  "head": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "resultHead": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Final exact-head review accepted with no new findings or changes. The previously reviewed subtype projection fix and regression cleanup remain sound; no unresolved human review threads require replies. Identifier/version/discriminator handling, formulas, inherited state, primary-table filtering, selection deduplication and joined-inheritance behavior remain preserved.\\n\\nExact-head JDK 25/H2 run 39473000124 passed all 46 tests across nine collection-fetch pagination classes, with zero failures, errors or skips, plus Java compilation and repository formatChecks. Its source commit is e0ffd4db80e5af4a7ff1176e715fd63a769bf88f, source and tested tree are 2b7b6461164b2306f969f0cd29f52d5d8fd8676d, and the verification patch is empty. The current-head gate passed.\\n\\nThe unrestricted Video-root test covers descendant projection; the ID-restricted PremiumVideo lookup covers inherited state only. The separate existing unrestricted leaf discriminator-filtering defect is outside this fix. PostgreSQL/live-database checks and the broader upstream CI matrix remain deferred. Approved within this focused scope.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
