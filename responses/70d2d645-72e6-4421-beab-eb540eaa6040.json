@@ -1,0 +1,14 @@
+{
+  "id": "70d2d645-72e6-4421-beab-eb540eaa6040",
+  "requestHash": "665f4b7a1ae2c1a4e252051d331364af4ed67c7f9e7386620f1a9257ddda6f01",
+  "runId": "39411543935",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "5e17db4d748e59c16ae06443d09539a26c454d79",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/internal/StatelessSessionImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/stateless/StatelessSessionOptionalOneToOneTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented the bounded materialization regression in StatelessSessionImpl. The existing protected three-argument internalLoadGet hook now calls find, retaining its load-count bracket. internalLoad still throws EntityNotFoundException for a missing mandatory row, while nullable results reach the association initializer. Public get/find contracts and the separate lazy-proxy path are unchanged. The Reactive hook signature and dispatch are preserved; asynchronous Reactive behavior was inspected but not executed.\n\nMarkus Westergren supplied the HHH-21015 reproduction and get/find diagnosis. The test adapts the shared-primary-key case and adds mandatory missing-row behavior, explicit NotFound(IGNORE)/NotFound(EXCEPTION), existing-row controls, and public get/find root behavior.\n\nExact verification:\n- RED ca5028e46841fe8e86d756be4f61dd8214df8ff3, run 39412502400: 3 tests, 1 expected failure (stateless missing detail), 2 passing controls, no skips. An earlier initial fixture used shared setup and suffered a cascading control failure after the test extension rebuilt the factory; per-test setup corrected that before accepting RED evidence.\n- First GREEN 305692c007392b83dc700dcccd441cd76ceb893d, run 39412975056: all 3 tests passed, no skips.\n- Expanded baseline 3f15239293c1c57779392d60563cba69eeed5dbb, run 39413770201: 9 tests, exactly 3 expected failures (optional missing detail, NotFound IGNORE, and wrong exception type for NotFound EXCEPTION); 6 controls passed.\n- Expanded GREEN 828fb057c2adc5e41cbdd0cb7c6b308ed55f2546, run 39413847308: 251 tests across 53 suites, zero failures/errors, 3 existing skips; all 9 new tests passed. JDK 25/H2, hibernate-core:test --tests org.hibernate.orm.test.stateless.* --tests org.hibernate.orm.test.notfound.* -Pdb=h2 formatChecks. Production/test compilation and formatting checks passed. verified.patch was empty and tested tree was 88311e50ca1e30a94429680a469d8406f0f9d186.\n\nFinal commit 5e17db4d748e59c16ae06443d09539a26c454d79 has that exact tested tree, one parent 4cabe417c868b343fa458a6e42b1da7a4813ec52, and no skip-CI marker. Only StatelessSessionImpl and the new regression test differ. No full build, non-H2 databases, or Hibernate Reactive runtime checks were run. No signatures or classification annotations changed. The workflow still owns task-branch publication and independent review.\n\n<promise>COMPLETE</promise>"
+}
