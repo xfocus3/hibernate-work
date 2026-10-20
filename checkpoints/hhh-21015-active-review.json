@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "issue": 11,
+  "pr": 12,
+  "runId": "39415568862",
+  "runAttempt": "1",
+  "requestId": "2917423b-e5d6-44d2-8070-6cc800be96f2",
+  "requestHash": "118530389b0d50d4e87323c46e481929cbf6935c720d6eeea6603c058efdf03b",
+  "stageId": "5315530b-3788-490f-8a1f-3dabf706aa2c",
+  "stageHash": "22cc0e6b0c5d4761515cd70469817daae2e1ee9a6bef2829f19ee54cd7b817d3",
+  "controllerHead": "feae9f73b6dd185b0ee2886f687e64a68c28b512",
+  "source": "5e17db4d748e59c16ae06443d09539a26c454d79",
+  "tree": "88311e50ca1e30a94429680a469d8406f0f9d186",
+  "expiresAt": "2026-10-20T12:17:53.932Z",
+  "verificationRun": "39414868269",
+  "verificationStatus": "success",
+  "state": "Independent review is reading the original review prompt, source and exact-head verification artifacts. No review response published yet."
+}
