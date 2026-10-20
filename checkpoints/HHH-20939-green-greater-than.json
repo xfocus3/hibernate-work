@@ -1,0 +1,14 @@
+{
+  "sha": "c60cf972e0c485a158603c28d55d34d68ef5c698",
+  "run": 39394312706,
+  "attempt": 1,
+  "tests": 1,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "sourceTree": "c8261ef1560f86b07e914299ae71cc5e220f7c97",
+  "testedTree": "c8261ef1560f86b07e914299ae71cc5e220f7c97",
+  "formatterChanges": false,
+  "scope": "Single reported LocalDate greaterThan regression only. No wider-suite claim.",
+  "next": "Expand comparable range and restriction boundary coverage; test-only checkpoint 3dc3c0b2d1775f7ba92e14d99b0f6010500b81e1."
+}
