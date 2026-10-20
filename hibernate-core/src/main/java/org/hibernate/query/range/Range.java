@@ -73,7 +73,7 @@ public interface Range<U> {
 	 * lower bound.
 	 */
 	@Nonnull
-	static <U extends Comparable<U>> Range<U> greaterThan(@Nonnull U bound) {
+	static <U extends Comparable<? super U>> Range<U> greaterThan(@Nonnull U bound) {
 		return new LowerBound<>( bound, true );
 	}
 

@@ -222,7 +222,7 @@ public interface Restriction<X> {
 	 * @see Range#greaterThan(Comparable)
 	 */
 	@Nonnull
-	static <T, U extends Comparable<U>> Restriction<T> greaterThan(@Nonnull SingularAttribute<T, U> attribute, @Nonnull U lowerBound) {
+	static <T, U extends Comparable<? super U>> Restriction<T> greaterThan(@Nonnull SingularAttribute<T, U> attribute, @Nonnull U lowerBound) {
 		return restrict( attribute, Range.greaterThan( lowerBound ) );
 	}
 
