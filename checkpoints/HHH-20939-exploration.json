@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "issue": 7,
+  "upstream": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "runId": "39392674504",
+  "runAttempt": "1",
+  "stageId": "f40f0fb7-042f-4cf6-823c-83833f4535c8",
+  "stageInputHash": "e63ff88a55dc17984ef7bbcec29f7250d268925a7ac3b4ed5de2a340c8e32fbd",
+  "artifacts": {
+    "input": 12250033317,
+    "exploration": 12250147938,
+    "extraction": 12250088597
+  },
+  "exchanges": [
+    {
+      "id": "fd5a82e5-46da-43ca-8048-a58fe08a4929",
+      "requestHash": "934b06dcb6a94ffc03bd12e06a8dabc62f1ea55866752dbc9f0ad931b6bcceb6",
+      "runId": "39392674504",
+      "runAttempt": "1",
+      "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+      "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+      "changedPaths": [],
+      "status": "completed",
+      "stdout": "Group: #7 stands alone. The same overly restrictive comparable bound is repeated through the restriction-to-range construction chain.\n\neasy-call: broaden the comparable bounds to accept a supertype comparator while retaining type safety. Restriction.java contains six affected factories, Range.java six affected factories, and LowerBound, UpperBound and Interval three internal bounds. Path itself needs no change. The underlying HibernateCriteriaBuilder already accepts Comparable<? super Y>.\n\nThis is a two-way, localized correction of an overly narrow generic constraint: runtime predicates, schema and erased JVM descriptors remain unchanged; generic source signatures widen and must be reviewed. Both public interfaces are incubating. Use Comparable<? super U> consistently across the five files, without casts, overloads or new abstractions.\n\nExisting RestrictionTest exercises integer and string values but lacks LocalDate. First add a typed LocalDate greaterThan regression and observe its expected compilation failure in Actions. Then apply the minimal coherent fix and verify runtime results. Expand coverage to inclusive/exclusive comparisons and open/closed ranges with boundary dates; explicitly target Range<LocalDate> because unconstrained inference can otherwise choose ChronoLocalDate and conceal the bug. Keep the original Integer/String controls. Use focused H2 tests, formatChecks, and the applicable classification report/validation tasks for changed generic signatures. Do not claim the full suite or other databases.\n\nVerified from source at 4cabe417c868b343fa458a6e42b1da7a4813ec52; compilation and runtime behavior have not yet been executed. No duplicate in this batch. Remaining implementation checks: genuine RED/GREEN results, complete bound coverage, boundary behavior and classification output.\n<promise>COMPLETE</promise>"
+    },
+    {
+      "id": "ce0b79ad-c0a9-4b3c-865a-edf9f3dcf07a",
+      "requestHash": "7a367d7d8c89acf99447098de7f07e1f76557de76a7e3ff46665a4e57631d352",
+      "runId": "39392674504",
+      "runAttempt": "1",
+      "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+      "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+      "changedPaths": [],
+      "status": "completed",
+      "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 7,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: the restriction/range layer requires Comparable<U>, while LocalDate compares through ChronoLocalDate and HibernateCriteriaBuilder already accepts Comparable<? super Y>.\\n\\nThe localized change touches Restriction.java, Range.java and their three package-private bound records: 15 generic bounds in five production files. Path needs no change. Existing erased descriptors, runtime predicates and schema remain unchanged; public generic signatures widen and need compatibility review. Both interfaces are incubating.\\n\\nTwo-way door: a narrowly scoped generic-constraint correction with no new overload, type, schema or runtime algorithm. Preserve comparable type safety using Comparable<? super U>, without casts or abstractions.\\n\\nRestrictionTest supplies the integration seam but currently covers String/Integer, not LocalDate. First reproduce typed LocalDate greaterThan compilation failure in Actions; then apply the coherent fix and validate runtime results. Extend boundary coverage to inclusive/exclusive comparisons, open/closed intervals and typed Range<LocalDate> targets, retaining existing controls. An unconstrained Range factory invocation may infer ChronoLocalDate and miss the bug.\\n\\nVerified by source inspection at 4cabe417c868b343fa458a6e42b1da7a4813ec52. No duplicate in this batch. Compilation/runtime tests have not run yet. Remaining checks: genuine RED/GREEN evidence, focused H2 tests, formatChecks and applicable classification reports/validation for signature changes.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+    }
+  ],
+  "sourceState": "Clean published upstream commit; no changed files",
+  "next": "Original apply step, then issue implementation stage. Inspect current run and labels before resuming; do not replay side effects.",
+  "testEvidence": []
+}
