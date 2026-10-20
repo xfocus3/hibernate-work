@@ -5,12 +5,16 @@ import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Version;
 import jakarta.persistence.metamodel.SingularAttribute;
+import org.hibernate.query.range.Range;
+import org.hibernate.query.restriction.Restriction;
 import org.hibernate.query.specification.SelectionSpecification;
 import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.Test;
 
+import java.time.LocalDate;
 import java.util.List;
 
 import static org.hibernate.query.Order.asc;
@@ -161,6 +165,93 @@ public class RestrictionTest {
 	}
 
 	@Test
+	@JiraKey( "HHH-20939" )
+	void testLocalDateGreaterThan(SessionFactoryScope scope) {
+		scope.getSessionFactory().getSchemaManager().truncate();
+		final var boundary = LocalDate.of( 2000, 1, 2 );
+		scope.inTransaction( session -> {
+			for ( var date : List.of( boundary.minusDays( 1 ), boundary, boundary.plusDays( 1 ) ) ) {
+				var book = new Book( date.toString(), "Hibernate", 100 );
+				book.publicationDate = date;
+				session.persist( book );
+			}
+		} );
+
+		var publicationDate = scope.getSessionFactory().getJpaMetamodel().findEntityType( Book.class )
+				.getDeclaredSingularAttribute( "publicationDate", LocalDate.class );
+		var books = scope.fromSession( session ->
+				SelectionSpecification.create( Book.class )
+						.restrict( greaterThan( publicationDate, boundary ) )
+						.createQuery( session )
+						.getResultList() );
+		assertEquals( List.of( boundary.plusDays( 1 ) ),
+				books.stream().map( book -> book.publicationDate ).toList() );
+	}
+
+	@Test
+	@JiraKey( "HHH-20939" )
+	void testLocalDateComparisons(SessionFactoryScope scope) {
+		final var boundary = LocalDate.of( 2000, 1, 2 );
+		persistDatedBooks( scope, boundary );
+		var publicationDate = scope.getSessionFactory().getJpaMetamodel().findEntityType( Book.class )
+				.getDeclaredSingularAttribute( "publicationDate", LocalDate.class );
+		final var before = boundary.minusDays( 1 );
+		final var after = boundary.plusDays( 1 );
+
+		assertPublicationDates( scope, Restriction.lessThan( publicationDate, boundary ), before );
+		assertPublicationDates( scope, Restriction.greaterThanOrEqual( publicationDate, boundary ), boundary, after );
+		assertPublicationDates( scope, Restriction.lessThanOrEqual( publicationDate, boundary ), before, boundary );
+		assertPublicationDates( scope, between( publicationDate, before, boundary ), before, boundary );
+		assertPublicationDates( scope, Restriction.notBetween( publicationDate, before, boundary ), after );
+	}
+
+	@Test
+	@JiraKey( "HHH-20939" )
+	void testLocalDateRanges(SessionFactoryScope scope) {
+		final var boundary = LocalDate.of( 2000, 1, 2 );
+		persistDatedBooks( scope, boundary );
+		var publicationDate = scope.getSessionFactory().getJpaMetamodel().findEntityType( Book.class )
+				.getDeclaredSingularAttribute( "publicationDate", LocalDate.class );
+		final var before = boundary.minusDays( 1 );
+		final var after = boundary.plusDays( 1 );
+
+		Range<LocalDate> greater = Range.greaterThan( boundary );
+		Range<LocalDate> greaterOrEqual = Range.greaterThanOrEqualTo( boundary );
+		Range<LocalDate> less = Range.lessThan( boundary );
+		Range<LocalDate> lessOrEqual = Range.lessThanOrEqualTo( boundary );
+		Range<LocalDate> open = Range.open( before, after );
+		Range<LocalDate> closed = Range.closed( before, after );
+		assertPublicationDates( scope, restrict( publicationDate, greater ), after );
+		assertPublicationDates( scope, restrict( publicationDate, greaterOrEqual ), boundary, after );
+		assertPublicationDates( scope, restrict( publicationDate, less ), before );
+		assertPublicationDates( scope, restrict( publicationDate, lessOrEqual ), before, boundary );
+		assertPublicationDates( scope, restrict( publicationDate, open ), boundary );
+		assertPublicationDates( scope, restrict( publicationDate, closed ), before, boundary, after );
+	}
+
+	private static void persistDatedBooks(SessionFactoryScope scope, LocalDate boundary) {
+		scope.getSessionFactory().getSchemaManager().truncate();
+		scope.inTransaction( session -> {
+			for ( var date : List.of( boundary.minusDays( 1 ), boundary, boundary.plusDays( 1 ) ) ) {
+				var book = new Book( date.toString(), "Hibernate", 100 );
+				book.publicationDate = date;
+				session.persist( book );
+			}
+		} );
+	}
+
+	private static void assertPublicationDates(
+			SessionFactoryScope scope, Restriction<Book> restriction, LocalDate... expected) {
+		var books = scope.fromSession( session ->
+				SelectionSpecification.create( Book.class )
+						.restrict( restriction )
+						.createQuery( session )
+						.getResultList() );
+		assertEquals( List.of( expected ),
+				books.stream().map( book -> book.publicationDate ).sorted().toList() );
+	}
+
+	@Test
 	void testPath(SessionFactoryScope scope) {
 		scope.getSessionFactory().getSchemaManager().truncate();
 		scope.inTransaction( session -> {
@@ -295,6 +386,7 @@ public class RestrictionTest {
 		String isbn;
 		String title;
 		int pages;
+		LocalDate publicationDate;
 
 		@ManyToOne
 		Publisher publisher;
