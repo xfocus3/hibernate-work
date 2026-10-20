@@ -1,0 +1,11 @@
+{
+  "id": "d093cb9d-1854-4383-ab3a-3b98242ed2d9",
+  "requestHash": "7adb1ac33f547bc7a93f1e15ff75cff6e3b32b3526086d6faf06365bf391ae4c",
+  "runId": "39429996680",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "HHH-20980 implementation is prepared and focused current-project validation passed, but the workflow cannot complete the next required stage yet. The existing exact-head verifier requires a trusted controller-main verification plan; that specific write was denied and its explicit user approval remains pending. No alternate route was used, no original task branch was pushed, no PR was created, and actual Sandcastle review/extraction has not run.\n\nPreserved baseline: 4cabe417c868b343fa458a6e42b1da7a4813ec52. RED bdb3b97390ce3104e5c94639bc853819b738ce5d / run 39430472963: 11 tests, 1 intended explicit-false failure, 10 controls passed, no errors/skips. GREEN 7a8b328267c1e2ea8d30e21b9330ec49dc2332f4 / run 39431264872: 134 reported tests, 128 passed, 6 expected Sybase-only skips on H2, no failures/errors; all 11 regressions passed. Compilation and formatChecks passed. Tested tree 05dfae3dd4cd0e65a9f18a4a211e5724e517ce0b equals source; verified.patch is empty.\n\nThe candidate commit 6acb9a941268a5906e0e479d6a5bfcdd0011f0fe has that same tree and only the one-line factory fix plus two test classes. It preserves old observable read-wait behavior. No live Altibase or full matrix claim. Resume this issue from the preserved candidate and exact evidence after the required verification-plan approval; do not repeat issue discovery or claim review complete."
+}
