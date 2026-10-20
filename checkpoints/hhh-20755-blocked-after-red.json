@@ -1,0 +1,39 @@
+{
+  "issue": "HHH-20755",
+  "workIssue": "https://github.com/xfocus3/hibernate-work/issues/24",
+  "status": "blocked",
+  "reason": "Assistant execution interruptions; no denied GitHub operation identified.",
+  "upstream": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "implementation": {
+    "runId": "39509122246",
+    "runAttempt": "1",
+    "requestId": "5c9ca9ec-0e3e-4daf-a8b4-31d555cd0e87",
+    "responseCommit": "4a43560650e521233d73d8bde16bb2bc65cdcfcd",
+    "responsePath": "responses/5c9ca9ec-0e3e-4daf-a8b4-31d555cd0e87.json",
+    "consumedAt": "2026-10-20T22:48:23Z",
+    "terminal": "failure",
+    "reasonInLog": "Dot reported the handoff blocked; inspect the response record",
+    "stageArtifactId": 12304583111,
+    "requestArtifactId": 12304363478,
+    "artifactExpiry": "2026-10-27"
+  },
+  "red": {
+    "runId": "39509602666",
+    "commit": "7918b45c01f5a1e530a1b418c934f551e7d4dd5c",
+    "tree": "78d837b8847000a1975f1e42f3a2e3d5103bb091",
+    "branch": "diagnostic/hhh-20755-conflict-target-red",
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skips": 0,
+    "message": "SemanticException: Could not interpret path expression 'id' in SemanticQueryBuilder.visitConflictClause"
+  },
+  "result": {
+    "productionFix": false,
+    "green": false,
+    "independentReview": false,
+    "workPr": null,
+    "implementationBranchRemoteHead": null
+  },
+  "recovery": "Do not replace or replay the blocked response. Before any later authorized resumption, reconcile terminal run attempt, controller sources, work issue, absent remote task branch and competing PRs. Original supported workflow rerun creates a new request identity; respond only to the new live request after checking metadata. A recovery journal containing the blocked response remains blocked by validateDotResponse. No rerun or new issue has been started."
+}
