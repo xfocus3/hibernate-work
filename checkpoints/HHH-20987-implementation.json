@@ -1,0 +1,18 @@
+{
+  "issue": 9,
+  "runId": "39405542565",
+  "runAttempt": "1",
+  "sourceHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "controllerHead": "d90465729b233322d3cc0e00d563f4f9d26edcb5",
+  "stageId": "fcb0376a-5bbc-4fd7-af90-42ba9e5d9ced",
+  "stageInputHash": "3c32cbab6e27fc3cd7a3c2c628adf7f7b226802bd024e3eaad19e57275c14ee3",
+  "stageArtifactId": 12255604660,
+  "requestId": "ee3519f7-f0d9-40c9-a9f4-0f674d997884",
+  "requestHash": "6355aabbc942b7f7fa1f03f9ed76b46809a8e2b4d5c0e981f2244e266d57be3c",
+  "requestArtifactId": 12255434984,
+  "expiresAt": "2026-10-20T10:52:59.354Z",
+  "branch": "agent/issue-9-hhh-20987-reuse-native-select-plans-for-identical-",
+  "redCommit": "94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c",
+  "redRun": 39406008008,
+  "status": "waiting-for-focused-red-result"
+}
