@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.dialect.unit.locking.*",
+    "--tests",
+    "org.hibernate.orm.test.jpa.lock.QueryLockingManagedEntityTest",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-20980: verify the parameterized locking factory regression and legacy compatibility, all locking-unit neighbors and managed-query locking behavior on H2, plus project compilation and formatting. This is focused validation, not an Altibase live-database test or full upstream matrix."
+}
