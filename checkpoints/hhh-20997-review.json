@@ -1,0 +1,29 @@
+{
+  "issue": "HHH-20997",
+  "workPullRequest": 21,
+  "stage": "independent-review",
+  "runId": "39492778906",
+  "runAttempt": "1",
+  "requestId": "86623586-929e-48b9-9678-d801e4d52022",
+  "requestHash": "1f264de1918909245f764ebb2e1f7916d832570cb8bb5813e244730eb39eda71",
+  "expiresAt": "2026-10-20T21:18:40.871Z",
+  "head": "e1f7373582987ad84ee3bda80bc0c212ba96c9da",
+  "tree": "9dd3d2a6c6d707128005429491a687af3f9af983",
+  "verification": {
+    "runId": "39491793601",
+    "conclusion": "success",
+    "tests": 111,
+    "passed": 108,
+    "skipped": 3,
+    "failures": 0,
+    "errors": 0,
+    "format": "passed",
+    "database": "H2",
+    "jdk": "25"
+  },
+  "limitations": [
+    "MySQL-only tests skipped by dialect guards",
+    "Full database matrix and Reactive integration deferred"
+  ],
+  "next": "Complete independent review and respond to the current request; verify consumption and extraction."
+}
