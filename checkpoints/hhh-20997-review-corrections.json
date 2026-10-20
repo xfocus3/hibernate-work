@@ -1,0 +1,39 @@
+{
+  "issue": "HHH-20997",
+  "workPullRequest": 21,
+  "reviewRun": "39492778906",
+  "requestId": "86623586-929e-48b9-9678-d801e4d52022",
+  "expiresAt": "2026-10-20T21:18:40.871Z",
+  "inputHead": "e1f7373582987ad84ee3bda80bc0c212ba96c9da",
+  "candidateHead": "a0e21265f5ab5dbd98c998d7ed75a05d9ef00ddd",
+  "candidateTree": "587ba40e0767e41d658886e249e4b8920082ba5a",
+  "findings": [
+    "Subtype replacement must remove collections from non-current subtype roles",
+    "Null array wrappers must not write through owner property access"
+  ],
+  "regressions": [
+    {
+      "run": "39493566010",
+      "tests": 4,
+      "failed": 3,
+      "passed": 1
+    },
+    {
+      "run": "39493952059",
+      "tests": 5,
+      "failed": 5
+    },
+    {
+      "run": "39494030241",
+      "scope": "Unchanged-upstream direct null-array delete control",
+      "tests": 1,
+      "passed": 1
+    }
+  ],
+  "verification": {
+    "run": "39495447163",
+    "status": "in_progress",
+    "scope": "JDK25/H2 stateless package, compilation and repository formatChecks"
+  },
+  "next": "Inspect exact candidate verification, obtain independent final approval, respond before expiry and verify consumption."
+}
