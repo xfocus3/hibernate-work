@@ -1,0 +1,11 @@
+{
+  "id": "fbd59556-66d0-4668-9bf8-fe8ad03950d2",
+  "requestHash": "6ba875803dc921406176d7db116480fbd2749fa7323ee1c42eb4a4dd26f3874a",
+  "runId": "39508302777",
+  "runAttempt": "1",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"issues\":[{\"number\":24,\"tag\":\"easy-call\",\"duplicate_of\":null,\"comment\":\"easy-call: resolve insert-select conflict paths inside their existing target scopes.\\n\\nThe change is internal to SemanticQueryBuilder.visitInsertStatement and BaseSqmToSqlAstConverter.visitInsertSelectStatement, with query regression tests. Two-way: no public API, schema, or persisted-format change.\\n\\nVerified at upstream 24e81f56: HQL registers the target in stateFieldsProcessingState, pops it, then visits the conflict in the source registry. SQL AST conversion likewise pops the target state before visiting conflict paths. Insert-values already retains the appropriate scope.\\n\\nAfter HQL source parsing, re-push the existing isolated target-fields state just for conflict parsing, with a finally pop. Preserve source-before-conflict ordering so WITH CTEs remain available, and do not leak source aliases into conflict paths.\\n\\nMove SQL AST conflict conversion into the existing target-processing try before its finally, leaving source conversion outside. Extending the target state around source conversion changes QuerySpec/QueryGroup topLevel; restoring a target state after source changes the lastPoppedProcessingState returned by translate().\\n\\nUse HQL and criteria insert-select regressions independently, plus target/source alias isolation, bind values, update assignments, insert-values and path-free controls. Existing InsertConflictTests and criteria-copy coverage provide the harness.\\n\\nNo runtime tests have yet run. Require genuine focused RED/GREEN and formatting checks in Actions, preserve source query shape/criteria-copy behavior, and obtain independent review before publication. Jira is New/unassigned/unresolved; no duplicate or competing PR was found.\"}],\"patterns\":\"\"}</output>"
+}
