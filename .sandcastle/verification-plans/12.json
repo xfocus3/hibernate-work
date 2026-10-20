@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.stateless.*",
+    "--tests",
+    "org.hibernate.orm.test.notfound.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Optional primary-key one-to-one stateless loading, mandatory missing rows, explicit NotFound policies, public find/get behavior and stateless/NotFound neighbors. Includes production/test compilation and repository format checks. The workflow binds this plan to the exact PR head and rechecks the head afterward. Full upstream build, non-H2 databases and Reactive runtime coverage are not claimed."
+}
