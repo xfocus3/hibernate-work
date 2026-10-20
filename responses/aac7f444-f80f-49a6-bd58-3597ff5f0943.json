@@ -1,0 +1,11 @@
+{
+  "id": "aac7f444-f80f-49a6-bd58-3597ff5f0943",
+  "requestHash": "415da936adaa516f3fc953563f17b2b207deb5f992c298324abd2caa8dc45542",
+  "runId": "39429184497",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Issue #16 is a standalone easy-call and continuation of the prepared HHH-20980 fix. At pinned main 4cabe417c868b343fa458a6e42b1da7a4813ec52, StandardLockingSupports.parameterized(..., boolean supportsInnerJoins, TransactionConcurrencyResolver) calls the seven-argument LockingSupportParameterized constructor, whose boolean is readsWaitForUncommittedWrites and which forces inner-join support true. AltibaseDialect supplies false; QueryLockingManagedEntityTest consumes this metadata for pessimistic streamed joins.\n\nTwo-way: select the existing eight-argument constructor without adding API or changing schemas. Pass supportsInnerJoins twice: first to correct join support, second to preserve the old observable legacy read-wait value. Preserve resolver identity, omitted-flag defaults, deprecated factory behavior and other metadata.\n\nReuse six prepared public-factory contract tests and five compatibility tests. Prior isolated results are not current-project validation. Establish genuine current-project RED then GREEN via focused JDK 25 GitHub Actions, followed by locking-unit neighbors, QueryLockingManagedEntityTest on H2 and formatChecks. This does not establish Altibase runtime or full database-matrix coverage.\n\nRead CONTRIBUTING.md, README.adoc, classification-tooling.adoc and current canonical coding standards including the scoped Hibernate maintainer checklist. Target CONTEXT.md and .sandcastle/CODING_STANDARDS.md are absent. Relevant lessons are explicit option alternatives, smallest responsible-layer correction and preserving contracts; unrelated cache/provider lessons do not expand scope. Nearby tests use the same package and JUnit structure. There are no duplicates in this batch or existing HHH-20980 work branches/PRs. No source edits or runtime tests during this read-only Explore stage. Current-project reproduction, verification, actual review and clean publication preparation remain implementation-stage work.\n\n<promise>COMPLETE</promise>"
+}
