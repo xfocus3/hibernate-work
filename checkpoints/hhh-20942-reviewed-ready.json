@@ -1,0 +1,43 @@
+{
+  "issue": "HHH-20942",
+  "jira": "https://hibernate.atlassian.net/browse/HHH-20942",
+  "work_issue": "https://github.com/xfocus3/hibernate-work/issues/18",
+  "work_pr": "https://github.com/xfocus3/hibernate-work/pull/19",
+  "state": "reviewed-ready-awaiting-upstream-publication",
+  "upstream_base": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "work_head": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "fork_branch": "HHH-20942-subclass-pagination",
+  "fork_head": "6709f762bf82303e4c3f756538830ac0975dbcae",
+  "reviewed_tested_tree": "2b7b6461164b2306f969f0cd29f52d5d8fd8676d",
+  "red_runs": [
+    39465977116,
+    39467421466
+  ],
+  "green_runs": [
+    39466535229,
+    39468172725,
+    39469539052,
+    39471376007,
+    39473000124
+  ],
+  "final_verification_run": 39473000124,
+  "final_review_run": 39473889812,
+  "final_review_id": 5589667609,
+  "tests": {
+    "tests": 46,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "java": "25",
+    "database": "h2",
+    "formatChecks": "passed"
+  },
+  "source_scope": "Two Java files: primary-table subtype projection correction and SINGLE_TABLE pagination regression tests.",
+  "limits": [
+    "PostgreSQL and broader dialect/integration matrix deferred to upstream CI.",
+    "A separate baseline unrestricted leaf discriminator-filtering defect was observed; the leaf ID lookup covers inherited state only."
+  ],
+  "work_pr_draft": false,
+  "active_handoffs": [],
+  "checked_at": "2026-10-20T18:25:00Z"
+}
