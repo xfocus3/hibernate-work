@@ -1,0 +1,39 @@
+{
+  "issue": "HHH-20919",
+  "workPr": 23,
+  "implementation": {
+    "runId": "39500921396",
+    "status": "success",
+    "responseCommit": "37f0866686a3cda71bbda07edd0da467ddc6be62",
+    "consumed": true
+  },
+  "head": "382c77361038dcc27eb362ef249cf7ac68dd81bb",
+  "tree": "0abad0bb5101766127109dbc5bd34aa224da57bf",
+  "verification": {
+    "runs": [
+      "39503481093",
+      "39504591774"
+    ],
+    "tests": 31,
+    "passed": 25,
+    "skipped": 6,
+    "failures": 0,
+    "errors": 0,
+    "formatterDiffEmpty": true,
+    "skips": "Native temporal dialect tests on H2",
+    "scope": "JDK25/H2 temporal-neighbor tests, testClasses and formatChecks"
+  },
+  "review": {
+    "runId": "39505410464",
+    "requestId": "9ea1bcd9-fc86-4055-8107-feb77287a533",
+    "expiresAt": "2026-10-20T22:51:08.678Z",
+    "status": "Independent review in progress; response not published"
+  },
+  "upstreamRecheck": {
+    "at": "2026-10-20T22:07:50Z",
+    "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+    "jiraStatus": "New",
+    "jiraAssigned": false
+  },
+  "publication": "Work PR remains draft pending review; no official PR created"
+}
