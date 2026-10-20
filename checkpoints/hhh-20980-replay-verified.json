@@ -1,0 +1,25 @@
+{
+  "stage": "Implementation replay consumed; work PR17 exact-head verification running",
+  "implementation": {
+    "run": 39429996680,
+    "attempt": 2,
+    "status": "completed",
+    "conclusion": "success",
+    "responseConsumed": true
+  },
+  "finalWorkSha": "4e60051989907278984b4e94d25a18820e4769e1",
+  "finalTree": "b34a11726e3a3dd0385bee52cdd94e84d414d01e",
+  "finalBase": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+  "refreshedGreen": {
+    "run": 39446578207,
+    "tests": 134,
+    "passed": 128,
+    "skipped": 6,
+    "failures": 0,
+    "errors": 0,
+    "formatChecks": "passed",
+    "verifiedPatchBytes": 0
+  },
+  "workPr": 17,
+  "exactHeadRun": 39447666665
+}
