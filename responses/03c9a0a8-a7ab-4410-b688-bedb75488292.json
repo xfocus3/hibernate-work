@@ -1,0 +1,11 @@
+{
+  "id": "03c9a0a8-a7ab-4410-b688-bedb75488292",
+  "requestHash": "05e0f45f9ffa88b72bd46e8bc5dcfd07035c2a2cd3231efa27fb2016cec2f887",
+  "runId": "39409400014",
+  "runAttempt": "1",
+  "head": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+  "resultHead": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Independent review found no issues. ImplicitResultClassBuilder now compares its sole immutable suppliedResultClass consistently with hashCode, allowing equivalent mappings to reuse select plans while preserving distinct result classes. Cache-key ownership remains safe; existing snapshots and parameter-identity handling are unchanged. The two-file change satisfies HHH-20987, with six integration tests covering correct values, reuse, Long/Integer discrimination, and inferred, explicit, named, and entity controls. Reporter attribution is preserved. No edits or commit were warranted.\\n\\nIndependently inspected RED/GREEN reports and exact-head verification for 7bc4b2897015d32ee75180c4cdaf8e055797a0b6 (tree 860ab7a9d565171f7cd8541ab3284ad780ebe4ee). JDK 25/H2 scoped verification passed: 109 tests passed, one MySQL-only test skipped, zero failures/errors; all six new tests passed. Logs confirm main/test compilation and formatChecks. The verified patch is empty and diff --check passes. The full upstream build and non-H2 matrix were not run.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
