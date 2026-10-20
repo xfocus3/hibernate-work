@@ -1,0 +1,15 @@
+{
+  "issue": 20,
+  "implementationRunId": "39487692649",
+  "requestId": "c67f3e41-e991-4065-96ef-250d4026b3e4",
+  "expiresAt": "2026-10-20T20:42:54.984Z",
+  "redRuns": [
+    "39488209042",
+    "39489976660"
+  ],
+  "firstGreenRun": "39488913763",
+  "candidate": "e1f7373582987ad84ee3bda80bc0c212ba96c9da",
+  "candidateTree": "9dd3d2a6c6d707128005429491a687af3f9af983",
+  "currentVerificationRun": "39490729937",
+  "verification": "First insert regression and direct control green. Nine lifecycle regressions fail on baseline; candidate stateless package plus formatting checks pending."
+}
