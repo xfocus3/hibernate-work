@@ -1,0 +1,9 @@
+{
+  "issue": 13,
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "explorationRun": "39417630576",
+  "explorationStatus": "success",
+  "implementationRun": "39418125058",
+  "implementationStatus": "started, awaiting request",
+  "codeChanges": false
+}
