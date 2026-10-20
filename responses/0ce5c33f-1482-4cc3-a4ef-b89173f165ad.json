@@ -1,0 +1,11 @@
+{
+  "id": "0ce5c33f-1482-4cc3-a4ef-b89173f165ad",
+  "requestHash": "40fad860c9a215875f46a272115c7015e9633387899d685fdce59fc16f47409a",
+  "runId": "39423738013",
+  "runAttempt": "1",
+  "head": "d91c2f681d4b3674d8145d5320f98dc1b75d2c04",
+  "resultHead": "d91c2f681d4b3674d8145d5320f98dc1b75d2c04",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed the member-level primary-key one-to-one foreign-key handling and regression tests. The focused change reuses the existing constraint handler and container resolver, preserves ordinary JoinColumn precedence, and introduces no unrelated behavior or helper redesign. No changes were needed and no blocking findings remain.\\n\\nThe identical eight-test regression suite reproduces five expected failures on unchanged main, with three controls passing. Exact-head JDK 25/H2 verification passes all eight new tests and reports 58 tests overall: 56 passed, two existing dialect-feature skips, and no failures or errors. Production/test compilation and format checks pass. The full upstream build and other database configurations were not run; existing container-resolution semantics are unchanged.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
