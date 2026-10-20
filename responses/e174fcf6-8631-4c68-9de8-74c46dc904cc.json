@@ -1,0 +1,16 @@
+{
+  "id": "e174fcf6-8631-4c68-9de8-74c46dc904cc",
+  "runId": "39500921396",
+  "runAttempt": "1",
+  "requestHash": "102e7df8ef0362043a126e2f05974156aa2e14cebeccae9a57bad8db7fd9de8a",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "382c77361038dcc27eb362ef249cf7ac68dd81bb",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/mapping/Collection.java",
+    "hibernate-core/src/main/java/org/hibernate/mapping/Set.java",
+    "hibernate-core/src/test/java/org/hibernate/temporal/TemporalCollectionUniqueConstraintTest.java",
+    "migration-guide.adoc"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20919 by adjusting only the exact inferred Set unique key at creation, while preserving existing primary-key adjustment. User-defined named and unnamed unique constraints retain declared columns; generated key naming and nulls-not-distinct behavior remain unchanged. Added six metadata regression/control tests and a DDL migration note. No public API or SPI change.\n\nRED: Actions 39501376039 at 9bebd3a7f3ea9b7889b25615a2d668fa27dc31ba ran two tests with one expected named-constraint failure and inferred-key control pass. Expanded RED 39502902166 at 7749886fcb30a7286fe2ebddff99370521df8e08 ran six tests: exactly named and unnamed user-constraint regressions failed on unexpected effective column; four inferred/non-temporal/history controls passed.\nGREEN: Actions 39502041613 passed the first two-test slice. Final Actions 39503481093 tested exact 382c77361038dcc27eb362ef249cf7ac68dd81bb / tree 0abad0bb5101766127109dbc5bd34aa224da57bf using JDK25/H2 with hibernate-core:testClasses hibernate-core:test --tests org.hibernate.temporal.Temporal* formatChecks -Pdb=h2. XML: 31 tests total, 25 passed, 6 dialect-restricted native tests skipped, zero failures/errors; all six regression/control tests passed. compileJava, compileTestJava, testClasses and repository formatChecks succeeded. Verified source tree unchanged and verified.patch empty. Full database matrix and native temporal dialect execution deferred; independent workflow review remains next.\n<promise>COMPLETE</promise>"
+}
