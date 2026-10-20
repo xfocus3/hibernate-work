@@ -1,0 +1,32 @@
+{
+  "issue": "HHH-20919",
+  "workIssue": 22,
+  "stage": "implementation",
+  "runId": "39500921396",
+  "requestId": "e174fcf6-8631-4c68-9de8-74c46dc904cc",
+  "expiresAt": "2026-10-20T22:17:00.964Z",
+  "inputHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "red": {
+    "runId": "39501376039",
+    "head": "9bebd3a7f3ea9b7889b25615a2d668fa27dc31ba",
+    "tests": 2,
+    "failures": 1,
+    "reason": "Unexpected effective column on named user-defined unique constraint; inferred-key control passed"
+  },
+  "green": {
+    "runId": "39502041613",
+    "head": "bd31d348afff12c094724c21bee9f6b40e283516",
+    "testedTree": "4bb992f360e4f4dcdcc2c904806cf8fc4e98abbf",
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "formatterDiffEmpty": true
+  },
+  "next": {
+    "runId": "39502902166",
+    "head": "7749886fcb30a7286fe2ebddff99370521df8e08",
+    "purpose": "Unnamed user constraint regression and inferred PK, non-temporal and history-table controls"
+  },
+  "status": "Active implementation; no implementation response published yet; independent review and final exact-head verification pending"
+}
