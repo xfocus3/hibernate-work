@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "issue": 11,
+  "runId": "39411543935",
+  "runAttempt": "1",
+  "requestId": "70d2d645-72e6-4421-beab-eb540eaa6040",
+  "requestHash": "665f4b7a1ae2c1a4e252051d331364af4ed67c7f9e7386620f1a9257ddda6f01",
+  "controllerHead": "ab17223d74db71dacc77745be95c2de18afe77ab",
+  "stageId": "2d5fb267-52e1-4bac-ac75-a4e297e7f570",
+  "stageHash": "f76554eaf0acfddbf2debf8ee2d0df5980e67e07606d85c781b292f414f851c7",
+  "expiresAt": "2026-10-20T11:43:53.986Z",
+  "upstream": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "redSource": "269522c7969a97623e479195a287d79cd83f68a5",
+  "redRun": "39411889645",
+  "state": "Original implementation handoff active. Three reporter-derived cases are awaiting focused JDK 25/H2 RED evidence. No production fix yet."
+}
