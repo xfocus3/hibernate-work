@@ -14,5 +14,18 @@
   "branch": "agent/issue-9-hhh-20987-reuse-native-select-plans-for-identical-",
   "redCommit": "94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c",
   "redRun": 39406008008,
-  "status": "waiting-for-focused-red-result"
+  "status": "waiting-for-focused-green-result",
+  "red": {
+    "runId": 39406008008,
+    "commit": "94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c",
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "diagnostic": "Correct IDs; expected one plan miss, actual three",
+    "tree": "1ffd48e8533fc57e067d380fa3e019c82b8bb707",
+    "formatterPatchEmpty": true
+  },
+  "greenCommit": "399c0ed4e1d0ec67468563d830d6e2b29f6c32f2",
+  "greenRun": 39406745322
 }
