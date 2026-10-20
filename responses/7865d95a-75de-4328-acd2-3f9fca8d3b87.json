@@ -1,0 +1,11 @@
+{
+  "id": "7865d95a-75de-4328-acd2-3f9fca8d3b87",
+  "requestHash": "dd633c79a097f6bb30993a968d647bb02e6af75dba2ed4ec62a65cd02580553b",
+  "runId": "39417630576",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 13,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: honor member-level primary-key one-to-one foreign-key declarations.\\n\\nThe change belongs in ToOneBinder.nestedForeignKey plus focused hibernate-core tests. Its existing handler reads JoinColumn(s), not PrimaryKeyJoinColumn(s); BinderHelper already has the required primary-key container resolver. Reuse that resolver and keep existing precedence.\\n\\nTwo-way: a narrowly reversible annotation-binding correction, without public signatures or persisted formats changing. Generated schema should reflect explicit mapping intent.\\n\\nVerified at 4cabe417c868b343fa458a6e42b1da7a4813ec52: bindOneToOne reaches this handler; current primary-key tests cover inheritance or combine ordinary JoinColumn with PrimaryKeyJoinColumn, so they do not isolate the report. Alberto Michele supplied the report and inline examples. The old 6.6 example used the removed Hibernate annotation, so earlier Jakarta behavior is not established.\\n\\nEstablish RED first for nonoptional shared-primary-key NO_CONSTRAINT and explicit-name cases with a default control, then the smallest fix. Cover plural container and nested-column declarations separately; retain JoinColumn behavior and existing helper semantics. Run focused JDK 25/H2 tests and formatChecks, not a full database matrix.\\n\\nNo duplicates. HHH-15052 is a distinct class-level inheritance report. Runtime reproduction and final focused verification remain to be established; no tests ran during read-only exploration.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
