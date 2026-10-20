@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "issue": 11,
+  "workPr": 12,
+  "workHead": "5e17db4d748e59c16ae06443d09539a26c454d79",
+  "fork": "xfocus3/hibernate-orm",
+  "branch": "HHH-21015-stateless-nullable-loading",
+  "forkHead": "7b831b4af9417740d08d7eed89bb44d6a6b51760",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "tree": "88311e50ca1e30a94429680a469d8406f0f9d186",
+  "verificationRun": "39414868269",
+  "reviewRun": "39415568862",
+  "reviewStatus": "success",
+  "reviewUrl": "https://github.com/xfocus3/hibernate-work/pull/12#pullrequestreview-5584477857",
+  "workDraft": false,
+  "tests": {
+    "total": 251,
+    "passed": 248,
+    "skipped": 3,
+    "newTests": 9,
+    "failures": 0,
+    "errors": 0
+  },
+  "verifiedPatchEmpty": true,
+  "state": "Original exploration, implementation and independent review completed and consumed. Clean fork branch verified with one upstream parent and identical tested tree. Upstream PR publication remains with the coordinator.",
+  "limits": "JDK 25/H2 focused stateless and NotFound packages, compilation and formatChecks. No full build, non-H2 matrix, Reactive runtime suite, or repository-wide classification validators."
+}
