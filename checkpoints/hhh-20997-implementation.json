@@ -1,0 +1,12 @@
+{
+  "issue": 20,
+  "runId": "39487692649",
+  "runAttempt": "1",
+  "requestId": "c67f3e41-e991-4065-96ef-250d4026b3e4",
+  "expiresAt": "2026-10-20T20:42:54.984Z",
+  "inputHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "stage": "implementation",
+  "status": "active",
+  "redHead": "00cdf52041960bbfc8da4b49f04af809f7c71f80",
+  "verification": "Nested insert regression plus existing direct collection control dispatched; no result yet."
+}
