@@ -1,0 +1,11 @@
+{
+  "issue": 20,
+  "upstream": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "runId": "39486835381",
+  "runAttempt": "1",
+  "requestId": "6b4f9789-2140-4de5-bd1d-e061750f1312",
+  "expiresAt": "2026-10-20T20:36:46.596Z",
+  "stage": "explore",
+  "status": "active",
+  "verification": "Source inspection only; no fresh regression execution yet."
+}
