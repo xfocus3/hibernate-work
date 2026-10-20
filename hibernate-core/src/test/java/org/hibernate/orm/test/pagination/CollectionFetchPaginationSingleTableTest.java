@@ -123,7 +123,7 @@ class CollectionFetchPaginationSingleTableTest {
 	void limitOneLookupIncludesSubclassColumns(SessionFactoryScope scope) {
 		scope.inTransaction( session -> assertItems(
 				session.createSelectionQuery( FETCH_QUERY + " where i.id = :id", Item.class )
-						.setParameter( "id", 2L ).setParameter( "id", 2L ).setMaxResults( 1 ).getResultList(),
+						.setParameter( "id", 2L ).setMaxResults( 1 ).getResultList(),
 				2L
 		) );
 	}
