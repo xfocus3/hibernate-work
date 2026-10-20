@@ -1,0 +1,11 @@
+{
+  "id": "62b2d3ee-1e33-4964-9ba3-d01642726267",
+  "requestHash": "da9429e2bf478044692ef7a9d81eb8ef16d83fcf7abcfd7c08ba25aa29deb692",
+  "runId": "39470391613",
+  "runAttempt": "1",
+  "head": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "resultHead": "e0ffd4db80e5af4a7ff1176e715fd63a769bf88f",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed the HHH-20942 projection correction and regression coverage. No blocking findings remain. Traversing current and subtype attribute mappings retains inherited state, formulas, primary-table filtering, identifier/version/discriminator selections and deduplication without changing mapping metadata or public APIs. Removed one redundant parameter binding in the limit-one test. The baseline was refreshed to upstream 24e81f56cf9a136ab2f65d9151752ebae7fbec2c; its unrelated deletion-logging changes are unchanged.\\n\\nVerified test-only RED revisions and artifacts showing the reported missing CHANNEL_ID and descendant QUALITY projections before the fix. Fresh JDK 25/H2 verification passed all 46 collection-fetch pagination tests across nine classes, with zero failures, errors or skips, plus compilation and repository formatChecks. Run 39471376007 tested full tree 2b7b6461164b2306f969f0cd29f52d5d8fd8676d, identical to the final reviewed source, with an empty verification patch.\\n\\nThe unrestricted Video-root pagination test genuinely covers descendant projection. The ID-restricted PremiumVideo lookup covers inherited state only: a separate pre-existing unrestricted leaf discriminator-filtering defect was observed and is not addressed by this change. PostgreSQL/live-database checks and the broader upstream CI matrix remain deferred. Approved within this focused scope.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
