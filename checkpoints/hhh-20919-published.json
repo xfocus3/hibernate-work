@@ -1,0 +1,29 @@
+{
+  "issue": "HHH-20919",
+  "officialPr": "https://github.com/hibernate/hibernate-orm/pull/13739",
+  "draft": false,
+  "head": "3f75982a1d9f00620e112afdcd8b71cf2b4c587a",
+  "base": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "tree": "0abad0bb5101766127109dbc5bd34aa224da57bf",
+  "workPr": 23,
+  "workHead": "382c77361038dcc27eb362ef249cf7ac68dd81bb",
+  "reviewRun": "39505410464",
+  "review": "PASS; unchanged head; consumed; terminal success",
+  "scopedRun": "39504591774",
+  "tests": {
+    "passed": 25,
+    "skipped": 6,
+    "failures": 0,
+    "errors": 0
+  },
+  "contributionCheck": {
+    "id": 118918516035,
+    "status": "success"
+  },
+  "jiraStatus": "Waiting for review",
+  "maintainerCanModify": false,
+  "checklist": "Tests and relevant migration documentation completed",
+  "upstreamCI": "Jenkins/build reports running; workflows awaiting maintainer approval are approval gates, not test failures",
+  "handoffs": "None active",
+  "next": "Immediate next eligible issue discovery; no waiting for merge or Jira closure"
+}
