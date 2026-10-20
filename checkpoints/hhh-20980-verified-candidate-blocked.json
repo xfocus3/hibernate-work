@@ -1,0 +1,66 @@
+{
+  "issue": 16,
+  "status": "Blocked pending approval; original runner stopped cleanly",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "controller": "2e85c535f0669fa14091ba261fb1667c0a5fc78a",
+  "queue": "d0caca3c42bab2d289eda85b57008a2fd558ff6f",
+  "tool": "27aa174336534dd3c0d41a1765a03e2c072ddc5c",
+  "explore": {
+    "run": 39429184497,
+    "status": "success"
+  },
+  "implementation": {
+    "run": 39429996680,
+    "status": "completed",
+    "conclusion": "failure",
+    "blockedResponseCommit": "575a7da493749c288c54d0e13103ff82231f66d4",
+    "responseConsumed": true,
+    "pushSkipped": true,
+    "prCreationSkipped": true,
+    "reviewSkipped": true
+  },
+  "red": {
+    "sha": "bdb3b97390ce3104e5c94639bc853819b738ce5d",
+    "tree": "1da371feede029ae57095e46646ac6b58a726685",
+    "run": 39430472963,
+    "tests": 11,
+    "passed": 10,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "expectedFailure": "explicitFalseDisablesInnerJoinLocking: expected false, actual true"
+  },
+  "green": {
+    "sha": "7a8b328267c1e2ea8d30e21b9330ec49dc2332f4",
+    "tree": "05dfae3dd4cd0e65a9f18a4a211e5724e517ce0b",
+    "run": 39431264872,
+    "tests": 134,
+    "passed": 128,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 6,
+    "skips": "SybaseSkipLockedRenderingTest requires Sybase; H2 run",
+    "newTestsPassed": 11,
+    "formatChecks": "passed",
+    "compilation": "passed",
+    "verifiedPatchBytes": 0
+  },
+  "candidate": {
+    "sha": "6acb9a941268a5906e0e479d6a5bfcdd0011f0fe",
+    "tree": "05dfae3dd4cd0e65a9f18a4a211e5724e517ce0b",
+    "parent": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+    "files": 3,
+    "skipCiMarker": false
+  },
+  "remaining": [
+    "Approved trusted-main verification plan for the actual work PR",
+    "Original implementation handoff resumption using preserved candidate and current baseline reconciliation",
+    "Exact-head verification and actual Sandcastle review/extraction",
+    "Clean fork branch and parent-owned official publication"
+  ],
+  "coverageLimits": "No live Altibase or full matrix validation. Provider-metadata correction only.",
+  "activeHandoff": false,
+  "taskBranchPublished": false,
+  "workPrCreated": false,
+  "officialPrCreated": false
+}
