@@ -14,7 +14,7 @@
   "branch": "agent/issue-9-hhh-20987-reuse-native-select-plans-for-identical-",
   "redCommit": "94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c",
   "redRun": 39406008008,
-  "status": "waiting-for-exact-head-verification-and-review-handoff",
+  "status": "independent-review-complete-awaiting-original-run",
   "red": {
     "runId": 39406008008,
     "commit": "94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c",
@@ -62,5 +62,33 @@
     "reason": "New PR number plan did not exist at initial dispatch; failed before tests",
     "resolution": "Committed focused plan and dispatched fresh run on updated controller"
   },
-  "exactHeadRun": 39408596691
+  "exactHeadRun": 39408596691,
+  "exactHeadResult": {
+    "runId": 39408596691,
+    "commit": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+    "tree": "860ab7a9d565171f7cd8541ab3284ad780ebe4ee",
+    "tests": 110,
+    "passed": 109,
+    "skipped": 1,
+    "failures": 0,
+    "errors": 0,
+    "formatChecks": "passed",
+    "compilation": "passed",
+    "formatterPatchEmpty": true,
+    "currentHeadGuard": "passed"
+  },
+  "review": {
+    "runId": "39409400014",
+    "runAttempt": "1",
+    "requestId": "b571759c-d982-4d92-a4cc-8b936f637478",
+    "requestHash": "541ee9a68733979386a3eb32ed707fab11de6fa29804f02818db499d1c0b343d",
+    "stageId": "a2ba7914-c5be-4507-ab27-1f1b545adbac",
+    "stageInputHash": "545d36c05a86f875b97aa06de6b5b446fd81b19f2ae736cb23f3013346d969de",
+    "stageArtifactId": 12258576771,
+    "requestArtifactId": 12258931524,
+    "head": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+    "expiresAt": "2026-10-20T11:25:06.286Z",
+    "verdict": "approve",
+    "findings": []
+  }
 }
