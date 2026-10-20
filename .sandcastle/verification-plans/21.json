@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.stateless.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Verify embedded collection mutations and the neighboring stateless package, Java compilation, and repository formatting on H2. MySQL-only cases are skipped by their dialect guards. Full database matrix and Reactive integration are deferred to upstream CI."
+}
