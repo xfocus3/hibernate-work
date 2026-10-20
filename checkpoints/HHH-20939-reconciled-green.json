@@ -1,0 +1,12 @@
+{
+  "sha": "10dc63bc8dfb04402706db136ad819f40413d876",
+  "resultCommit": "406b945fbd25a0b14c633f72df5299cde555a3ab",
+  "run": 39401944555,
+  "artifact": 12256270876,
+  "tree": "5e52e0d3282954a3201896bcc7935dccd0f95f9f",
+  "tests": 19,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "formatterPatchEmpty": true
+}
