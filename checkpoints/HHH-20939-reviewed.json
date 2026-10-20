@@ -1,0 +1,51 @@
+{
+  "issue": "HHH-20939",
+  "workPr": "https://github.com/xfocus3/hibernate-work/pull/8",
+  "head": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+  "tree": "edd3e179bc007e31d4ba351544cd234e43ca8a72",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "implementation": {
+    "run": 39393372027,
+    "status": "success",
+    "request": "857e1aad-3b17-43da-9d35-0dfdce53828d",
+    "responseCommit": "0150b5b08ac999d93476f185fa2e115a4ad4aa4c"
+  },
+  "verification": {
+    "run": 39398726925,
+    "status": "success",
+    "tests": 14,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "formatterPatchEmpty": true
+  },
+  "review": {
+    "run": 39399264927,
+    "status": "success",
+    "request": "4a8efde7-3333-4c51-8f07-15a430844295",
+    "extractionRequest": "1620a940-0daa-4da5-88ad-8c865fdb6f63",
+    "url": "https://github.com/xfocus3/hibernate-work/pull/8#pullrequestreview-5583132354",
+    "changes": 0
+  },
+  "classification": {
+    "candidate": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+    "initialRun": 39396698744,
+    "baselineDiagnosticRevision": "473f12f66816080cda319d571d0a53c291fce1ba",
+    "baselineRun": 39397986606,
+    "candidateDiagnosticRevision": "aa63acadcf0bbf23fad9a6ea6cc11760d1476052",
+    "candidateRun": 39398041049,
+    "result": "Both fail with identical normalized diagnostic fields",
+    "diagnostics": 5609,
+    "forbiddenCategoryDependencies": 5606,
+    "unclassifiedDeclarations": 1,
+    "internalIncubation": 2,
+    "changedPackageFindings": 0,
+    "normalization": "Remove Actions timestamps/BOM and interleaved build-progress text; compare title, count and every diagnostic type, source, target, edge, roles, message, path, allowlist and remediation in order.",
+    "scriptsExcludedFromFinalCandidate": true
+  },
+  "untested": [
+    "full upstream build",
+    "non-H2 database matrix"
+  ],
+  "publication": "No official upstream PR submitted; no merge or release"
+}
