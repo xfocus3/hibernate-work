@@ -1,0 +1,16 @@
+{
+  "issue": 15,
+  "stage": "Focused RED running; no production edits",
+  "base": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "exploreRun": "39426133377",
+  "owner": "investigate_nested_refresh_fix",
+  "implementationRun": "39426873824",
+  "requestId": "2885d2e8-058d-4851-9c0b-f43166e51007",
+  "expiresAt": "2026-10-20T13:47:47.906Z",
+  "checklistVerified": true,
+  "redSha": "10beb449acd50e63cf93d0c1e8c5a9ad01d12859",
+  "redTree": "0b9c205599fcbdc05a145624b9dc31f505e5bb4b",
+  "redRun": 39427422499,
+  "redBranch": "diagnostic/hhh-21009-nested-refresh-red",
+  "plan": "Complete RED, preserve evidence, then blocked/incomplete response if no bounded correct mechanism; no speculative loader rewrite"
+}
