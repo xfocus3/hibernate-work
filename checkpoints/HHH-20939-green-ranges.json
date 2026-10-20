@@ -1,0 +1,20 @@
+{
+  "sha": "e653cb0d79d8439e069285cc8ddae76c251c38d9",
+  "run": 39395916662,
+  "attempt": 1,
+  "tree": "edd3e179bc007e31d4ba351544cd234e43ca8a72",
+  "testedTree": "edd3e179bc007e31d4ba351544cd234e43ca8a72",
+  "tests": 14,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "formatterPatchEmpty": true,
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.restriction.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "cleanCandidate": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe"
+}
