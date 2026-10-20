@@ -1,0 +1,11 @@
+{
+  "id": "59277c6a-d39b-4e2a-a793-4d82f5d75686",
+  "requestHash": "4d870f5e1371303fee532434c267bd760e7d985d1117918b5336b8058c121fff",
+  "runId": "39411002498",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 11,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: restore nullable internal loading for missing optional stateless associations.\\n\\nThe change is confined to StatelessSessionImpl and focused stateless association tests. AbstractSharedSessionContract.get now throws on a missing row, whereas EntitySelectFetchInitializer needs a null result to apply optional and explicit NotFound behavior. No public API, schema, or signature change is needed.\\n\\nTwo-way: a small internal loading correction with behavioral regression tests, reversible without persisted-data changes.\\n\\nVerified at upstream 4cabe417c868b343fa458a6e42b1da7a4813ec52: internalLoad ignores nullable and internalLoadGet calls the throwing public get method. SessionImpl separately enforces mandatory internal loads, while EntitySelectFetchInitializer distinguishes NotFound(EXCEPTION) from NotFound(IGNORE) after receiving null.\\n\\nKeep the protected three-argument internalLoadGet hook, use nullable find within it, and enforce mandatory missing results in internalLoad. Hibernate Reactive overrides this exact hook and returns a CompletionStage as Object; preserve dispatch and do not claim to fix the eventual Reactive result.\\n\\nMarkus Westergren supplied the primary-key one-to-one reproduction and get/find diagnosis in HHH-21015. Adapt its regular Session missing-detail, stateless existing-detail, and stateless missing-detail cases; observe RED on unchanged main before the fix. Then verify mandatory loading, both NotFound modes, public get/find semantics, and relevant stateless neighbors with JDK 25/H2 and format checks.\\n\\nNo duplicates. Runtime reproduction, exact exception behavior, and final focused checks remain to be established. No tests ran in this read-only exploration; full-build and non-H2 coverage are not claimed.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
