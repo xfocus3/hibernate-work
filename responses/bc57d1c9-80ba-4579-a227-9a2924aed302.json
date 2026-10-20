@@ -1,0 +1,11 @@
+{
+  "id": "bc57d1c9-80ba-4579-a227-9a2924aed302",
+  "requestHash": "50d633113d6f98f058ffec560874d2de23e27562204801fa7497ac11ef87bd5a",
+  "runId": "39486835381",
+  "runAttempt": "1",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"issues\":[{\"number\":20,\"tag\":\"easy-call\",\"duplicate_of\":null,\"comment\":\"**easy-call** — owned collections inside embeddables are skipped by stateless collection traversal.\\n\\nTwo-way door: narrow internal traversal correction and regression tests; no public API or schema change is needed.\\n\\n- `StatelessSessionImpl.forEachOwnedCollection` currently handles only top-level plural mappings. Insert, delete, update and upsert share that seam.\\n- `BaseEntityPersister.indicatesOwnedCollection` already traverses composite types, so the caller's ownership gate needs no change.\\n- Preserve the protected extension signature and existing leaf callbacks, cache order, inverse ownership and uninitialized-collection skipping. Keep the original entity owner separate from the current component instance.\\n- Recurse null components as null child values, consistent with existing reattachment traversal; validate null transitions and subtype-specific access with regression tests.\\n- Extend the existing stateless test seam with an ordered nested element collection. Prove focused JDK 25/H2 RED before GREEN, then cover detached update/upsert replacement, delete, deeper nesting and relevant lifecycle boundaries.\\n\\nSource inspection confirms the omission; the reporter's runtime results have not been rerun. Fresh Actions compilation, tests and formatting remain required. No duplicates were found in the reconciled queue and branches. Remaining questions are regression-backed null/subtype/cache boundaries.\"}],\"patterns\":\"\"}</output>"
+}
