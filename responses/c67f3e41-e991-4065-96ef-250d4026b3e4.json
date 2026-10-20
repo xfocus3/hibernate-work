@@ -1,0 +1,14 @@
+{
+  "id": "c67f3e41-e991-4065-96ef-250d4026b3e4",
+  "requestHash": "53b22f6606898fcf3be68c3224fb705bd7ff55b30c2509bd10e26268c2ab4c29",
+  "runId": "39487692649",
+  "runAttempt": "1",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "e1f7373582987ad84ee3bda80bc0c212ba96c9da",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/internal/StatelessSessionImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/stateless/StatelessEmbeddedCollectionTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented recursive traversal of owned collections inside embedded components while preserving the protected entry point, root entity owner, inverse ownership, uninitialized collection skipping, cache ordering and existing mutation/event callbacks. Null components are traversed as null values; empty wrappers are initialized and retain the root owner before recreation. Concrete embedded subtype declarations guard property access.\n\nFresh tracer evidence on JDK 25/H2:\n- RED https://github.com/xfocus3/hibernate-work/actions/runs/39488209042 at 00cdf52041960bbfc8da4b49f04af809f7c71f80: nested insert returned an empty result instead of three ordered skills; direct collection control passed.\n- GREEN https://github.com/xfocus3/hibernate-work/actions/runs/39488913763 at 6e4ef269671c9cf24f235fa3783a190bfeb83780: both tests passed.\n- Lifecycle RED https://github.com/xfocus3/hibernate-work/actions/runs/39489976660 at 9ae7678adbd2ceee81a271d1a40283faa37d9a12: all nine nested regressions failed with missing/stale rows, missing events or delete FK violations; direct control passed.\n- Final GREEN https://github.com/xfocus3/hibernate-work/actions/runs/39490729937 at e1f7373582987ad84ee3bda80bc0c212ba96c9da, exact tested tree 9dd3d2a6c6d707128005429491a687af3f9af983: ./gradlew hibernate-core:test --tests 'org.hibernate.orm.test.stateless.*' -Pdb=h2 formatChecks. 111 tests discovered, 108 passed, zero failures/errors, three MySQL-only skips. All nine new regressions passed. compileJava, compileTestJava, testClasses and repository formatChecks succeeded. Artifact verified.patch is empty and source/tree match.\n\nNew coverage includes ordered nested insert, stateful-seeded detached update/upsert replacement, deletion and null-component deletion, null/empty-component updates, two-level embedding, uninitialized lazy collection preservation, and original-entity collection event ownership. Dedicated polymorphic subtype and second-level cache tests are not yet added; concrete subtype filtering follows existing model code and leaf cache behavior is unchanged. Full database matrix and Reactive integration deferred to upstream CI. No local heavy build was run. Reporter Pardhiv Krishna's public reproducer informed the mapping; its multi-provider project was not executed. The task branch was not pushed by this response producer.\n<promise>COMPLETE</promise>"
+}
