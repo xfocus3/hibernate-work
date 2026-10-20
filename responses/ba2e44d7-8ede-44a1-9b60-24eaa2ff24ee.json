@@ -1,0 +1,11 @@
+{
+  "id": "ba2e44d7-8ede-44a1-9b60-24eaa2ff24ee",
+  "requestHash": "1cd96733097897c576cb1435f422bfed4e1b908d7cae6e1f72d9ba811b1934d6",
+  "runId": "39492778906",
+  "runAttempt": "1",
+  "head": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "resultHead": "6816ccd0ac77ea593c74f686c19336c2e52598a2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Approved after independent review and corrections. Fixed stale rows and delete failures when an embeddable changes subtype, and null-array handling without mutating the owner or component. Added subtype and array regressions, warmed READ_WRITE cache coverage, populated/null wrapper ownership checks, and listener/cache cleanup. Protected Reactive hooks and existing inverse, cache, and uninitialized-wrapper behavior remain intact.\\n\\nFresh behavioral regressions confirmed both review findings: subtype replacement produced three failures with a passing sibling-insert control; five null-array cases failed, while unchanged-upstream direct null-array deletion passed. An intermediate candidate failed three array cases and was corrected, not counted as successful.\\n\\nFinal head 6816ccd0ac77ea593c74f686c19336c2e52598a2, tree 8d5a50e1da4ee8c36740c077a918ae2960f0fea9, passed Actions run 39496386848 on JDK 25/H2: ./gradlew hibernate-core:test --tests 'org.hibernate.orm.test.stateless.*' -Pdb=h2 formatChecks. Compilation, testClasses, and repository formatting passed; 119 tests passed, three MySQL/MariaDB-only cases skipped, zero failures/errors. All 20 new/expanded regression invocations passed. Exact tested-tree metadata and an empty verification patch were independently checked. Full database matrix and Hibernate Reactive integration remain deferred.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
