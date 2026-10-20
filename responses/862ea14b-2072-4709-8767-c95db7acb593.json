@@ -1,0 +1,14 @@
+{
+  "id": "862ea14b-2072-4709-8767-c95db7acb593",
+  "requestHash": "4e0738be0e8e7c07deeb9cdfedc59aeaa587c4ff98b7d84aa3c666af3f794524",
+  "runId": "39465465081",
+  "runAttempt": "1",
+  "head": "3f7f4394923048a09dc2ecdcc53f79a0067a9fc7",
+  "resultHead": "30bd89fb9ef8bec6b4d3fe2c87f5670ff3957310",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/sql/internal/CollectionFetchPaginationQueryTransformer.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPaginationSingleTableTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented a narrow primary-table projection correction: traverse current and subtype attribute mappings while retaining explicit identifier/discriminator/version selections, primary-table filtering and deduplication. Added SINGLE_TABLE hierarchy regressions for root and subclass-root pagination, offsets, limit-one lookup, subtype formula state, inherited version and complete collections, plus unlimited and in-memory controls. Regression based on Simon Juresa's HHH-20942 reproducer.\n\nFresh RED on upstream 3f7f439: run 39465977116 at source 41be1110b41fd409a363ae9dc14df6e53fef9272 failed the first regression with missing CHANNEL_ID (1 test, 1 failure). First tracer GREEN 39466535229 at db6e92584bacc5b5a8458425cf7933f111406fed passed that test. Expanded baseline run 39467421466 at f56b27ad3ec42eff1e391d04debae99d16329cd9 demonstrated four missing-QUALITY projection failures; unlimited and in-memory controls passed. It also exposed an independent pre-existing unrestricted leaf-root discriminator-filtering defect. That defect was not changed or claimed fixed; the final leaf lookup uses an explicit identifier predicate solely to verify inherited state. Root and intermediate-subclass tests retain genuine pagination coverage.\n\nFinal focused JDK 25/H2 run 39468172725 at a29b21ea6351bd80e370ad949a307cfc2120e204 passed all 46 tests across CollectionFetchPagination* (0 failures, 0 errors, 0 skips), including 7 new tests. Arguments: [\"hibernate-core:test\",\"--tests\",\"org.hibernate.orm.test.pagination.CollectionFetchPagination*\",\"-Pdb=h2\",\"formatChecks\"]. compileJava, compileTestJava, testClasses and repository formatChecks succeeded. Artifact verification records tree=tested_tree=8f993110ce77b69349516a745295bc17d2abc6f8 and empty verified.patch. Result commit 30bd89fb9ef8bec6b4d3fe2c87f5670ff3957310 has exactly that full tested tree, one commit above the request head and only the two reported Java paths. git diff --check passed.\n\nNo public API, schema, plan-cache or transformer redesign. Existing neighboring tests cover joined inheritance and formula behavior. PostgreSQL and the broader dialect/integration matrix remain deferred to upstream CI; no local heavy build was run. Independent actual review and exact-head pipeline verification remain required.\n<promise>COMPLETE</promise>"
+}
