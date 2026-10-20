@@ -1,0 +1,11 @@
+{
+  "id": "2ead5e4d-7b74-4915-8e23-a1df50fcbfcb",
+  "requestHash": "848dbfb30d9995007063dd5d1e54ade30cd28e166cddd2e1a142335688090f96",
+  "runId": "39505410464",
+  "runAttempt": "1",
+  "head": "382c77361038dcc27eb362ef249cf7ac68dd81bb",
+  "resultHead": "382c77361038dcc27eb362ef249cf7ac68dd81bb",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Independent review found no blocking correctness or maintainability issue, and no changes were warranted. Temporal augmentation now receives only the inferred Set unique key at its creation boundary; named and unnamed user-defined constraints remain untouched. Existing primary-key behavior, generated key naming, nullable-key semantics and temporal-strategy guards are preserved. Regression tests and the migration note match the corrected DDL behavior.\\n\\nVerified genuine RED evidence for both named and unnamed declarations. Final verification and scoped checks on commit 382c77361038dcc27eb362ef249cf7ac68dd81bb passed compilation, testClasses, repository formatChecks and neighboring temporal tests: 25 passed, 6 native-dialect tests skipped, zero failures/errors. Both artifacts confirm the reviewed tree and no formatter changes. Native temporal execution and the full database matrix remain deferred; skipped tests are not passes. No human review thread required a reply.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
