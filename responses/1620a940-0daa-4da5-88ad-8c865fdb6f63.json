@@ -1,0 +1,11 @@
+{
+  "id": "1620a940-0daa-4da5-88ad-8c865fdb6f63",
+  "requestHash": "523db356790940b2bee2d20967e4de5d5afc6175ba9331e1555a789c59b9da51",
+  "runId": "39399264927",
+  "runAttempt": "1",
+  "head": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+  "resultHead": "0c22fe364eb2d3a756cff3c967a39a5f7c431bfe",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed the complete change at 0c22fe364eb2d3a756cff3c967a39a5f7c431bfe; no actionable correctness or maintainability findings and no changes warranted. All 15 bounds consistently use Comparable<? super U>, fixing typed LocalDate restrictions and ranges while matching CriteriaBuilder's contract. Production method bodies, null handling, predicate selection, allocations and erased JVM descriptors are unchanged. No casts, redundant copies or new abstractions were introduced. There are no unresolved human review threads.\\n\\nExact-head Actions run 39398726925 passed the JDK 25 wrapper focused H2 restriction-package tests and formatChecks: 14 tests, zero failures/errors/skips; the receipt tree matches HEAD and the formatter patch is empty. Regressions cover all six Restriction comparison factories and all six Range factories, inclusive/exclusive endpoints and explicitly typed Range<LocalDate> assignments, alongside existing String/Integer and neighboring Jakarta Data controls. Earlier Actions runs demonstrate genuine failing compilation before each fix. Classification metadata/reports generated, but validation remains a failed check: baseline 39397986606 and candidate 39398041049 have the same 5,609 normalized diagnostic findings, none in the changed packages. This failure is not counted as a pass. The full upstream suite and non-H2 databases remain untested.\\n\\nCompatibility caveat: erased JVM descriptors are preserved, but universal source compatibility is not promised. Targetless inference may narrow: a LocalDate factory invocation assigned using var can now infer Range<LocalDate> instead of Range<ChronoLocalDate>, affecting subsequent invariant assignments; explicit target typing resolves that edge. This intended correction to the incubating API does not warrant another code change.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
