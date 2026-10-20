@@ -1,0 +1,17 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.sql.*",
+    "--tests",
+    "org.hibernate.orm.test.stat.internal.QueryPlanCacheStatisticsTest",
+    "--tests",
+    "org.hibernate.orm.test.query.resultmapping.NamedNativeQueryWithCountColumnTest",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Native basic result-class plan reuse and result-class isolation regressions, mapping controls, native SQL neighbors, plan-cache statistics and named scalar mapping tests. Includes Java/test compilation and repository format checks. The workflow binds this plan to the current exact PR head and rechecks the head afterward. Full upstream build and non-H2 coverage are not claimed."
+}
