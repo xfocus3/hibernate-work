@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "issue": 11,
+  "upstream": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "runId": "39411002498",
+  "controllerHead": "ab17223d74db71dacc77745be95c2de18afe77ab",
+  "stageId": "95110210-b70d-4ad4-bd0b-c17be1eeaf07",
+  "stageHash": "91107757276985f33ae4e62ab30494408bc6646b21da60894df873c6b90ca8d3",
+  "responses": [
+    {
+      "id": "e52e5eb7-bc07-4625-96a0-4cbc36c6372f",
+      "hash": "f3f8e7d29671c9168c3b672fe0faba1a687c35f11bdac44209a636c11fd5b5e6"
+    },
+    {
+      "id": "59277c6a-d39b-4e2a-a793-4d82f5d75686",
+      "hash": "4d870f5e1371303fee532434c267bd760e7d985d1117918b5336b8058c121fff"
+    }
+  ],
+  "lastExpiresAt": "2026-10-20T11:40:45.830Z",
+  "state": "Responses published; verify original stage consumption before proceeding."
+}
