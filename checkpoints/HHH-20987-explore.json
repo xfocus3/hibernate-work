@@ -1,0 +1,19 @@
+{
+  "issue": 9,
+  "runId": "39404960155",
+  "runAttempt": "1",
+  "sourceHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "controllerHead": "d90465729b233322d3cc0e00d563f4f9d26edcb5",
+  "stageId": "705dca82-0fda-4822-a1aa-1b53d7f6d447",
+  "stageInputHash": "167b2d819bfecbb73b40299698f8a0ae056c9e25fd268c417222c7fab43a406b",
+  "stageArtifactId": 12255814838,
+  "requestArtifactIds": [
+    12255754997,
+    12256790323
+  ],
+  "responses": [
+    "responses/e1018f11-823c-4301-be88-d9547481a8bd.json",
+    "responses/a5128c25-6563-4ffa-842e-be191221b10b.json"
+  ],
+  "status": "responses-published-awaiting-stage-completion"
+}
