@@ -1,0 +1,11 @@
+{
+  "id": "fd5a82e5-46da-43ca-8048-a58fe08a4929",
+  "requestHash": "934b06dcb6a94ffc03bd12e06a8dabc62f1ea55866752dbc9f0ad931b6bcceb6",
+  "runId": "39392674504",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Group: #7 stands alone. The same overly restrictive comparable bound is repeated through the restriction-to-range construction chain.\n\neasy-call: broaden the comparable bounds to accept a supertype comparator while retaining type safety. Restriction.java contains six affected factories, Range.java six affected factories, and LowerBound, UpperBound and Interval three internal bounds. Path itself needs no change. The underlying HibernateCriteriaBuilder already accepts Comparable<? super Y>.\n\nThis is a two-way, localized correction of an overly narrow generic constraint: runtime predicates, schema and erased JVM descriptors remain unchanged; generic source signatures widen and must be reviewed. Both public interfaces are incubating. Use Comparable<? super U> consistently across the five files, without casts, overloads or new abstractions.\n\nExisting RestrictionTest exercises integer and string values but lacks LocalDate. First add a typed LocalDate greaterThan regression and observe its expected compilation failure in Actions. Then apply the minimal coherent fix and verify runtime results. Expand coverage to inclusive/exclusive comparisons and open/closed ranges with boundary dates; explicitly target Range<LocalDate> because unconstrained inference can otherwise choose ChronoLocalDate and conceal the bug. Keep the original Integer/String controls. Use focused H2 tests, formatChecks, and the applicable classification report/validation tasks for changed generic signatures. Do not claim the full suite or other databases.\n\nVerified from source at 4cabe417c868b343fa458a6e42b1da7a4813ec52; compilation and runtime behavior have not yet been executed. No duplicate in this batch. Remaining implementation checks: genuine RED/GREEN results, complete bound coverage, boundary behavior and classification output.\n<promise>COMPLETE</promise>"
+}
