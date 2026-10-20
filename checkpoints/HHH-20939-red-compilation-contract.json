@@ -1,0 +1,20 @@
+{
+  "sha": "b12a41a8a9d829f9682bec78935dc4b4c1e287db",
+  "run": 39400658863,
+  "tree": "2b03c77807a23e0e37a2228047066753b0a05890",
+  "tests": 6,
+  "failures": 2,
+  "errors": 0,
+  "skips": 0,
+  "expectedFailures": [
+    "LocalDate",
+    "LocalDateTime"
+  ],
+  "passingControls": [
+    "String",
+    "explicit ChronoLocalDate target and witness",
+    "non-comparable Restriction rejection",
+    "non-comparable Range rejection"
+  ],
+  "formatterPatchEmpty": true
+}
