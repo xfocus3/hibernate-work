@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.pagination.CollectionFetchPagination*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Verify HHH-20942 subtype projection with the collection-fetch pagination regression suite, including hierarchy state, offsets, formulas, joined inheritance and fallback controls, plus compilation and repository formatting. PostgreSQL and the broader integration/dialect matrix remain deferred to upstream CI. The independent existing unrestricted leaf discriminator-filtering defect is outside this projection fix."
+}
