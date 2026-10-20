@@ -1,0 +1,14 @@
+{
+  "id": "ee3519f7-f0d9-40c9-a9f4-0f674d997884",
+  "requestHash": "6355aabbc942b7f7fa1f03f9ed76b46809a8e2b4d5c0e981f2244e266d57be3c",
+  "runId": "39405542565",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "7bc4b2897015d32ee75180c4cdaf8e055797a0b6",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/results/internal/implicit/ImplicitResultClassBuilder.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/sql/NativeQueryPlanCacheTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20987 in two files. ImplicitResultClassBuilder now compares its immutable supplied result class and supplies the matching hash code, matching neighboring builder equality style. It remains safe to reuse the immutable builder as its cache key; no new copies, abstractions, configuration, public API or schema changes.\n\nThe reporter identified the missing equality/hashCode and supplied an H2 reproduction in HHH-20987. Independently reproduced the issue against current upstream 4cabe417c868b343fa458a6e42b1da7a4813ec52 with a new integration regression: three queries returned the correct IDs but produced three cache misses rather than one. RED run39406008008, checkpoint94db8bb720bdf1a89a21f7b18ba5a75e622b7e3c:1 test,1 intended assertion failure,0 errors/skips. Minimal fix GREEN run39406745322 on399c0ed4e1d0ec67468563d830d6e2b29f6c32f2:1 passed,0 failures/errors/skips.\n\nExpanded coverage confirms Long/Integer result-class isolation with actual typed values, inferred scalar, explicit scalar, named basic and entity controls. Focused run39407613885 on994ae7ee8d7351b52dfd6f4608cf066f32330fa5 ran hibernate-core:test --tests org.hibernate.orm.test.query.sql.* --tests org.hibernate.orm.test.stat.internal.QueryPlanCacheStatisticsTest --tests org.hibernate.orm.test.query.resultmapping.NamedNativeQueryWithCountColumnTest -Pdb=h2 formatChecks under JDK25. Result:109 passed,1 MySQL-only test skipped,0 failures/errors; all6 new tests passed. Java/test compilation and formatChecks passed. Artifacts verify tree860ab7a9d565171f7cd8541ab3284ad780ebe4ee and empty formatter patch. Clean final source commit7bc4b2897015d32ee75180c4cdaf8e055797a0b6 has this identical tested tree, with upstream as its sole parent. Source scope is one internal builder and one test class. No API/SPI reclassification needed.\n\nFull upstream build/matrix and non-H2 databases were not run; independent review and automatic final exact-head verification remain pending. No task branch push or PR creation performed by this handoff; original workflow owns them.\n<promise>COMPLETE</promise>"
+}
