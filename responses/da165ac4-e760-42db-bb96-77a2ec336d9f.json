@@ -1,0 +1,11 @@
+{
+  "id": "da165ac4-e760-42db-bb96-77a2ec336d9f",
+  "requestHash": "78a3d8f004b4f85a31cbb3f4796085b36e9e43c7b102e4adbaa90f708c459183",
+  "runId": "39448561257",
+  "runAttempt": "1",
+  "head": "4e60051989907278984b4e94d25a18820e4769e1",
+  "resultHead": "4e60051989907278984b4e94d25a18820e4769e1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Approved. The existing eight-argument constructor is the smallest correct fix: it honors explicit inner-join support while preserving legacy read-wait behavior and the remaining factory contracts. Public-factory tests cover false, true, omitted defaults, resolver identity and non-invocation, metadata, and deprecated compatibility. No concrete improvement warranted a code change, and no human review threads require replies.\\n\\nReviewed exact head 4e60051989907278984b4e94d25a18820e4769e1 against upstream 3f7f4394923048a09dc2ecdcc53f79a0067a9fc7. The regression first failed as intended with ten passing controls. Original exact-head JDK 25/H2 verification passed compilation, formatChecks, and 128 tests, with six expected Sybase-only skips and no failures or errors. All 11 new tests and all 53 managed-query locking cases passed. Source and tested trees match, and the formatter patch is empty.\\n\\nNo actionable findings. This is a provider-metadata correction; a live Altibase run, full clean build and the full upstream database matrix were not run.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
