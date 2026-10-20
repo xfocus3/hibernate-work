@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.constraint.*",
+    "--tests",
+    "org.hibernate.orm.test.schemaupdate.foreignkeys.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Member-level primary-key one-to-one foreign-key suppression and naming, plural container and nested names, ordinary JoinColumn controls and neighboring constraint/schema-export tests. Includes production/test compilation and repository format checks. Bound to the exact PR head. Full upstream build, non-H2 configurations and repository-wide classification validators are not claimed."
+}
