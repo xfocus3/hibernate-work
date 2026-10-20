@@ -1,0 +1,11 @@
+{
+  "id": "ce0b79ad-c0a9-4b3c-865a-edf9f3dcf07a",
+  "requestHash": "7a367d7d8c89acf99447098de7f07e1f76557de76a7e3ff46665a4e57631d352",
+  "runId": "39392674504",
+  "runAttempt": "1",
+  "head": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "resultHead": "4cabe417c868b343fa458a6e42b1da7a4813ec52",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 7,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"easy-call: the restriction/range layer requires Comparable<U>, while LocalDate compares through ChronoLocalDate and HibernateCriteriaBuilder already accepts Comparable<? super Y>.\\n\\nThe localized change touches Restriction.java, Range.java and their three package-private bound records: 15 generic bounds in five production files. Path needs no change. Existing erased descriptors, runtime predicates and schema remain unchanged; public generic signatures widen and need compatibility review. Both interfaces are incubating.\\n\\nTwo-way door: a narrowly scoped generic-constraint correction with no new overload, type, schema or runtime algorithm. Preserve comparable type safety using Comparable<? super U>, without casts or abstractions.\\n\\nRestrictionTest supplies the integration seam but currently covers String/Integer, not LocalDate. First reproduce typed LocalDate greaterThan compilation failure in Actions; then apply the coherent fix and validate runtime results. Extend boundary coverage to inclusive/exclusive comparisons, open/closed intervals and typed Range<LocalDate> targets, retaining existing controls. An unconstrained Range factory invocation may infer ChronoLocalDate and miss the bug.\\n\\nVerified by source inspection at 4cabe417c868b343fa458a6e42b1da7a4813ec52. No duplicate in this batch. Compilation/runtime tests have not run yet. Remaining checks: genuine RED/GREEN evidence, focused H2 tests, formatChecks and applicable classification reports/validation for signature changes.\"\n    }\n  ],\n  \"patterns\": \"\"\n}\n</output>"
+}
