@@ -1,0 +1,11 @@
+{
+  "id": "6b4f9789-2140-4de5-bd1d-e061750f1312",
+  "requestHash": "dfe360c88add8ddda08826963943934f2860f7463575804db8e651ebd71094df",
+  "runId": "39486835381",
+  "runAttempt": "1",
+  "head": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "resultHead": "24e81f56cf9a136ab2f65d9151752ebae7fbec2c",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Issue #20 is a single-issue group, duplicate_of: null. Verdict: easy-call. The root cause is verified by source inspection at 24e81f56cf9a136ab2f65d9151752ebae7fbec2c: StatelessSessionImpl.forEachOwnedCollection visits entity attributes but handles only plural mappings, while BaseEntityPersister.indicatesOwnedCollection already recurses composite types. Insert, delete, update and upsert share this missing traversal. StatelessCollectionsTest supplies a direct-collection regression seam.\n\nTwo-way door: a narrow internal traversal correction with focused tests, no public API or schema change. Preserve the existing protected signature, collection action callbacks, inverse and uninitialized handling, cache lock/removal order, and the root entity owner when wrapping nested collections. Recurse embedded mappings while retaining a separate current component value. Traverse null components as null child values, consistent with ReattachVisitor, rather than retaining stale collection rows. Check subtype-specific attribute access for polymorphic embeddables using existing subtype-aware patterns.\n\nImplement through focused JDK 25/H2 tracer bullets: first nested ordered embeddable element-collection insert versus a direct control; prove fresh RED before smallest GREEN; then detached replacement update/upsert, delete and null/empty/uninitialized/nested boundaries. Run repository formatting and relevant stateless neighboring tests in GitHub Actions. Reporter observations were inspected but not executed here and are not fresh RED evidence. No local compilation or tests were run in this read-only triage. CONTRIBUTING.md and classification-tooling.adoc were read; CONTEXT.md, docs/adr and target .sandcastle/CODING_STANDARDS.md are absent. No duplicates were found in the reconciled queue/branch/all-state PR inventory. Remaining implementation questions are regression-backed null/subtype/cache boundary details, not an unresolved product decision.\n<promise>COMPLETE</promise>"
+}
