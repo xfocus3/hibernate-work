@@ -58,6 +58,20 @@ public class InsertConflictTests {
 	}
 
 	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20755" )
+	@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsUpsertOrMerge.class)
+	@SkipForDialect( dialectClass = SpannerDialect.class,
+			reason = "Cloud Spanner does not support ON CONFLICT clauses for INSERT ... SELECT statements" )
+	public void testInsertSelectOnConflictTarget(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.createMutationQuery(
+					"insert into BasicEntity (id, data) select 1, :data on conflict(id) do nothing"
+			).setParameter( "data", "changed" ).executeUpdate();
+			assertEquals( "data", session.find( BasicEntity.class, 1 ).getData() );
+		} );
+	}
+
+	@Test
 	@SkipForDialect( dialectClass = SpannerPostgreSQLDialect.class,
 			reason = "ON CONFLICT clause with empty conflict target in INSERT statement is not supported")
 	@SkipForDialect( dialectClass = SpannerDialect.class, reason = "UNIMPLEMENTED: ON CONFLICT clause with empty conflict target in INSERT statement is not supported in Emulator")
