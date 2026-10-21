@@ -1,0 +1,36 @@
+{
+  "issue": "HHH-20755",
+  "workIssue": 24,
+  "workPr": 25,
+  "workUrl": "https://github.com/xfocus3/hibernate-work/pull/25",
+  "status": "work_pr_ready_official_publication_pending",
+  "head": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "upstream": "8f538b199da15ab42827e9c9b70820ab468c0aa0",
+  "tree": "e0aa46a4f27b87c74eed552731c4e394e3c9ce1e",
+  "redRuns": [
+    39573010128,
+    39579563292
+  ],
+  "scopedGreenRun": 39581357795,
+  "neighborGreenRun": 39582848053,
+  "tests": {
+    "total": 36,
+    "passed": 34,
+    "skipped": 2,
+    "failures": 0,
+    "errors": 0
+  },
+  "skipReason": "Existing InsertConflictOnConstraintTest non-H2 dialect gates; H2-specific control passed.",
+  "formatChecks": "passed",
+  "formatterPatch": "empty",
+  "reviewRun": 39582108970,
+  "reviewResponseCommit": "76c4a21d8be0a99a84194f461c16eedb7595dab6",
+  "extractionResponseCommit": "b3cb4cf7ce5d2fa9684f740064a8f208d29f9380",
+  "review": "independent_approved_no_edits",
+  "reviewConsumption": "terminal_success",
+  "draft": false,
+  "activeHandoffs": [],
+  "publication": "not_started",
+  "limits": "JDK 25/H2 bounded insert family; wider matrix deferred to upstream CI.",
+  "next": "Recheck latest upstream, Jira and all-state semantic competing PRs. Publish clean one-commit official PR with required template and evidence-supported contribution checks; no merge."
+}
