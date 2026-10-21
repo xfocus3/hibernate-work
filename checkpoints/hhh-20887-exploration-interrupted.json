@@ -1,0 +1,21 @@
+{
+  "issue": "HHH-20887",
+  "workIssue": 27,
+  "runId": 39680638291,
+  "runAttempt": 1,
+  "requestId": "d9313a1c-f8b5-46ec-89e0-ee0032b40cc1",
+  "requestHash": "b008ab116d25e35b5ec5792a3d35919d031a67672ad96510450fc142f5986115",
+  "head": "a5a571801bef8eb5d7454970442b2e752bef626f",
+  "status": "blocked-terminal",
+  "reason": "Assistant runtime safety interruption during read-only exploration; no identifiable denied tool operation in the interrupted turn.",
+  "responseCommit": "992b50a1be91a8518382a42bc5ca628e6a2a4a3d",
+  "consumedAt": "2026-10-21T21:45:03Z",
+  "runConclusion": "failure",
+  "apply": "skipped",
+  "implementationRun": 39681296146,
+  "implementationConclusion": "skipped",
+  "codeChanged": false,
+  "testsRun": false,
+  "activeHandoffs": [],
+  "recovery": "Do not replay as completed or restart until interruption is resolved and a fresh permitted recovery is reconciled."
+}
