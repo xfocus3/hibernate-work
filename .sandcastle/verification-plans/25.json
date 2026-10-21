@@ -1,0 +1,18 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:testClasses",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.InsertConflictTests",
+    "--tests",
+    "org.hibernate.orm.test.query.hql.InsertConflictWithCriteriaCopyTreeEnabledTests",
+    "--tests",
+    "org.hibernate.orm.test.query.criteria.InsertSelectTests",
+    "hibernate-core:formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify HQL and Criteria insert-select conflict target scopes, alias isolation and criteria copying with neighboring insert-select controls; broader database matrix remains upstream CI."
+}
