@@ -1,0 +1,26 @@
+{
+  "issue": "HHH-20755",
+  "workIssue": 24,
+  "status": "blocked",
+  "reason": "Transient aborted tool batch; no permission denial identified.",
+  "run": "39572407092",
+  "request": "985b140b-3d37-4dc1-bae3-04c8584c12cd",
+  "responseCommit": "5b0bfa6e8a4ba5e3f6c460b78f9117910db90b2c",
+  "consumedAt": "2026-10-21T09:19:21Z",
+  "terminal": "failure",
+  "upstream": "8f538b199da15ab42827e9c9b70820ab468c0aa0",
+  "red": {
+    "head": "39127e1e3898e68a6ab9303f085f1c7cd35738a9",
+    "tree": "936426c7188ef06bf55a73f76fb353c79ae70548",
+    "run": "39573010128",
+    "tests": 1,
+    "failures": 1,
+    "skipped": 0
+  },
+  "preparedTree": "b814fbb830d47b6bb0c157e7fa47b8b4353a971e",
+  "preparedTreeRemote": false,
+  "green": false,
+  "review": false,
+  "workPr": null,
+  "recovery": "Original retry remains requested. Reconcile no active run, branch or response race before supported original workflow recovery with a new request. Never overwrite or replay blocked response as completed."
+}
