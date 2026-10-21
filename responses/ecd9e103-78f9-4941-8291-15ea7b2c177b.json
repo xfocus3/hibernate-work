@@ -1,0 +1,11 @@
+{
+  "id": "ecd9e103-78f9-4941-8291-15ea7b2c177b",
+  "requestHash": "e91362a2eb5ef20a9a8e0e2fc9038d339e89b4f421202a9d607742e26a7e9061",
+  "runId": "39582108970",
+  "runAttempt": "1",
+  "head": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "resultHead": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed the unchanged branch and found no blocking issues or edits needed. The HQL change reuses the isolated target-field processing state, keeping source aliases out of conflict paths while preserving source-first CTE handling. SQL AST conflict conversion now runs while the target table group is available; source conversion remains outside that scope, preserving query top-level semantics and resolver ownership.\\n\\nGenuine HQL and Criteria regressions failed independently before the fix. Exact-head verification on JDK 25/H2 passed 34 tests across the HQL insert family and Criteria insert-select, with two expected non-H2 dialect skips and no failures or errors. Compilation and formatChecks passed, and the verified tree matches this branch without formatter changes. Wider database-matrix coverage remains deferred to upstream CI.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
