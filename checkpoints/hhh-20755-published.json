@@ -1,0 +1,33 @@
+{
+  "issue": "HHH-20755",
+  "state": "published-ready",
+  "verifiedAt": "2026-10-21T10:27:03Z",
+  "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13744",
+  "officialHead": "690a4d1ca8a31807db0d72ded62ff2fabc44e15b",
+  "upstreamBase": "8f538b199da15ab42827e9c9b70820ab468c0aa0",
+  "testedTree": "e0aa46a4f27b87c74eed552731c4e394e3c9ce1e",
+  "workPR": 25,
+  "workHead": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "redRuns": [
+    39573010128,
+    39579563292
+  ],
+  "greenRuns": [
+    39581357795,
+    39582848053
+  ],
+  "neighborTests": {
+    "passed": 34,
+    "skipped": 2,
+    "failed": 0
+  },
+  "reviewRun": 39582108970,
+  "review": "approved-no-edits-consumed-terminal-success",
+  "contributionCheck": 119170405769,
+  "contributionConclusion": "success",
+  "draft": false,
+  "maintainerCanModify": false,
+  "activeHandoffs": [],
+  "upstreamCI": "Jenkins running; GitHub workflows require maintainer approval",
+  "next": "Continue eligible issue discovery without waiting for merge"
+}
