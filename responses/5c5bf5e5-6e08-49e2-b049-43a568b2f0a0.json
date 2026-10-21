@@ -1,0 +1,11 @@
+{
+  "id": "5c5bf5e5-6e08-49e2-b049-43a568b2f0a0",
+  "requestHash": "2be07fbd13c3344a143533b00ecc2de45a64a95d2956ce193e0f812bb4a163b3",
+  "runId": "39582108970",
+  "runAttempt": "1",
+  "head": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "resultHead": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "APPROVE unchanged head cf7a04d2f3805b18a84085dd256dfd3bd0452531, tree e0aa46a4f27b87c74eed552731c4e394e3c9ce1e. Independent review found no blocking findings and no necessary edits.\n\nHQL reuses the existing parentless target registry, preserving target/source isolation and CTE lookup timing with balanced finally restoration. SQL conflict conversion now uses the target processing state before it is popped; source conversion remains outside, preserving topLevel semantics and the final source resolver. SET/WHERE scopes and Criteria copying ownership remain correct. No public API or unrelated scope change.\n\nVerified HQL RED 39573010128 at 39127e1e3898e68a6ab9303f085f1c7cd35738a9: one genuine unresolved-id SemanticException. Independent Criteria RED 39579563292 at ba33cc420448a972570534322453a960c8b1e620: one genuine missing-FromClauseIndex NullPointerException. Exact-head scoped GREEN 39581357795 passed 17 tests. Neighboring GREEN https://github.com/xfocus3/hibernate-work/actions/runs/39582848053 passed 34 of 36 tests with zero failures/errors and two expected non-H2 dialect skips in InsertConflictOnConstraintTest; its H2-specific control passed. Both exact-head artifacts match the reviewed tree and have empty formatter patches. JDK 25/H2 compilation, testClasses and formatChecks succeeded.\n\nNeighboring command: ./gradlew hibernate-core:testClasses hibernate-core:test --tests 'org.hibernate.orm.test.query.hql.Insert*' --tests org.hibernate.orm.test.query.criteria.InsertSelectTests hibernate-core:formatChecks -Pdb=h2. Covers the seven HQL insert classes plus Criteria insert-select. Wider module/database matrix is deferred to upstream CI. CTE/set-operation conflict combinations were structurally reviewed, not separately runtime-tested.\n\n<promise>COMPLETE</promise>"
+}
