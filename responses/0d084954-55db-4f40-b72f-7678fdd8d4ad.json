@@ -1,0 +1,16 @@
+{
+  "id": "0d084954-55db-4f40-b72f-7678fdd8d4ad",
+  "requestHash": "8b53316febca347dd6ce761e76b3fa9ef8043ae70f36e70ccc06f47192f1b272",
+  "runId": "39576513513",
+  "runAttempt": "1",
+  "head": "8f538b199da15ab42827e9c9b70820ab468c0aa0",
+  "resultHead": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/hql/internal/SemanticQueryBuilder.java",
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/InsertConflictTests.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/InsertConflictWithCriteriaCopyTreeEnabledTests.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20755 with isolated target scopes for HQL conflict parsing and SQL AST conflict conversion, preserving source query processing order and scope. Added insert-select target, alias, excluded-value update, predicate, invalid source-alias and Criteria copying enabled/disabled coverage.\n\nGenuine RED: https://github.com/xfocus3/hibernate-work/actions/runs/39573010128 at 39127e1e3898e68a6ab9303f085f1c7cd35738a9 executed the HQL regression and failed with unresolved id. Independent Criteria RED: https://github.com/xfocus3/hibernate-work/actions/runs/39579563292 at ba33cc420448a972570534322453a960c8b1e620 executed one test and failed with missing FromClauseIndex during conflict conversion.\n\nGREEN: https://github.com/xfocus3/hibernate-work/actions/runs/39580174404 at 4420f574bf49cedfade146f60df01c0a8244b18b passed 17 tests with zero failures, errors or skips. JDK 25/H2: hibernate-core:testClasses hibernate-core:test --tests org.hibernate.orm.test.query.hql.InsertConflictTests --tests org.hibernate.orm.test.query.hql.InsertConflictWithCriteriaCopyTreeEnabledTests --tests org.hibernate.orm.test.query.criteria.InsertSelectTests hibernate-core:formatChecks -Pdb=h2. compileJava, compileTestJava, testClasses and formatChecks succeeded. Tested tree e0aa46a4f27b87c74eed552731c4e394e3c9ce1e equals the returned clean commit tree; formatter patch is empty. Earlier first-slice GREEN 39578630721 passed 12 tests. Wider database matrix is deferred to upstream CI; independent review is still required before official publication.\n\n<promise>COMPLETE</promise>"
+}
