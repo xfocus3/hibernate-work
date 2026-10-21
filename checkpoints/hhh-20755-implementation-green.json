@@ -1,0 +1,28 @@
+{
+  "issue": "HHH-20755",
+  "workIssue": 24,
+  "workPr": 25,
+  "status": "implementation_completed_review_pending",
+  "owner": "dot",
+  "implementationRun": 39576513513,
+  "requestId": "0d084954-55db-4f40-b72f-7678fdd8d4ad",
+  "responseCommit": "1b5fc99d0fcdb6eb10b6fcbaba02d7fc5840359b",
+  "resultHead": "cf7a04d2f3805b18a84085dd256dfd3bd0452531",
+  "upstream": "8f538b199da15ab42827e9c9b70820ab468c0aa0",
+  "testedTree": "e0aa46a4f27b87c74eed552731c4e394e3c9ce1e",
+  "greenRun": 39580174404,
+  "tests": {
+    "passed": 17,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "formatChecks": "passed",
+  "redRuns": [
+    39573010128,
+    39579563292
+  ],
+  "reviewRun": 39581127300,
+  "verificationPlanCommit": "28ad1dae7b09bbbddd7e869777e3ad36554c8fa5",
+  "notes": "Original implementation response consumed and run succeeded. Work PR remains draft pending original independent review. Broader upstream database checks not run. No official PR published. Large inline tree request stalled; separate GitHub blobs and SHA-only tree succeeded without changing scope."
+}
