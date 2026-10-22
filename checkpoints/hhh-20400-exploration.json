@@ -1,0 +1,31 @@
+{
+  "issue": 31,
+  "jira": "HHH-20400",
+  "stage": "Explore",
+  "status": "plan-applied-run-status-unconfirmed",
+  "verdict": "needs-a-human",
+  "implementationStarted": false,
+  "upstreamHead": "01fe3ffce698bb655a7ddb470766e3f74339220c",
+  "supportedLineHead": "ccc3d86b694c7d6d24c2b9581e8da0d34dac44e7",
+  "runId": "39794185338",
+  "runAttempt": 1,
+  "runConclusion": null,
+  "stageInputArtifact": 12432771779,
+  "planArtifact": 12431669530,
+  "handoffs": [
+    {
+      "id": "e262b091-f300-4eef-804a-09e134f4c5a1",
+      "responseCommit": "5666ef8a2d550955ec3ca932c07aa0982f4cc4e0",
+      "consumed": true
+    },
+    {
+      "id": "43e6c980-1882-4cd8-a0b5-06cd0264d829",
+      "responseCommit": "b4f1b4fd8e58afb902195e0829efe961ea9cfec7",
+      "consumed": true
+    }
+  ],
+  "result": "https://github.com/xfocus3/hibernate-work/issues/31#issuecomment-6343085169",
+  "evidence": "Source-only triage, public attachment text inspection. No code changes, compilation, executable current-line RED/GREEN, or PR. Original workflow applied ready-for-human and posted the plan. Incidental Implement run 39794185797 completed skipped.",
+  "next": "Reconcile final Explore run status without replaying completed exchanges. Review cache metadata serialization compatibility and establish focused H2 RED on current main and supported 7.4 before implementation.",
+  "verifiedAt": "2026-10-22T14:22:22Z"
+}
