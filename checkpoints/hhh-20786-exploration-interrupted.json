@@ -1,0 +1,38 @@
+{
+  "issue": "HHH-20786",
+  "workIssue": 29,
+  "upstreamHead": "1ed820d01410071e52430eca4ad129b9eaf3e844",
+  "explore": {
+    "runId": 39765848790,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "failure"
+  },
+  "stage": {
+    "id": "3d9d5e3f-1749-4b36-9c9e-70b9af517a4d",
+    "inputHash": "4251f149e5f1df50aca5b9d046b345251642a573a9ee9c496e45de880a82235b",
+    "artifactId": 12420576225
+  },
+  "handoff": {
+    "id": "15002a1b-ede0-4afe-a894-57f4acb7d361",
+    "artifactId": 12420700962,
+    "responseCommit": "86a778c8451836e4b6ab2a38097417765fdf4d03",
+    "status": "blocked",
+    "consumed": true,
+    "consumptionEvidence": "Run job119781161020 logged 'FAILED: Dot reported the handoff blocked; inspect the response record' at2026-10-22T10:50:51.9409871Z"
+  },
+  "queue": {
+    "exploreLabelRemoved": true,
+    "label": "agent:blocked"
+  },
+  "verification": "No issue-code edits, compilation, reproduction, tests or RED/GREEN evidence. Sandcastle toolkit setup/build completed but does not validate Hibernate.",
+  "successors": {
+    "apply": "skipped",
+    "implementation": 39765849149,
+    "verification": 39765855667,
+    "review": 39765856188,
+    "conclusion": "skipped"
+  },
+  "decision": "Interrupted attempt stopped. No replay or alternative execution started.",
+  "observedAt": "2026-10-22T10:51:23Z"
+}
