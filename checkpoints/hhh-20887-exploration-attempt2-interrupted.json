@@ -1,0 +1,22 @@
+{
+  "issue": "HHH-20887",
+  "workIssue": 27,
+  "runId": 39680638291,
+  "runAttempt": 2,
+  "requestId": "6b719792-e7a3-40f5-89b7-b59f8d6009da",
+  "requestHash": "b3d028d8c6e100fc76ae8be6b4928ea1c34d000a4f0c54240589b5dfb65e2973",
+  "head": "a5a571801bef8eb5d7454970442b2e752bef626f",
+  "latestOfficialUpstream": "1ed820d01410071e52430eca4ad129b9eaf3e844",
+  "status": "blocked-terminal",
+  "reason": "Assistant runtime safety interruption during read-only exploration. No identifiable denied tool operation or uncertain write preceded interruption.",
+  "responseCommit": "33fc726655ef80a80fd12551931c9aebe00948b4",
+  "consumedAt": "2026-10-22T08:51:34Z",
+  "runConclusion": "failure",
+  "apply": "skipped",
+  "implementationRun": 39750929855,
+  "implementationConclusion": "skipped",
+  "codeChanged": false,
+  "testsRun": false,
+  "activeHandoffs": [],
+  "recovery": "Preserve blocked response. Do not replay as completed or retry execution without a newly permitted recovery."
+}
