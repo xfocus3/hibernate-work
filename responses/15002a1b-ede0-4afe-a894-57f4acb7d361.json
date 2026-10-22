@@ -1,0 +1,11 @@
+{
+  "id": "15002a1b-ede0-4afe-a894-57f4acb7d361",
+  "requestHash": "41dbf68fda4e528841b4b89b7ae1fc2f49e4719bea8f407a6409bac34efe5571",
+  "runId": "39765848790",
+  "runAttempt": "1",
+  "head": "1ed820d01410071e52430eca4ad129b9eaf3e844",
+  "resultHead": "1ed820d01410071e52430eca4ad129b9eaf3e844",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Exploration interrupted before analysis could complete. No code changes, compilation, reproduction, tests or RED/GREEN evidence were produced. Stop this attempt; do not advance to implementation."
+}
