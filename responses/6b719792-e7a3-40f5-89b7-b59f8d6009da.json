@@ -1,0 +1,11 @@
+{
+  "id": "6b719792-e7a3-40f5-89b7-b59f8d6009da",
+  "runId": "39680638291",
+  "runAttempt": "2",
+  "requestHash": "b3d028d8c6e100fc76ae8be6b4928ea1c34d000a4f0c54240589b5dfb65e2973",
+  "head": "a5a571801bef8eb5d7454970442b2e752bef626f",
+  "resultHead": "a5a571801bef8eb5d7454970442b2e752bef626f",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Exploration stopped after an assistant runtime safety interruption during read-only source analysis. No issue code changes, tests, or completed exploration plan were produced. This terminal response records the interruption only and must not advance implementation."
+}
