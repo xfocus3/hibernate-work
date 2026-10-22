@@ -1,0 +1,28 @@
+{
+  "issue": 30,
+  "jira": "HHH-20945",
+  "stage": "Explore",
+  "status": "completed",
+  "verdict": "needs-a-human",
+  "implementationStarted": false,
+  "upstreamHead": "01fe3ffce698bb655a7ddb470766e3f74339220c",
+  "runId": "39788715206",
+  "runAttempt": 1,
+  "runConclusion": "success",
+  "handoffs": [
+    {
+      "id": "2a464600-0e76-4d32-b07a-9760377e9902",
+      "responseCommit": "476efb99ae287813f9176514e71556ce4e6a84d9",
+      "consumed": true
+    },
+    {
+      "id": "0741d2b9-2be8-4ac9-ae45-f524e2ff6bc3",
+      "responseCommit": "4cacf5d81706be9f0094313c2b4f0c870501971f",
+      "consumed": true
+    }
+  ],
+  "result": "https://github.com/xfocus3/hibernate-work/issues/30#issuecomment-6342315851",
+  "evidence": "Source-only triage; no Hibernate code changes, compilation, executable reproduction, RED/GREEN or PR. Legacy DDL strategy does not establish historical Envers ordering guarantee; earlier component sorting identified.",
+  "next": "Await maintainer compatibility decision before implementation. No automatic replay or implementation.",
+  "verifiedAt": "2026-10-22T13:46:04Z"
+}
