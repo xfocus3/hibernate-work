@@ -1,0 +1,43 @@
+{
+  "issue": "HHH-21023",
+  "workIssue": 28,
+  "upstreamHead": "1ed820d01410071e52430eca4ad129b9eaf3e844",
+  "explore": {
+    "runId": 39751519862,
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "completedAt": "2026-10-22T09:04:05Z"
+  },
+  "handoffs": [
+    {
+      "id": "d199a208-67b8-456b-94df-2d21e4a98c14",
+      "responseCommit": "fab334a5e135e90d7d70f83044f94fc633f22a73",
+      "consumed": true
+    },
+    {
+      "id": "22ad571e-a960-4933-990f-68de849339ff",
+      "responseCommit": "701c8f6820d75f532cfeae7898113202d17ed4f7",
+      "consumed": true
+    }
+  ],
+  "verdict": "needs-a-human",
+  "label": "ready-for-human",
+  "comment": "https://github.com/xfocus3/hibernate-work/issues/28#issuecomment-6336967404",
+  "decision": "Choose a proven receiver-aware constructor tracking mechanism across normal and extended field enhancement, before implementation.",
+  "verification": "Source inspection only. No implementation, code change, compilation, runtime reproduction or RED/GREEN claim.",
+  "successors": {
+    "implementation": 39752541573,
+    "implementationJob": "skipped",
+    "verify": 39752575405,
+    "review": 39752576066,
+    "reviewJob": "skipped"
+  },
+  "priorBlockedWork": "Issue27 exploration label removed before intake; issue26 untouched. Neither restarted.",
+  "incidentalCI": {
+    "runId": 39751578399,
+    "status": "in_progress",
+    "cancellation": "Not performed; separate approval pending."
+  },
+  "observedAt": "2026-10-22T09:05:01Z"
+}
