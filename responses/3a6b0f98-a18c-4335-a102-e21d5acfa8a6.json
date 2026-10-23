@@ -1,0 +1,16 @@
+{
+  "id": "3a6b0f98-a18c-4335-a102-e21d5acfa8a6",
+  "requestHash": "b4d8d374510f7360c9e6233d59d66b646086da0b515b9e362e089608cea6b92b",
+  "runId": "40017454289",
+  "runAttempt": "1",
+  "head": "bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1",
+  "resultHead": "254e227e03165529c9e21b1b51b783bd40ec0cb3",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderSelectBuilder.java",
+    "hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeySelectTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeyTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Reviewed the full HHH-21009 diff and independently reviewed the minimal correction. Found and reproduced incorrect REFRESH propagation through entity map keys: candidate test-only 2c75d138ac922b13229ba91a9739fbd0b05b4343 failed both map-key tests in run 40014619948 (expected old key-child label, actual new); baseline test-only fb747ce8338e983deeda75e84c3abb3ab21e46b0 passed both in run 40014645953. Earlier positive value-refresh, identity and initial-state assertions passed. Cascade collection iteration is over values, not keys.\nOne descendant commit 254e227e03165529c9e21b1b51b783bd40ec0cb3 restricts new collection-part propagation to ELEMENT and excludes INDEX from the new eviction helper before identity registration, without changing preexisting hasCascadeRefresh semantics. Adds default and max_fetch_depth=0 regression tests, including preservation of the initialized key-child wrapper and identities.\nExact-revision run 40017710774 passed hibernate-core:testClasses hibernate-core:test --tests org.hibernate.orm.test.refresh.* -Pdb=h2 formatChecks on JDK 25/H2. All 45 tests passed, zero failures/errors/skips, including 4 composite-ID tests, 2 map-key tests, 30 original nested-refresh tests and 9 neighbors. Artifact 12530135833 SHA256 9591397e3d327e6d2be3d1fdcfe9dcb34ec777e374fbaae9a7be6060dbbe46ff confirms source/tested tree 2426229b9865408a6b5fd6703abdf44d16f08ca7 and empty formatter patch. Independent source review found no remaining blocking defect.\nLimitations: alternate resolveInstance(Object,data) overload execution was not specifically instrumented; full upstream/database matrix and updated 7.4 backport were not run. Keep PR draft and issue 15 open. No merge or official upstream publication requested. This fresh response preserves the original blocked invocation.\n<promise>COMPLETE</promise>"
+}
