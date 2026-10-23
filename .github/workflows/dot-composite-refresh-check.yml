@@ -1,0 +1,15 @@
+name: HHH-21009 clean submission check
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-21009-submission-verify]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: dcee07bce13b6d4a901307272c990e6209a65cd9
+      java_version: '25'
+      build_tool: gradle
+      database: h2
+      arguments: '["hibernate-core:testClasses","hibernate-core:test","--tests","org.hibernate.orm.test.refresh.*","-Pdb=h2","formatChecks"]'
