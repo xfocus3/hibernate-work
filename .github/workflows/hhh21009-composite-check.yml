@@ -1,15 +1,15 @@
-name: HHH-21009 composite refresh check
+name: HHH-21009 map key candidate check
 on:
   push:
-    branches: [sandcastle/dot-check/HHH-21009-composite-id-verify]
+    branches: [sandcastle/dot-check/HHH-21009-map-key-candidate-verify]
 permissions:
   contents: read
 jobs:
   verify:
     uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
     with:
-      target_sha: 231f9aaa543328e535ad3cf108eef728a787def1
+      target_sha: 2c75d138ac922b13229ba91a9739fbd0b05b4343
       java_version: '25'
       build_tool: gradle
       database: h2
-      arguments: '["hibernate-core:test","--tests","org.hibernate.orm.test.refresh.*","-Pdb=h2","formatChecks"]'
+      arguments: '["hibernate-core:test","--tests","org.hibernate.orm.test.refresh.NestedCascadeRefreshMapKey*","-Pdb=h2","formatChecks"]'
