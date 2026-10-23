@@ -95,4 +95,3 @@ class NestedCascadeRefreshTest {
 		private Parent parent;
 	}
 }
-
