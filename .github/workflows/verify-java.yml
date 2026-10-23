@@ -18,7 +18,7 @@ on:
         description: Test database (match the -Pdb argument)
         type: choice
         default: h2
-        options: [h2, oracle, mssql, spanner, spannerpgsql, sybase]
+        options: [h2, mysql, oracle, mssql, spanner, spannerpgsql, sybase]
       arguments:
         description: Gradle argument JSON array
         type: string
