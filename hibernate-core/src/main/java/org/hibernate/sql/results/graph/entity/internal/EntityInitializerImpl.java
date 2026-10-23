@@ -716,6 +716,10 @@ public class EntityInitializerImpl
 	}
 
 	protected void resolveInstanceSubInitializers(EntityInitializerData data) {
+		if ( data.concreteDescriptor.getEntityName().contains( "NestedCascade" ) ) {
+			System.out.println( "HHH-21009 INSTANCE SUB: " + navigablePath + " state=" + data.getState()
+					+ " instance=" + (data.entityInstanceForNotify != null) + " refresh=" + isRefreshingCascadeAssociation( data ) );
+		}
 		final int subclassId = data.concreteDescriptor.getSubclassId();
 		final var entityEntry = data.entityHolder.getEntityEntry();
 		assert entityEntry != null : "This method should only be called if the entity is already initialized";
@@ -854,10 +858,16 @@ public class EntityInitializerImpl
 	protected void resolveKeySubInitializers(EntityInitializerData data) {
 		final var rowProcessingState = data.getRowProcessingState();
 		final var session = rowProcessingState.getSession();
+		if ( data.concreteDescriptor.getEntityName().contains( "NestedCascade" ) ) {
+			System.out.println( "HHH-21009 KEY SUB: " + navigablePath + " state=" + data.getState()
+					+ " instance=" + (data.entityInstanceForNotify != null) + " refresh=" + isRefreshingCascadeAssociation( data )
+					+ " profile=" + session.getLoadQueryInfluencers().getEnabledCascadingFetchProfile() );
+		}
 		if ( isRefreshingCascadeAssociation( data )
 				&& data.entityInstanceForNotify != null
 				&& session.isEventSource()
 				&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
+			System.out.println( "HHH-21009 EVICT: " + navigablePath );
 			// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
 			DefaultRefreshEventListener.evictCollections(
 					data.entityInstanceForNotify,

@@ -43,6 +43,9 @@ public abstract class AbstractNonJoinCollectionInitializer<Data extends Abstract
 	}
 
 	protected void resolveInstance(Data data, boolean isEager) {
+		if ( collectionPath.toString().contains( "NestedCascade" ) ) {
+			System.out.println( "HHH-21009 NONJOIN: " + collectionPath + " state=" + data.getState() + " eager=" + isEager );
+		}
 		if ( data.getState() == State.KEY_RESOLVED ) {
 			resolveCollectionKey( data, false );
 			if ( data.getState() == State.KEY_RESOLVED ) {
@@ -51,6 +54,9 @@ public abstract class AbstractNonJoinCollectionInitializer<Data extends Abstract
 				// We can avoid processing further if the parent is already initialized,
 				// as the value produced by this initializer will never be used anyway.
 				final var owningEntityData = owningEntityInitializer.getData( rowProcessingState );
+					if ( collectionPath.toString().contains( "NestedCascade" ) ) {
+						System.out.println( "HHH-21009 OWNER: " + collectionPath + " state=" + owningEntityData.getState() );
+					}
 				if ( owningEntityData.getState() == State.INITIALIZED ) {
 					// It doesn't matter if it's eager or lazy, the collection object can not be referred to,
 					// so it doesn't make sense to create or initialize it
