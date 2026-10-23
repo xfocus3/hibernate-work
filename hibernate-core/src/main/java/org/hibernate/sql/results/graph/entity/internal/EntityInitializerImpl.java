@@ -1206,6 +1206,7 @@ public class EntityInitializerImpl
 				}
 			}
 			else {
+				prepareCollectionsForRefresh( data );
 				resolveKeySubInitializers( data );
 			}
 		}
@@ -1301,18 +1302,7 @@ public class EntityInitializerImpl
 				}
 			}
 
-			if ( isRefreshingCascadeAssociation( data )
-					&& data.entityInstanceForNotify != null
-					&& session.isEventSource()
-					&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
-				// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
-				DefaultRefreshEventListener.evictCollections(
-						data.entityInstanceForNotify,
-						data.concreteDescriptor,
-						data.entityKey.getIdentifier(),
-						session.asEventSource()
-				);
-			}
+			prepareCollectionsForRefresh( data );
 
 			if ( data.getInstance() != null ) {
 				upgradeLockMode( data );
@@ -1327,6 +1317,22 @@ public class EntityInitializerImpl
 					initializeSubInstancesFromParent( data );
 				}
 			}
+		}
+	}
+
+	private void prepareCollectionsForRefresh(EntityInitializerData data) {
+		final var session = data.getRowProcessingState().getSession();
+		if ( isRefreshingCascadeAssociation( data )
+				&& data.entityInstanceForNotify != null
+				&& session.isEventSource()
+				&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
+			// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
+			DefaultRefreshEventListener.evictCollections(
+					data.entityInstanceForNotify,
+					data.concreteDescriptor,
+					data.entityKey.getIdentifier(),
+					session.asEventSource()
+			);
 		}
 	}
 
