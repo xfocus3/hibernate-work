@@ -853,19 +853,6 @@ public class EntityInitializerImpl
 
 	protected void resolveKeySubInitializers(EntityInitializerData data) {
 		final var rowProcessingState = data.getRowProcessingState();
-		final var session = rowProcessingState.getSession();
-		if ( isRefreshingCascadeAssociation( data )
-				&& data.entityInstanceForNotify != null
-				&& session.isEventSource()
-				&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
-			// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
-			DefaultRefreshEventListener.evictCollections(
-					data.entityInstanceForNotify,
-					data.concreteDescriptor,
-					data.entityKey.getIdentifier(),
-					session.asEventSource()
-			);
-		}
 		for ( var initializer : subInitializers[data.concreteDescriptor.getSubclassId()] ) {
 			if ( initializer != null ) {
 				initializer.resolveKey( rowProcessingState );
@@ -1312,6 +1299,19 @@ public class EntityInitializerImpl
 					);
 					persistenceContext.addEntity( entityUniqueKey, data.getInstance() );
 				}
+			}
+
+			if ( isRefreshingCascadeAssociation( data )
+					&& data.entityInstanceForNotify != null
+					&& session.isEventSource()
+					&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
+				// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
+				DefaultRefreshEventListener.evictCollections(
+						data.entityInstanceForNotify,
+						data.concreteDescriptor,
+						data.entityKey.getIdentifier(),
+						session.asEventSource()
+				);
 			}
 
 			if ( data.getInstance() != null ) {
