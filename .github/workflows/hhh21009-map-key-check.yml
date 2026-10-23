@@ -1,0 +1,21 @@
+name: HHH-21009 map key boundary comparison
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-21009-map-key-verify]
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - 2c75d138ac922b13229ba91a9739fbd0b05b4343
+          - fb747ce8338e983deeda75e84c3abb3ab21e46b0
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: ${{ matrix.target }}
+      java_version: '25'
+      build_tool: gradle
+      database: h2
+      arguments: '["hibernate-core:test","--tests","org.hibernate.orm.test.refresh.NestedCascadeRefreshMapKey*","-Pdb=h2","formatChecks"]'
