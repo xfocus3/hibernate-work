@@ -1,0 +1,15 @@
+{
+  "id": "83a5c016-2625-4788-8afb-2359a2f12599",
+  "requestHash": "b592af0ea4784b0d76a8da91f40c59e081b5f773ee9fab146439a82f640cc0b1",
+  "runId": "39998238470",
+  "runAttempt": "1",
+  "head": "8c4ebcf7b327ea79e767ac95fad599f59cc1ad53",
+  "resultHead": "231f9aaa543328e535ad3cf108eef728a787def1",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdSelectTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdTest.java"
+  ],
+  "status": "blocked",
+  "stdout": "Verification pending; implementation stage is not complete. The four new composite-ID nested-refresh cases reproduced the stale child label on test-only checkpoint 9e946893e6b57c0fa4e8abf68ea34c43eb942ebe: Actions run 40001448807 attempt 1 executed 4 tests, 4 assertion failures, 0 errors and 0 skips (expected new, actual old). Compilation succeeded. Source and tested tree were both 3df5dc0a646ad528b493094461080b7f44cac3f5, with an empty formatter patch. Formatting checks were requested but cannot be claimed passed after the failed test task. Minimal timing repair checkpoint 231f9aaa543328e535ad3cf108eef728a787def1 moves the existing collection-eviction hook until after entity instance resolution; it is published on sandcastle/dot-check/HHH-21009-composite-id-fix, not the PR branch. Its focused refresh-package/JDK25/H2/formatChecks run 40003743676 and unmodified-baseline comparison run 40001571607 are both still queued as of 2026-10-23T18:36:47Z. No GREEN result is claimed. Request expires at 2026-10-23T18:42:33.271Z, so this supported blocked response preserves the checkpoint without publishing unverified code through the original stage. Continue monitoring those two runs, inspect exact source/tested trees and JUnit results, and reconcile before any new implementation invocation. Original stage-input artifact 12521845562 and request artifact 12521815667 were downloaded and hashes validated; stage ID 1a56d3ce-88fa-4409-a22b-3d3d9913a18d. Keep PR32 draft, issue15 open, and do not merge."
+}
