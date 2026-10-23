@@ -1,0 +1,11 @@
+{
+  "id": "5992fe40-f29b-4e7e-8b9a-c52776a39f31",
+  "requestHash": "65771a4ea123a37094279cf2c27354b06dbf921a7bd642257cb8628d5b18ec3c",
+  "runId": "40017454289",
+  "runAttempt": "1",
+  "head": "254e227e03165529c9e21b1b51b783bd40ec0cb3",
+  "resultHead": "254e227e03165529c9e21b1b51b783bd40ec0cb3",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\"summary\":\"Reviewed the full HHH-21009 change and corrected a reproduced map-key cascade regression in 254e227e03165529c9e21b1b51b783bd40ec0cb3. Collection REFRESH cascades apply to map values, not entity keys. The new loader propagation now requires ELEMENT, and the new collection-eviction helper excludes INDEX before refresh identity registration; existing hasCascadeRefresh behavior remains unchanged. Two regression tests cover default fetching and max_fetch_depth=0, positively verify value refresh, and preserve initialized key-child collection wrappers, stale key-child state and managed identities. Independent source review found no remaining blocking defect.\\n\\nBehavioral comparison: the candidate with tests only (2c75d138ac922b13229ba91a9739fbd0b05b4343) failed both key-child assertions in [run 40014619948](https://github.com/xfocus3/hibernate-work/actions/runs/40014619948), while the unmodified baseline with the same tests (fb747ce8338e983deeda75e84c3abb3ab21e46b0) passed both in [run 40014645953](https://github.com/xfocus3/hibernate-work/actions/runs/40014645953). The repaired exact revision passed [run 40017710774](https://github.com/xfocus3/hibernate-work/actions/runs/40017710774): JDK 25/H2, hibernate-core:testClasses hibernate-core:test --tests org.hibernate.orm.test.refresh.* -Pdb=h2 formatChecks; 45 tests, zero failures/errors/skips. This includes four composite-ID cases, two map-key cases, 30 original nested-refresh cases and nine neighboring tests. Source/tested tree 2426229b9865408a6b5fd6703abdf44d16f08ca7; formatter patch empty.\\n\\nLimitations: specific execution of the alternate resolveInstance(Object, data) overload was not instrumented; the full upstream/database matrix and an updated 7.4 backport remain untested. Keep this PR draft and issue #15 open. No merge or official upstream publication is requested.\",\"inlineComments\":[],\"replies\":[]}\n</output>"
+}
