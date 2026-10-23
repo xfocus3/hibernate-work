@@ -6,6 +6,7 @@ package org.hibernate.orm.test.columntransformer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.hibernate.annotations.ColumnTransformer;
 import org.hibernate.dialect.MySQLDialect;
@@ -17,6 +18,8 @@ import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -26,9 +29,10 @@ import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hibernate.jpa.SpecHints.HINT_SPEC_FETCH_GRAPH;
 
 @DomainModel(annotatedClasses = ColumnTransformerMySqlSelfJoinTest.PaymentRequestLog.class)
-@SessionFactory
+@SessionFactory(useCollectingStatementInspector = true)
 @RequiresDialect(MySQLDialect.class)
 @JiraKey("HHH-20354")
 class ColumnTransformerMySqlSelfJoinTest {
@@ -56,6 +60,33 @@ class ColumnTransformerMySqlSelfJoinTest {
 			final PaymentRequestLog child = parent.upgradePaymentRequestLogs.get( 0 );
 			assertThat( child.email ).isEqualTo( "child@example.com" );
 			assertThat( child.upgradePaymentRequestLogId ).isEqualTo( "parent" );
+		} );
+	}
+
+	@ParameterizedTest(name = "find = {0}")
+	@ValueSource(booleans = { true, false })
+	void testEntityGraph(boolean find, SessionFactoryScope scope) {
+		final var statementInspector = scope.getCollectingStatementInspector();
+		statementInspector.clear();
+		scope.inTransaction( session -> {
+			final var graph = session.createEntityGraph( PaymentRequestLog.class );
+			graph.addAttributeNodes( "upgradePaymentRequestLogs" );
+			final PaymentRequestLog parent = find
+					? session.find( PaymentRequestLog.class, "parent", Map.of( HINT_SPEC_FETCH_GRAPH, graph ) )
+					: session.createQuery(
+							"select p from PaymentRequestLog p where p.id = :id",
+							PaymentRequestLog.class
+					)
+					.setParameter( "id", "parent" )
+					.setHint( HINT_SPEC_FETCH_GRAPH, graph )
+					.getSingleResult();
+			assertThat( parent.email ).isEqualTo( "parent@example.com" );
+			assertThat( parent.upgradePaymentRequestLogs ).hasSize( 1 );
+			final PaymentRequestLog child = parent.upgradePaymentRequestLogs.get( 0 );
+			assertThat( child.email ).isEqualTo( "child@example.com" );
+			assertThat( child.upgradePaymentRequestLogId ).isEqualTo( "parent" );
+			statementInspector.assertExecutedCount( 1 );
+			statementInspector.assertNumberOfJoins( 0, 1 );
 		} );
 	}
 
