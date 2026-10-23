@@ -42,6 +42,7 @@ import org.hibernate.event.spi.PreLoadEventListener;
 import org.hibernate.internal.util.ImmutableBitSet;
 import org.hibernate.loader.ast.spi.CascadingFetchProfile;
 import org.hibernate.metamodel.mapping.AttributeMetadata;
+import org.hibernate.metamodel.mapping.CollectionPart;
 import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
 import org.hibernate.metamodel.mapping.EntityValuedModelPart;
 import org.hibernate.metamodel.mapping.ModelPart;
@@ -1321,6 +1322,10 @@ public class EntityInitializerImpl
 	}
 
 	private void prepareCollectionsForRefresh(EntityInitializerData data) {
+		if ( referencedModelPart instanceof EntityCollectionPart collectionPart
+				&& collectionPart.getNature() == CollectionPart.Nature.INDEX ) {
+			return;
+		}
 		final var session = data.getRowProcessingState().getSession();
 		if ( isRefreshingCascadeAssociation( data )
 				&& data.entityInstanceForNotify != null

@@ -909,6 +909,7 @@ public class LoaderSelectBuilder {
 			final boolean isFetchablePluralAttributeMapping = isABag || isPluralAttributeMapping( fetchable );
 			final Integer maximumFetchDepth = creationContext.getMaximumFetchDepth();
 			boolean cascadeReachable = fetchable instanceof CollectionPart collectionPart
+					&& collectionPart.getNature() == CollectionPart.Nature.ELEMENT
 					&& loadQueryInfluencers.getEnabledCascadingFetchProfile() == CascadingFetchProfile.REFRESH
 					&& collectionPart.getCollectionAttribute().getAttributeMetadata()
 							.getCascadeStyle().doCascade( CascadingActions.REFRESH );
