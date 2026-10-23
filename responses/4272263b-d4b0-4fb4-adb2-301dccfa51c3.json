@@ -1,0 +1,11 @@
+{
+  "id": "4272263b-d4b0-4fb4-adb2-301dccfa51c3",
+  "requestHash": "ec08751352bc582f26c9a61344466dc00a36fc11ecb2cbc6a502720e3b666c80",
+  "runId": "40009525053",
+  "runAttempt": "1",
+  "head": "bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1",
+  "resultHead": "bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"threadReplies\": [],\n  \"newInlineComments\": [],\n  \"topLevelComments\": [\n    {\n      \"body\": \"Completed the targeted composite-ID nested-refresh coverage and minimal timing repair at bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1.\\n\\n- Four new @IdClass/key-many-to-one regression cases cover default fetching and max_fetch_depth=0, initialized/uninitialized root collections, child scalar updates, membership additions and managed identity preservation.\\n- Behavioral RED: test-only candidate 9e946893e6b57c0fa4e8abf68ea34c43eb942ebe ([run 40001448807](https://github.com/xfocus3/hibernate-work/actions/runs/40001448807)) and unmodified-baseline test checkpoint f36133a70e846cc27f2db2c0ba746dd9b89b1c69 ([run 40001571607](https://github.com/xfocus3/hibernate-work/actions/runs/40001571607)) each executed four tests with four stale-label assertion failures, zero errors/skips.\\n- Final GREEN: [run 40007303440](https://github.com/xfocus3/hibernate-work/actions/runs/40007303440), attempt 1, JDK 25/H2, hibernate-core:test --tests org.hibernate.orm.test.refresh.* -Pdb=h2 formatChecks. All 43 refresh tests passed with zero failures/errors/skips, including four new composite-ID cases and all 30 original nested-refresh cases. Source/tested tree: bb5ced26ef4fcd0909525d5859bd602241358065; formatter patch empty.\\n- The existing cascade/REFRESH/EventSource/identity-registration guard is preserved in a shared helper. Preparation now follows entity resolution, with the alternate instance-resolution path retaining its former hook scope. Independent source review found no blocking defect.\\n\\nLimitations: execution of the alternate resolveInstance(Object, data) overload was not specifically demonstrated. The full upstream/database matrix and an updated 7.4 backport were not run. The prior blocked invocation remains unchanged; this is a fresh validated continuation. Keep this PR draft and issue #15 open. No merge is requested.\"\n    }\n  ]\n}\n</output>"
+}
