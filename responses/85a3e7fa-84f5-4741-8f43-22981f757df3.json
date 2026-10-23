@@ -1,0 +1,15 @@
+{
+  "id": "85a3e7fa-84f5-4741-8f43-22981f757df3",
+  "requestHash": "a24117131c6c390a260070f91fca189f170929e0400a7ce42b84cbd929beecda",
+  "runId": "40009525053",
+  "runAttempt": "1",
+  "head": "8c4ebcf7b327ea79e767ac95fad599f59cc1ad53",
+  "resultHead": "bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdSelectTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Completed targeted HHH-21009 composite-ID nested-refresh coverage and minimal timing repair. Added four initially uncached @IdClass/key-many-to-one cases covering default fetch and max_fetch_depth=0, initialized/uninitialized root collections, existing managed identities, child scalar refresh and collection membership. Behavioral RED: test-only candidate 9e946893e6b57c0fa4e8abf68ea34c43eb942ebe in run40001448807 and unmodified-baseline test checkpoint f36133a70e846cc27f2db2c0ba746dd9b89b1c69 in run40001571607 each executed 4 tests with 4 expected stale-label assertion failures (expected new, actual old), 0 errors/skips. Compilation succeeded. Repair preserves the existing REFRESH/cascade/EventSource/first-identity-registration guard and moves collection preparation after identifier/instance resolution, shared with the alternate resolveInstance(Object,data) non-INITIALIZED path at its former hook scope. Final exact revision bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1 passed JDK25/H2 hibernate-core:test --tests org.hibernate.orm.test.refresh.* -Pdb=h2 formatChecks in https://github.com/xfocus3/hibernate-work/actions/runs/40007303440 attempt1. Artifact12526015515: source tree and tested tree both bb5ced26ef4fcd0909525d5859bd602241358065; verified formatter patch empty. 43 tests passed, 0 failures/errors/skips: 4 composite-ID, 30 original nested-refresh and 9 neighboring refresh tests. Independent read-only source review approved the conservative helper revision, checking null/key/descriptor safety, registration lifetime, cascade and state boundaries. Specific execution coverage of the alternate resolveInstance(Object,data) overload was not demonstrated. Full upstream/database matrix and updated 7.4 backport were not run; previous 7.4 checkpoint is preserved, not claimed to include this repair. Original blocked run39998238470 and its response remain unchanged. This is a fresh invocation consuming a validated descendant checkpoint. Keep PR32 draft and issue15 open; do not merge. No review threads require replies. A top-level completion comment may summarize this public technical evidence and limitations.\n<promise>COMPLETE</promise>"
+}
