@@ -36,6 +36,7 @@ import org.hibernate.engine.spi.PersistenceContext;
 import org.hibernate.engine.spi.PersistentAttributeInterceptor;
 import org.hibernate.engine.spi.SharedSessionContractImplementor;
 import org.hibernate.engine.spi.Status;
+import org.hibernate.event.internal.DefaultRefreshEventListener;
 import org.hibernate.event.monitor.spi.EventMonitor;
 import org.hibernate.event.spi.PreLoadEventListener;
 import org.hibernate.internal.util.ImmutableBitSet;
@@ -852,6 +853,19 @@ public class EntityInitializerImpl
 
 	protected void resolveKeySubInitializers(EntityInitializerData data) {
 		final var rowProcessingState = data.getRowProcessingState();
+		final var session = rowProcessingState.getSession();
+		if ( isRefreshingCascadeAssociation( data )
+				&& data.entityInstanceForNotify != null
+				&& session.isEventSource()
+				&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
+			// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
+			DefaultRefreshEventListener.evictCollections(
+					data.entityInstanceForNotify,
+					data.concreteDescriptor,
+					data.entityKey.getIdentifier(),
+					session.asEventSource()
+			);
+		}
 		for ( var initializer : subInitializers[data.concreteDescriptor.getSubclassId()] ) {
 			if ( initializer != null ) {
 				initializer.resolveKey( rowProcessingState );
