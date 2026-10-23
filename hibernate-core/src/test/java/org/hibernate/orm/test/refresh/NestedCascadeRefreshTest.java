@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.hibernate.Hibernate;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.Fetch;
 import org.hibernate.annotations.FetchMode;
 import org.hibernate.annotations.Cache;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
@@ -191,6 +193,42 @@ class NestedCascadeRefreshTest {
 		} );
 	}
 
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void refreshDoesNotRefreshOtherCollectionOwners(boolean subselect, SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.persist( createRoot() );
+			final Root otherRoot = createRoot();
+			otherRoot.id = 10;
+			final Parent otherParent = otherRoot.parents.get( 0 );
+			otherParent.id = 20;
+			otherParent.children.get( 0 ).id = 30;
+			session.persist( otherRoot );
+		} );
+		scope.inTransaction( session -> {
+			session.setSubselectFetchingEnabled( subselect );
+			final Root root = session.find( Root.class, 1L );
+			final List<Parent> parents = session.createSelectionQuery(
+					"from NestedRefreshParent p order by p.id", Parent.class ).getResultList();
+			final Parent otherParent = parents.get( 1 );
+			final Child child = session.find( Child.class, 3L );
+			final Child otherChild = session.find( Child.class, 30L );
+			assertThat( Hibernate.isInitialized( otherParent.children ) ).isFalse();
+			session.doWork( connection -> {
+				try ( var statement = connection.createStatement() ) {
+					assertThat( statement.executeUpdate( "update nested_refresh_child set label = 'new'" ) )
+							.isEqualTo( 2 );
+				}
+			} );
+
+			session.refresh( root );
+
+			assertThat( child.label ).isEqualTo( "new" );
+			assertThat( otherChild.label ).isEqualTo( "old" );
+			assertThat( Hibernate.isInitialized( otherParent.children ) ).isFalse();
+		} );
+	}
+
 	private static Root createRoot() {
 		final Root root = new Root();
 		root.id = 1;
@@ -234,6 +272,7 @@ class NestedCascadeRefreshTest {
 
 		@OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
 		@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+		@BatchSize(size = 10)
 		private List<Child> children = new ArrayList<>();
 	}
 
