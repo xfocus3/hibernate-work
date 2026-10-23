@@ -1,0 +1,14 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:testClasses",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.refresh.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Verify HHH-21009 nested composite-ID refresh, existing managed identity, repeated refresh, cascade boundaries and neighboring refresh behavior at the exact current PR head. Initial validated head bf2830b86be72ec5c7736fcb7b9e5e5758ddedd1 passed 43 refresh tests; the full upstream database matrix and updated 7.4 backport remain outside this focused plan."
+}
