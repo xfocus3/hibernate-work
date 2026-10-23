@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.hibernate.Hibernate;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.cfg.AvailableSettings;
@@ -214,6 +216,7 @@ class NestedCascadeRefreshTest {
 		private List<Parent> parents = new ArrayList<>();
 
 		@OneToMany(mappedBy = "uncascadedRoot", cascade = CascadeType.PERSIST, fetch = FetchType.EAGER)
+		@Fetch(FetchMode.SELECT)
 		private List<Parent> otherParents = new ArrayList<>();
 	}
 
