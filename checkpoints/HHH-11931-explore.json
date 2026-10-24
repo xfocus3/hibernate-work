@@ -41,8 +41,8 @@
     "controls": "Parameterized self-comparable and comparable-supertype control passed; both existing Jpa4MetamodelTest methods passed.",
     "scopeNote": "The raw fixture includes direct and inherited raw Comparable. The harness reports the first compiler error only; the observed baseline diagnostic is for the direct raw field. GREEN must verify both exact value types."
   },
-  "next": "Prepare clean official fork branch, verify its exact head with a work-main-rooted focused controller, and recheck upstream/dedup before normal draft PR publication. Wider upstream CI remains unchanged.",
-  "updatedAt": "2026-10-24T15:33:20Z",
+  "next": "Official submission is blocked by integration permissions. No alternate publication route attempted. All original Sandcastle handoffs are consumed; no pending requests.",
+  "updatedAt": "2026-10-24T15:37:53Z",
   "implementation": {
     "run": 40106005512,
     "request": "e8a6061e-3b7a-4530-845f-8f51b4198fea",
@@ -103,11 +103,39 @@
     "parent": "37616099b745e01500f65eb580f9cef270550cdb",
     "changedFiles": 4,
     "remoteVerified": true,
-    "verificationRun": 40107466552,
+    "verificationRun": 40107633336,
     "verificationControllerRepository": "xfocus3/hibernate-work",
-    "verificationController": "348e7aeb7cd0bf180a293dbabc930f21ae4f09c9",
-    "verificationControllerParent": "aa570c495bb0df336fbf27b46efb4012d4419852",
-    "status": "focused final-head verification running",
-    "forkPushRuns": 0
-  }
+    "verificationController": "89cd2910c1d8443137afe7a4f6b5cd8e69a381d2",
+    "verificationControllerParent": "348e7aeb7cd0bf180a293dbabc930f21ae4f09c9",
+    "status": "source ready; official PR creation denied",
+    "forkPushRuns": 0,
+    "controllerInitial": "348e7aeb7cd0bf180a293dbabc930f21ae4f09c9",
+    "artifact": 12564922574,
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "testTask": "executed with --rerun; not cached",
+    "compilation": "passed with Gradle build cache",
+    "format": "passed",
+    "jdk": "Temurin25.0.4.1+1",
+    "testedTree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "verifiedPatchEmpty": true,
+    "attempt": {
+      "action": "create_pull_request",
+      "target": "hibernate/hibernate-orm:main",
+      "head": "xfocus3:8.0-HHH-11931-raw-comparable",
+      "draft": true,
+      "httpStatus": 403,
+      "message": "Resource not accessible by integration",
+      "result": "denied; no official PR",
+      "verifiedAt": "2026-10-24T15:37:46Z",
+      "dedup": "All-state exact-head REST query and exact Jira-key PR search returned no PR."
+    },
+    "incompleteEvidenceRun": {
+      "run": 40107466552,
+      "note": "Source/tree and Gradle checks passed, but artifact glob omitted test XML and the test task was cached. Superseded by run40107633336 with fresh test execution and complete reports."
+    }
+  },
+  "pendingRequests": []
 }
