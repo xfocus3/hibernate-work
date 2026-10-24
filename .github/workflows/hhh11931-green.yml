@@ -1,0 +1,17 @@
+name: HHH-11931 focused processor GREEN
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-11931-green]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: 37616099b745e01500f65eb580f9cef270550cdb
+      patch_ref: ${{ github.sha }}
+      patch_path: patches/HHH-11931-candidate.patch
+      java_version: '25'
+      build_tool: gradle
+      database: h2
+      arguments: '["hibernate-processor:formatChecks","hibernate-processor:test","--tests","org.hibernate.processor.test.jpa4.*","--tests","org.hibernate.processor.test.generics.GenericsTest","--tests","org.hibernate.processor.test.generictype.GenericEntityTest","--tests","org.hibernate.processor.test.rawtypes.RawTypesTest","-x","hibernate-processor:jakartaDataTest","-x","hibernate-processor:integrationTest","-x","hibernate-processor:dataIntegrationTest","--continue","-Pdb=h2"]'
