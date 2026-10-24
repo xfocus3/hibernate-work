@@ -1,0 +1,26 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-processor:formatChecks",
+    "hibernate-processor:test",
+    "--tests",
+    "org.hibernate.processor.test.jpa4.*",
+    "--tests",
+    "org.hibernate.processor.test.generics.GenericsTest",
+    "--tests",
+    "org.hibernate.processor.test.generictype.GenericEntityTest",
+    "--tests",
+    "org.hibernate.processor.test.rawtypes.RawTypesTest",
+    "-x",
+    "hibernate-processor:jakartaDataTest",
+    "-x",
+    "hibernate-processor:integrationTest",
+    "-x",
+    "hibernate-processor:dataIntegrationTest",
+    "--continue",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify HHH-11931 at the exact current PR head. Seven real Hibernate Processor compilation tests cover direct and inherited raw Comparable fallback to typed SingularAttribute, parameterized self-comparable values, comparable-supertype inheritance, existing JPA4 specialized types and statement references, and generic/raw-type neighbors. Exact candidate tree 6c0cf3d7e255972262aec216022c8c416721029e passed this scope and formatting. No database service is required; h2 is the build configuration. Unrelated processor integration tasks are explicitly excluded. The full upstream database matrix is outside this focused plan."
+}
