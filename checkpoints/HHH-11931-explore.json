@@ -1,0 +1,33 @@
+{
+  "issue": "HHH-11931",
+  "ticket": "https://github.com/xfocus3/hibernate-work/issues/38",
+  "baseline": "37616099b745e01500f65eb580f9cef270550cdb",
+  "explore": {
+    "run": 40105113817,
+    "conclusion": "success",
+    "request": "18b09a78-8322-4b2f-bc34-0c38af32554d",
+    "requestHash": "65e179f3ad01f8c20ea9edccdbb938503c24b450226999bbcae1750b426e6a9b",
+    "requestArtifact": 12564656244,
+    "stageArtifact": 12564088768,
+    "responseCommit": "b824a523ad6ddf76e7b0dee9129af7daec04cdae",
+    "extractionRequest": "4458e850-73c1-458c-8185-0545d4be40cf",
+    "extractionArtifact": 12564457436,
+    "extractionResponseCommit": "f0aa6385153fca9510de6f11c05b59b18c3cc3c3",
+    "consumed": true,
+    "planArtifact": 12564701351,
+    "comment": "https://github.com/xfocus3/hibernate-work/issues/38#issuecomment-6385795011",
+    "pendingRequests": []
+  },
+  "red": {
+    "run": 40105627127,
+    "controller": "bf13c4dff532d2585f0241ac4f46ad541dfbd536",
+    "parent": "d756c8f18c729b88e27405ab33e111fc159853ec",
+    "patchPath": "patches/HHH-11931-red.patch",
+    "expectedTestedTree": "24e793098cf4beaf91a80b709b5209a37f83311a",
+    "status": "running",
+    "onlyIntendedWorkflow": true,
+    "productionChanges": false
+  },
+  "next": "Inspect focused test results and exact tested tree; stop before production implementation until RED and the narrow plan are reviewed.",
+  "updatedAt": "2026-10-24T15:09:02Z"
+}
