@@ -1,5 +1,6 @@
 package org.hibernate.processor.test.data.constructormismatch;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -23,24 +24,41 @@ class ConstructorMismatchTest {
 	@Test
 	void reportsSelectionAndConstructorTypes() throws Exception {
 		final var diagnostics = new DiagnosticCollector<JavaFileObject>();
-		assertFalse( compile( InvalidSummaryRepository.class, diagnostics ) );
+		assertFalse( compile( InvalidSummaryRepository.class, diagnostics, List.of() ) );
 		final String message = diagnostics.getDiagnostics().stream()
 				.filter( diagnostic -> diagnostic.getKind() == Diagnostic.Kind.ERROR )
 				.map( diagnostic -> diagnostic.getMessage( Locale.ROOT ) )
 				.filter( diagnostic -> diagnostic.contains( "has no constructor matching query selection list" ) )
 				.collect( Collectors.joining( "\n" ) );
 		assertFalse( message.isEmpty(), diagnostics.getDiagnostics().toString() );
-		assertTrue( message.contains( "java.lang.String" ) && message.contains( "[]" )
-				&& message.contains( "int" ), "Missing selection and constructor parameter types: " + message );
+		// The generic dialect does not register array_agg, so its inferred type is Object.
+		assertTrue( message.contains( "with types (java.lang.String, java.lang.Object)" ), message );
+		assertTrue( message.contains( "available constructor parameter lists: [(java.lang.String, int)]" ), message );
+	}
+
+	@Test
+	void reportsArraySelectionTypesWithDialect() throws Exception {
+		final var diagnostics = new DiagnosticCollector<JavaFileObject>();
+		assertFalse( compile( InvalidSummaryRepository.class, diagnostics,
+				List.of( "-A" + HibernateProcessor.DIALECT_OPTION + "=org.hibernate.dialect.PostgreSQLDialect" ) ) );
+		final String message = diagnostics.getDiagnostics().stream()
+				.filter( diagnostic -> diagnostic.getKind() == Diagnostic.Kind.ERROR )
+				.map( diagnostic -> diagnostic.getMessage( Locale.ROOT ) )
+				.collect( Collectors.joining( "\n" ) );
+		assertTrue( message.contains( "with types (java.lang.String, java.lang.Integer[])" ), message );
+		assertTrue( message.contains( "available constructor parameter lists: [(java.lang.String, int)]" ), message );
 	}
 
 	@Test
 	void matchingConstructorStillCompiles() throws Exception {
 		final var diagnostics = new DiagnosticCollector<JavaFileObject>();
-		assertTrue( compile( ValidSummaryRepository.class, diagnostics ), diagnostics.getDiagnostics().toString() );
+		assertTrue( compile( ValidSummaryRepository.class, diagnostics, List.of() ), diagnostics.getDiagnostics().toString() );
 	}
 
-	private boolean compile(Class<?> repository, DiagnosticCollector<JavaFileObject> diagnostics) throws Exception {
+	private boolean compile(
+			Class<?> repository,
+			DiagnosticCollector<JavaFileObject> diagnostics,
+			List<String> processorOptions) throws Exception {
 		final var compiler = ToolProvider.getSystemJavaCompiler();
 		try ( var fileManager = compiler.getStandardFileManager( diagnostics, Locale.ROOT, defaultCharset() ) ) {
 			final var sourceFiles = List.of(
@@ -48,10 +66,14 @@ class ConstructorMismatchTest {
 					TestUtil.getSourceFile( Summary.class ),
 					TestUtil.getSourceFile( repository )
 			);
+			final var options = new ArrayList<>( List.of(
+					"-d", TestUtil.getOutBaseDir( ConstructorMismatchTest.class ).getAbsolutePath(),
+					"-processor", HibernateProcessor.class.getName()
+			) );
+			options.addAll( processorOptions );
 			return compiler.getTask(
 					null, fileManager, diagnostics,
-					List.of( "-d", TestUtil.getOutBaseDir( ConstructorMismatchTest.class ).getAbsolutePath(),
-							"-processor", HibernateProcessor.class.getName() ),
+					options,
 					null, fileManager.getJavaFileObjectsFromFiles( sourceFiles )
 			).call();
 		}
