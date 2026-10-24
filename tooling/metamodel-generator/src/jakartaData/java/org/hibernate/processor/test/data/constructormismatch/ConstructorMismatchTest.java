@@ -50,6 +50,20 @@ class ConstructorMismatchTest {
 	}
 
 	@Test
+	void reportsAllOverloadsForWrongArity() throws Exception {
+		final var diagnostics = new DiagnosticCollector<JavaFileObject>();
+		assertFalse( compile( InvalidArityRepository.class, diagnostics, List.of() ) );
+		final String message = diagnostics.getDiagnostics().stream()
+				.filter( diagnostic -> diagnostic.getKind() == Diagnostic.Kind.ERROR )
+				.map( diagnostic -> diagnostic.getMessage( Locale.ROOT ) )
+				.collect( Collectors.joining( "\n" ) );
+		assertTrue( message.contains( "with types (java.lang.String, java.lang.Integer, java.lang.Long)" ), message );
+		assertTrue( message.contains( "available constructor parameter lists:" ), message );
+		assertTrue( message.contains( "(java.lang.String)" ), message );
+		assertTrue( message.contains( "(java.util.List<java.lang.String>, int[])" ), message );
+	}
+
+	@Test
 	void matchingConstructorStillCompiles() throws Exception {
 		final var diagnostics = new DiagnosticCollector<JavaFileObject>();
 		assertTrue( compile( ValidSummaryRepository.class, diagnostics, List.of() ), diagnostics.getDiagnostics().toString() );
@@ -64,6 +78,7 @@ class ConstructorMismatchTest {
 			final var sourceFiles = List.of(
 					TestUtil.getSourceFile( Book.class ),
 					TestUtil.getSourceFile( Summary.class ),
+					TestUtil.getSourceFile( OverloadedSummary.class ),
 					TestUtil.getSourceFile( repository )
 			);
 			final var options = new ArrayList<>( List.of(
