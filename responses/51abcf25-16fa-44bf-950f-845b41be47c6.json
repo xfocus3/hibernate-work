@@ -1,0 +1,11 @@
+{
+  "id": "51abcf25-16fa-44bf-950f-845b41be47c6",
+  "requestHash": "6b90feb2e462989f71e28e3fad4c6404decf44e0df5147d90a9735b80f38beaa",
+  "runId": "40093026913",
+  "runAttempt": "1",
+  "head": "5794cfd079e4d09db0743d8062e7212c83612197",
+  "resultHead": "5794cfd079e4d09db0743d8062e7212c83612197",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed HHH-20771 at commit 5794cfd079e4d09db0743d8062e7212c83612197. No blocking findings and no review changes were needed. The diagnostic now distinguishes inferred query selection types from declared constructor parameter lists, including readable array and parameterized types. Constructor matching and Tuple/List/Map exceptions are unchanged; no function registration, type inference, caching, or public API behavior was broadened.\\n\\nExact-head verification passed: https://github.com/xfocus3/hibernate-work/actions/runs/40092318817 (artifact 12559512277). The tested tree is 134a92929c879b975d7b80f422e985034bfa9aa4, with an empty formatting patch. All six compiler tests passed with zero failures, errors, or skips, covering default Object inference, configured PostgreSQL-dialect Integer[] rendering, valid matching, wrong arity with multiple constructors including List<String> and int[] signatures, and existing SelectionTest neighbors. Processor compilation and formatting passed on JDK 25. These are annotation-processor/compiler tests in the H2 build configuration, not PostgreSQL database integration tests.\\n\\nThe original missing-detail regression failed before the fix in run 40090780324. The initial candidate's array expectation exposed GenericDialect's existing Object fallback; the final tests distinguish that baseline from configured array inference rather than changing query acceptance. Null/unknown-type fallback and the special return-type exceptions were source-reviewed, not separately execution-tested. The full upstream matrix remains deferred.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
