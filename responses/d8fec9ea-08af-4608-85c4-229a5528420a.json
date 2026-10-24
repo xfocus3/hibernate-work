@@ -1,0 +1,20 @@
+{
+  "id": "d8fec9ea-08af-4608-85c4-229a5528420a",
+  "requestHash": "7301b75158cc6ad92a500a0794197672a9505d55460a2f017f145aefbef5b30a",
+  "runId": "40091052433",
+  "runAttempt": "1",
+  "head": "37616099b745e01500f65eb580f9cef270550cdb",
+  "resultHead": "5794cfd079e4d09db0743d8062e7212c83612197",
+  "changedPaths": [
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/Book.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/ConstructorMismatchTest.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/InvalidArityRepository.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/InvalidSummaryRepository.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/OverloadedSummary.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/Summary.java",
+    "tooling/metamodel-generator/src/jakartaData/java/org/hibernate/processor/test/data/constructormismatch/ValidSummaryRepository.java",
+    "tooling/metamodel-generator/src/main/java/org/hibernate/processor/annotation/AnnotationMetaEntity.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-20771 as a diagnostic-only change. Constructor mismatch errors now show the inferred query selection types and every declared constructor parameter list. Matching behavior and Tuple/List/Map exceptions are unchanged; existing type names render arrays and parameterized constructor types readably.\n\nLatest official main rechecked: 37616099b745e01500f65eb580f9cef270550cdb. Result commit: 5794cfd079e4d09db0743d8062e7212c83612197; result tree: 134a92929c879b975d7b80f422e985034bfa9aa4.\n\nGenuine test-only RED: 89a444d701070b5b819d55fdb175ed7bed13d93a, run https://github.com/xfocus3/hibernate-work/actions/runs/40090780324, artifact12558816819. The missing-diagnostic-detail assertion failed; matching constructor and two existing SelectionTest tests passed; formatting passed.\n\nThe first production candidate run40091320547 still failed the array expectation. Investigation showed GenericDialect does not register array_agg and exposes Object. No inference or function-registration change was made. Tests now assert the exact honest default Object tuple and separately configure PostgreSQLDialect to prove Integer[] rendering.\n\nFinal focused GREEN: https://github.com/xfocus3/hibernate-work/actions/runs/40091964006, artifact12559158597. Temurin JDK25.0.4+1. Command: ./gradlew hibernate-processor:formatChecks hibernate-processor:jakartaDataTest --tests org.hibernate.processor.test.data.constructormismatch.ConstructorMismatchTest --tests org.hibernate.processor.test.data.select.SelectionTest --continue -Pdb=h2. All six tests passed, zero failures/errors/skips, formatting passed, verified.patch empty, input and tested trees both134a92929c879b975d7b80f422e985034bfa9aa4. Coverage includes default and dialect-specific selection types, positive matching, overloaded constructors with wrong arity, parameterized List<String> and primitive int[] constructor signatures, and two existing selection neighbors. Null/unknown fallback and unchanged Tuple/List/Map exceptions were source-reviewed, not separately execution-tested. Full upstream matrix deferred.\n\nIndependent review of this exact final tree found no blocking issues. No upstream PR, merge, release, or access change was performed. Ready for the workflow's draft work PR and review stage; upstream publication remains separately gated.\n\n<promise>COMPLETE</promise>"
+}
