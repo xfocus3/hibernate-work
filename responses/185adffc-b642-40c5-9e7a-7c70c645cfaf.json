@@ -1,0 +1,11 @@
+{
+  "id": "185adffc-b642-40c5-9e7a-7c70c645cfaf",
+  "requestHash": "0fa2e7950955614fd18bf15bf258b7b7ce707be8430ada836a52aa75cca2f2e3",
+  "runId": "40106780102",
+  "runAttempt": "1",
+  "head": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+  "resultHead": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed exact head e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2 against official main 37616099b745e01500f65eb580f9cef270550cdb. No blocking findings or further code changes were warranted. The narrow JPA classifier correction rejects unchecked raw Comparable conversions without erasing valid parameterized types. Real processor compilation regressions verify direct and inherited raw Comparable values retain exact SingularAttribute value types, while self-comparable and comparable-supertype controls retain specialization. The Data classifier, dependencies and spatial mapping are unchanged.\\n\\nGenuine test-only RED run40105627127 had one expected generated-source compilation failure and three passing controls. Exact-head focused verification run40106630382 passed seven tests with zero failures/errors/skips, plus compilation and format checks on JDK25. Its input and tested trees match 6c0cf3d7e255972262aec216022c8c416721029e and verified.patch is empty. Broader integration tests and the full upstream database matrix remain deferred, not claimed as passed. No unresolved human review threads require replies. Evidence: https://github.com/xfocus3/hibernate-work/actions/runs/40106630382\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
