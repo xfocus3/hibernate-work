@@ -1,0 +1,11 @@
+{
+  "id": "0e28545f-fdda-4880-a7e4-afd88e8d59e9",
+  "runId": "40106780102",
+  "runAttempt": "1",
+  "requestHash": "9dca83742c0f9d5ca9bd5feccaf8916e3c5bd1d56d282d871326dacb3192299e",
+  "head": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+  "resultHead": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed exact source head e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2 and tree 6c0cf3d7e255972262aec216022c8c416721029e against official main 37616099b745e01500f65eb580f9cef270550cdb. No blocking findings and no code changes warranted. The JPA classifier now requires strict Comparable subtyping while preserving declared generic types. Direct and inherited raw Comparable values retain their exact types through SingularAttribute; parameterized self-comparable and comparable-supertype controls retain ComparableAttribute specialization. The real processor compilation tests assert generated generic declarations, not source inspection or a mocked compiler. DataMetaAttributeGenerationVisitor, dependencies, and spatial mapping remain unchanged. No unresolved human review threads require replies.\n\nGenuine test-only RED run40105627127 had four tests with one expected generated-source compilation failure and three passing controls. Exact-head focused GREEN run40106630382 passed seven tests with zero failures/errors/skips, plus compilation and formatChecks on Temurin JDK25. Input and tested trees both match the reviewed tree, and verified.patch is empty. Public evidence: https://github.com/xfocus3/hibernate-work/actions/runs/40106630382 . Command: ./gradlew --no-daemon hibernate-processor:formatChecks hibernate-processor:test --tests org.hibernate.processor.test.jpa4.* --tests org.hibernate.processor.test.generics.GenericsTest --tests org.hibernate.processor.test.generictype.GenericEntityTest --tests org.hibernate.processor.test.rawtypes.RawTypesTest -x hibernate-processor:jakartaDataTest -x hibernate-processor:integrationTest -x hibernate-processor:dataIntegrationTest --continue -Pdb=h2. No review commit was made. Broader integration tests and the full upstream database matrix remain deferred, not claimed as passed.\n\n<promise>COMPLETE</promise>"
+}
