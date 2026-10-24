@@ -1,0 +1,64 @@
+name: HHH-11931 exact fork-head verification
+on:
+  push:
+    branches: ['sandcastle/dot-check/HHH-11931-final-fork-verify']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xfocus3/hibernate-orm
+          ref: 6c8e08c0f65d5967d491f24ec32934cd917419c1
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify exact final source
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "6c8e08c0f65d5967d491f24ec32934cd917419c1"
+          test "$(git rev-parse HEAD^{tree})" = "6c0cf3d7e255972262aec216022c8c416721029e"
+          test -z "$(git status --porcelain)"
+          printf 'repository=xfocus3/hibernate-orm\nbase=%s\npatch_commit=\ntree=%s\n' "$(git rev-parse HEAD)" "$(git write-tree)" > ../verification.txt
+          java -version 2>&1 | tee ../java-version.txt
+      - name: Run focused processor checks
+        working-directory: target
+        env:
+          ARGUMENTS: '["hibernate-processor:formatChecks","hibernate-processor:test","--tests","org.hibernate.processor.test.jpa4.*","--tests","org.hibernate.processor.test.generics.GenericsTest","--tests","org.hibernate.processor.test.generictype.GenericEntityTest","--tests","org.hibernate.processor.test.rawtypes.RawTypesTest","-x","hibernate-processor:jakartaDataTest","-x","hibernate-processor:integrationTest","-x","hibernate-processor:dataIntegrationTest","--continue","-Pdb=h2"]'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          args = json.loads(os.environ["ARGUMENTS"])
+          sys.exit(subprocess.run(["./gradlew", "--no-daemon"] + args).returncode)
+          PY
+      - name: Capture tested source
+        if: always()
+        working-directory: target
+        run: |
+          set -euo pipefail
+          git diff --binary HEAD > ../verified.patch
+          git add -u
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
+          test ! -s ../verified.patch
+          test "$(git write-tree)" = "6c0cf3d7e255972262aec216022c8c416721029e"
+      - name: Save focused verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hhh11931-final-fork-verification
+          path: |
+            verification.txt
+            java-version.txt
+            verified.patch
+            target/**/build/test-results/**/TEST-*.xml
+          retention-days: 7
+          if-no-files-found: error
