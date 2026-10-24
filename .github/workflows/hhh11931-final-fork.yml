@@ -32,13 +32,28 @@ jobs:
       - name: Run focused processor checks
         working-directory: target
         env:
-          ARGUMENTS: '["hibernate-processor:formatChecks","hibernate-processor:test","--tests","org.hibernate.processor.test.jpa4.*","--tests","org.hibernate.processor.test.generics.GenericsTest","--tests","org.hibernate.processor.test.generictype.GenericEntityTest","--tests","org.hibernate.processor.test.rawtypes.RawTypesTest","-x","hibernate-processor:jakartaDataTest","-x","hibernate-processor:integrationTest","-x","hibernate-processor:dataIntegrationTest","--continue","-Pdb=h2"]'
+          ARGUMENTS: '["hibernate-processor:formatChecks","hibernate-processor:test","--rerun","--tests","org.hibernate.processor.test.jpa4.*","--tests","org.hibernate.processor.test.generics.GenericsTest","--tests","org.hibernate.processor.test.generictype.GenericEntityTest","--tests","org.hibernate.processor.test.rawtypes.RawTypesTest","-x","hibernate-processor:jakartaDataTest","-x","hibernate-processor:integrationTest","-x","hibernate-processor:dataIntegrationTest","--continue","-Pdb=h2"]'
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, os, subprocess, sys
           args = json.loads(os.environ["ARGUMENTS"])
           sys.exit(subprocess.run(["./gradlew", "--no-daemon"] + args).returncode)
+          PY
+      - name: Validate focused test reports
+        working-directory: target
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, xml.etree.ElementTree as ET
+          files = list(pathlib.Path("tooling/metamodel-generator/target/test-results/test").glob("TEST-*.xml"))
+          suites = [ET.parse(path).getroot() for path in files]
+          counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites) for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"org.hibernate.processor.test.jpa4.RawComparableMetamodelTest", "org.hibernate.processor.test.jpa4.Jpa4MetamodelTest", "org.hibernate.processor.test.generics.GenericsTest", "org.hibernate.processor.test.generictype.GenericEntityTest", "org.hibernate.processor.test.rawtypes.RawTypesTest"}
+          assert {suite.attrib["name"] for suite in suites} == expected
+          assert counts == {"tests": 7, "failures": 0, "errors": 0, "skipped": 0}, counts
+          pathlib.Path("../test-summary.json").write_text(json.dumps(counts, indent=2) + "\n")
+          print(json.dumps(counts))
           PY
       - name: Capture tested source
         if: always()
@@ -59,6 +74,8 @@ jobs:
             verification.txt
             java-version.txt
             verified.patch
+            test-summary.json
             target/**/build/test-results/**/TEST-*.xml
+            target/**/target/test-results/**/TEST-*.xml
           retention-days: 7
           if-no-files-found: error
