@@ -41,6 +41,58 @@
     "controls": "Parameterized self-comparable and comparable-supertype control passed; both existing Jpa4MetamodelTest methods passed.",
     "scopeNote": "The raw fixture includes direct and inherited raw Comparable. The harness reports the first compiler error only; the observed baseline diagnostic is for the direct raw field. GREEN must verify both exact value types."
   },
-  "next": "Implement the narrow JPA-only classifier fix through the original Sandcastle workflow, preserving declared generic TypeMirror and using strict Comparable subtyping; keep Jakarta Data unchanged. Require focused GREEN, formats, independent review and exact-head submission checks.",
-  "updatedAt": "2026-10-24T15:12:29Z"
+  "next": "Prepare clean official fork branch, verify its exact head with a work-main-rooted focused controller, and recheck upstream/dedup before normal draft PR publication. Wider upstream CI remains unchanged.",
+  "updatedAt": "2026-10-24T15:30:18Z",
+  "implementation": {
+    "run": 40106005512,
+    "request": "e8a6061e-3b7a-4530-845f-8f51b4198fea",
+    "requestHash": "2f0f2e10811090c6d5403637f7b4a99b54da4cee203510ededaaed3615dab97f",
+    "responseCommit": "60133f6e861960940169b3002b9dd6470fe0a0b7",
+    "consumed": true,
+    "resultHead": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+    "tree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "workPR": "https://github.com/xfocus3/hibernate-work/pull/39",
+    "scope": "Two-line JPA classifier fix and three regression fixtures/tests; Data classifier unchanged."
+  },
+  "green": {
+    "run": 40106288233,
+    "artifact": 12563819567,
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "format": "passed",
+    "testedTree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "patchMatches": true
+  },
+  "exactHead": {
+    "run": 40106630382,
+    "artifact": 12565081540,
+    "head": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+    "tests": 7,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "compilation": "passed",
+    "format": "passed",
+    "tree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "testedTree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "verifiedPatchEmpty": true
+  },
+  "review": {
+    "run": 40106780102,
+    "conclusion": "success",
+    "head": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+    "request": "0e28545f-fdda-4880-a7e4-afd88e8d59e9",
+    "requestHash": "9dca83742c0f9d5ca9bd5feccaf8916e3c5bd1d56d282d871326dacb3192299e",
+    "responseCommit": "d939e254c4690e1f3e186975144fa66aacd5e1d7",
+    "extractionRequest": "185adffc-b642-40c5-9e7a-7c70c645cfaf",
+    "extractionResponseCommit": "25d66f0b65dbc47bb8dde0af56c8111234cf0492",
+    "consumed": true,
+    "result": "No blocking findings; no further code changes.",
+    "url": "https://github.com/xfocus3/hibernate-work/pull/39#pullrequestreview-5638787811",
+    "workPRDraft": false,
+    "workPRLabels": [],
+    "pendingRequests": []
+  }
 }
