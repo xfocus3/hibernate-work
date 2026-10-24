@@ -1,0 +1,13 @@
+--- a/hibernate-core/src/main/java/org/hibernate/graph/EntityGraphs.java
++++ b/hibernate-core/src/main/java/org/hibernate/graph/EntityGraphs.java
+@@ -379,8 +379,8 @@
+ 			final var aKeys = a.keySet();
+ 			final var bKeys = b.keySet();
+ 			if ( aKeys.equals( bKeys ) ) {
+-				for ( var key : aKeys ) {
+-					if ( !areEqual( a.get( key ), b.get( key ) ) ) {
++				for ( var entry : a.entrySet() ) {
++					if ( !areEqual( entry.getValue(), b.get( entry.getKey() ) ) ) {
+ 						return false;
+ 					}
+ 				}

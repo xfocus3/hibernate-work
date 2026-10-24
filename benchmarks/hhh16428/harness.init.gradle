@@ -1,0 +1,26 @@
+// Temporary, identical build configuration for both evidence source trees.
+// This file is never part of the proposed upstream production change.
+gradle.beforeProject { project ->
+    // Compilation normally rewrites source with Spotless. Evidence must identify
+    // the exact input tree instead; the controller rejects any remaining drift.
+    project.tasks.configureEach { task ->
+        if (task.name.startsWith('spotless') && task.name.endsWith('Apply')) {
+            task.enabled = false
+        }
+    }
+
+    if (project.path == ':hibernate-core') {
+        project.pluginManager.withPlugin('me.champeau.jmh') {
+            project.extensions.getByName('jmh').includeTests.set(false)
+            project.sourceSets.named('jmh') {
+                java.setIncludes(['org/hibernate/graph/EntityGraphsMapBenchmark.java'])
+            }
+            project.tasks.named('jmhJar') {
+                archiveFileName.set('hhh16428-jmh.jar')
+                destinationDirectory.set(project.layout.projectDirectory.dir('build/hhh16428'))
+                preserveFileTimestamps = false
+                reproducibleFileOrder = true
+            }
+        }
+    }
+}

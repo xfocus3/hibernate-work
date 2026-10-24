@@ -1,0 +1,58 @@
+name: HHH-16428 paired JMH evidence
+
+on:
+  push:
+    branches: ['evidence/HHH-16428-paired-jmh-v2']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hhh16428-paired-jmh
+  cancel-in-progress: false
+
+jobs:
+  paired:
+    if: github.ref == 'refs/heads/evidence/HHH-16428-paired-jmh-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out the exact evidence controller
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          path: request
+          persist-credentials: false
+      - name: Check out the exact semantic baseline
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 0b6f2013a64886d48b7d5341f2f10c987598d921
+          path: baseline
+          persist-credentials: false
+      - name: Set up the shared JDK
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          overwrite-settings: false
+      - name: Build both variants and execute paired forks
+        timeout-minutes: 36
+        env:
+          EVIDENCE_COMMIT: ${{ github.sha }}
+          PYTHONUNBUFFERED: '1'
+        run: >-
+          python3 request/benchmarks/hhh16428/run.py
+          --baseline baseline
+          --candidate candidate
+          --output evidence-results
+      - name: Preserve measurements, logs, and source provenance
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hhh16428-paired-jmh-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence-results/
+            !evidence-results/jars/**
+          retention-days: 7
+          if-no-files-found: error
