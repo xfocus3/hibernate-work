@@ -24,10 +24,23 @@
     "parent": "d756c8f18c729b88e27405ab33e111fc159853ec",
     "patchPath": "patches/HHH-11931-red.patch",
     "expectedTestedTree": "24e793098cf4beaf91a80b709b5209a37f83311a",
-    "status": "running",
+    "status": "completed",
     "onlyIntendedWorkflow": true,
-    "productionChanges": false
+    "productionChanges": false,
+    "conclusion": "expected regression failure",
+    "artifact": 12564473047,
+    "tests": 4,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "format": "passed",
+    "verifiedPatchMatchesInput": true,
+    "testedTree": "24e793098cf4beaf91a80b709b5209a37f83311a",
+    "jdk": "Temurin 25.0.4+1",
+    "failure": "RawComparableEntity_ emits ComparableAttribute<RawComparableEntity, RawValue>, but RawValue is not within bounds of type-variable C.",
+    "controls": "Parameterized self-comparable and comparable-supertype control passed; both existing Jpa4MetamodelTest methods passed.",
+    "scopeNote": "The raw fixture includes direct and inherited raw Comparable. The harness reports the first compiler error only; the observed baseline diagnostic is for the direct raw field. GREEN must verify both exact value types."
   },
-  "next": "Inspect focused test results and exact tested tree; stop before production implementation until RED and the narrow plan are reviewed.",
-  "updatedAt": "2026-10-24T15:09:02Z"
+  "next": "Implement the narrow JPA-only classifier fix through the original Sandcastle workflow, preserving declared generic TypeMirror and using strict Comparable subtyping; keep Jakarta Data unchanged. Require focused GREEN, formats, independent review and exact-head submission checks.",
+  "updatedAt": "2026-10-24T15:12:29Z"
 }
