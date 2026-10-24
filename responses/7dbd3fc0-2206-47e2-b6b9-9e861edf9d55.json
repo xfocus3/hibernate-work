@@ -1,0 +1,11 @@
+{
+  "id": "7dbd3fc0-2206-47e2-b6b9-9e861edf9d55",
+  "requestHash": "09bdd341ff4cdc7e37baaedd98619c187d3898158e7804c44dc0543215be9b50",
+  "runId": "40066899002",
+  "runAttempt": "1",
+  "head": "37616099b745e01500f65eb580f9cef270550cdb",
+  "resultHead": "37616099b745e01500f65eb580f9cef270550cdb",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Exploration was interrupted before a completed technical assessment or executable current-line reproduction. No source changes, regression tests, implementation or validation results are supplied. HHH-20758 must not be promoted to implementation based on this invocation."
+}
