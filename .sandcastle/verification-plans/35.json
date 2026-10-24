@@ -1,0 +1,16 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-processor:formatChecks",
+    "hibernate-processor:jakartaDataTest",
+    "--tests",
+    "org.hibernate.processor.test.data.constructormismatch.ConstructorMismatchTest",
+    "--tests",
+    "org.hibernate.processor.test.data.select.SelectionTest",
+    "--continue",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify HHH-20771 diagnostic-only constructor mismatch reporting at the exact current PR head. Six compiler tests cover default Object inference, configured PostgreSQL Integer[] type rendering, a matching constructor, wrong arity with overloaded parameterized and primitive-array signatures, and existing SelectionTest neighbors. These are compilation/annotation-processor tests in the H2 build configuration, not PostgreSQL database integration. Initial validated head 5794cfd079e4d09db0743d8062e7212c83612197 passed all six tests and formatting. Null/unknown fallback is source-reviewed; the full upstream matrix is outside this focused plan."
+}
