@@ -4,9 +4,26 @@
   "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13757",
   "review": {
     "run": 40207319697,
-    "status": "in_progress"
+    "conclusion": "success",
+    "head": "2c0657e651c96e6361bfd204314c7fb9cf95a2de",
+    "request": "bded8399-cc01-4305-b043-af23bf0c35e1",
+    "requestHash": "443bd29e02afd17c947e23b7cd3d54594367f5409c7fdb619607489282c2085e",
+    "requestArtifact": 12605040233,
+    "stageArtifact": 12604366627,
+    "responseCommit": "7dbea86231994470e3f8a860f98f4a241540701e",
+    "extractionRequest": "3f7cc378-16f1-415f-8bed-b810c0ac0200",
+    "extractionHash": "4306e592fce2cfdc6e95add01c6512edd9d6a5fcdf5e76c2729545e8cd1d3379",
+    "extractionArtifact": 12605030391,
+    "extractionResponseCommit": "4f09e33285023ed56233f19bbf0c4e26493ff13d",
+    "consumed": true,
+    "extractionConsumed": true,
+    "responseReadbacksVerified": true,
+    "result": "No findings; no further changes.",
+    "url": "https://github.com/xfocus3/hibernate-work/pull/39#pullrequestreview-5643887618",
+    "workPRDraft": false,
+    "workPRLabels": []
   },
-  "status": "Exact new work head verified; original review continuation active.",
+  "status": "Original follow-up implementation, exact-head verification and review completed. Publication preparation blocked before a candidate commit or official branch update.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -71,7 +88,7 @@
     "readbackVerified": true
   },
   "pendingRequests": [],
-  "next": "Verify exact-head scoped checks, own the original review handoff, and verify consumption. Stop before upstream-facing branch publication for independent coordination.",
+  "next": "Resolve the publication-preparation authorization blocker before any further publication attempt. Preserve the unchanged official head and original RED evidence. Do not retry or substitute another publication route.",
   "independentReview": {
     "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
   },
@@ -89,6 +106,17 @@
     "format": "passed",
     "compilation": "passed",
     "testExecution": "fresh --rerun",
-    "verifiedPatchEmpty": true
+    "verifiedPatchEmpty": true,
+    "jdk": "Temurin 25.0.4+1"
+  },
+  "publicationPreparation": {
+    "targetRepository": "xfocus3/hibernate-orm",
+    "plannedParent": "6c8e08c0f65d5967d491f24ec32934cd917419c1",
+    "reviewedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "action": "create_tree",
+    "outcome": "rejected",
+    "candidateCommit": null,
+    "officialBranchUpdated": false,
+    "attempts": 1
   }
 }
