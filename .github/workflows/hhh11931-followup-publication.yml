@@ -1,0 +1,81 @@
+name: HHH-11931 follow-up exact publication commit
+on:
+  push:
+    branches: ['sandcastle/dot-check/HHH-11931-followup-publication-20261025']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xfocus3/hibernate-orm
+          ref: b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify exact final source
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6"
+          test "$(git rev-parse HEAD^{tree})" = "5d83caeca818b0984abfeab0500e826fa9a510a6"
+          test -z "$(git status --porcelain)"
+          printf 'repository=xfocus3/hibernate-orm\nbase=%s\npatch_commit=\ntree=%s\n' "$(git rev-parse HEAD)" "$(git write-tree)" > ../verification.txt
+          java -version 2>&1 | tee ../java-version.txt
+      - name: Run focused processor checks
+        working-directory: target
+        env:
+          ARGUMENTS: '["hibernate-processor:formatChecks","hibernate-processor:test","--rerun","--tests","org.hibernate.processor.test.jpa4.*","--tests","org.hibernate.processor.test.generics.GenericsTest","--tests","org.hibernate.processor.test.generictype.GenericEntityTest","--tests","org.hibernate.processor.test.rawtypes.RawTypesTest","-x","hibernate-processor:jakartaDataTest","-x","hibernate-processor:integrationTest","-x","hibernate-processor:dataIntegrationTest","--continue","-Pdb=h2"]'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          args = json.loads(os.environ["ARGUMENTS"])
+          sys.exit(subprocess.run(["./gradlew", "--no-daemon"] + args).returncode)
+          PY
+      - name: Validate focused test reports
+        working-directory: target
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, xml.etree.ElementTree as ET
+          files = list(pathlib.Path("tooling/metamodel-generator/target/test-results/test").glob("TEST-*.xml"))
+          suites = [ET.parse(path).getroot() for path in files]
+          counts = {key: sum(int(suite.attrib.get(key, 0)) for suite in suites) for key in ("tests", "failures", "errors", "skipped")}
+          expected = {"org.hibernate.processor.test.jpa4.RawComparableMetamodelTest", "org.hibernate.processor.test.jpa4.Jpa4MetamodelTest", "org.hibernate.processor.test.generics.GenericsTest", "org.hibernate.processor.test.generictype.GenericEntityTest", "org.hibernate.processor.test.rawtypes.RawTypesTest"}
+          assert {suite.attrib["name"] for suite in suites} == expected
+          assert counts == {"tests": 11, "failures": 0, "errors": 0, "skipped": 0}, counts
+          pathlib.Path("../test-summary.json").write_text(json.dumps(counts, indent=2) + "\n")
+          print(json.dumps(counts))
+          PY
+      - name: Capture tested source
+        if: always()
+        working-directory: target
+        run: |
+          set -euo pipefail
+          git diff --binary HEAD > ../verified.patch
+          git add -u
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
+          test ! -s ../verified.patch
+          test "$(git write-tree)" = "5d83caeca818b0984abfeab0500e826fa9a510a6"
+      - name: Save focused verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hhh11931-followup-publication-verification
+          path: |
+            verification.txt
+            java-version.txt
+            verified.patch
+            test-summary.json
+            target/**/build/test-results/**/TEST-*.xml
+            target/**/target/test-results/**/TEST-*.xml
+          retention-days: 7
+          if-no-files-found: error
