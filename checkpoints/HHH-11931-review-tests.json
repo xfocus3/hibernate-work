@@ -3,7 +3,7 @@
   "workPR": 39,
   "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13757",
   "review": "https://github.com/hibernate/hibernate-orm/pull/13757#pullrequestreview-5642998632",
-  "status": "Maintainer-requested test additions await focused verification; no upstream-facing branch changes.",
+  "status": "Requested tests implemented on work PR 39; original implementation and extraction consumed successfully. Exact-head verification and review pending.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -26,7 +26,19 @@
       ],
       "sourceReconstruction": "All tracked source restored from the request index object pack; its exact tree matched the input tree. No pending worktree changes."
     },
-    "consumed": false
+    "consumed": true,
+    "conclusion": "success",
+    "resultHead": "2c0657e651c96e6361bfd204314c7fb9cf95a2de",
+    "resultTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "responseCommit": "84d9f219c352813e1c14651681ba9859ddac1c79",
+    "responseReadbackVerified": true,
+    "extractionRequest": "a2c47dae-f484-48d7-b7b4-2f342d4a9de6",
+    "extractionHash": "f1571dc506ac9ce5c39b4e117d619e401b9bc4514f44d8b2380bddec70cd142c",
+    "extractionArtifact": 12604055974,
+    "extractionResponseCommit": "b55c01961b11bfaa929c93007f94c956f1b44f58",
+    "extractionReadbackVerified": true,
+    "extractionConsumed": true,
+    "workBranchRemoteVerified": true
   },
   "verification": {
     "controller": "d268bd36d5c523e1f21ccc6a862b41662655c30a",
@@ -36,15 +48,32 @@
     "expectedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
     "run": 40206803198,
     "expectedTests": 11,
-    "scope": "JPA 4 compilation tests and selected generic/raw-type neighbors; processor format checks; fresh test execution with --rerun. No broad database matrix."
+    "scope": "JPA 4 compilation tests and selected generic/raw-type neighbors; processor format checks; fresh test execution with --rerun. No broad database matrix.",
+    "conclusion": "success",
+    "artifact": 12604495219,
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "format": "passed",
+    "compilation": "passed",
+    "testExecution": "fresh --rerun",
+    "jdk": "Temurin 25.0.4.1+1",
+    "testedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "patchMatches": true
   },
   "plan": {
     "path": ".sandcastle/verification-plans/39.json",
     "commit": "17ccf7ed1b89f5704ae10a2957207546d4f302c2",
     "readbackVerified": true
   },
-  "pendingRequests": [
-    "33bc4355-4681-4686-8162-3348634b7f25"
-  ],
-  "next": "Consume the original implementation request only after actual focused test and format evidence; verify downstream extraction, work-branch push and exact-head checks. Independent review before upstream-facing publication."
+  "pendingRequests": [],
+  "next": "Verify exact-head scoped checks, own the original review handoff, and verify consumption. Stop before upstream-facing branch publication for independent coordination.",
+  "independentReview": {
+    "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
+  },
+  "exactHead": {
+    "queueRun": 40207125535,
+    "status": "queued"
+  }
 }
