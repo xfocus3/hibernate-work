@@ -2,8 +2,11 @@
   "issue": "HHH-11931",
   "workPR": 39,
   "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13757",
-  "review": "https://github.com/hibernate/hibernate-orm/pull/13757#pullrequestreview-5642998632",
-  "status": "Requested tests implemented on work PR 39; original implementation and extraction consumed successfully. Exact-head verification and review pending.",
+  "review": {
+    "run": 40207319697,
+    "status": "in_progress"
+  },
+  "status": "Exact new work head verified; original review continuation active.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -73,7 +76,19 @@
     "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
   },
   "exactHead": {
-    "queueRun": 40207125535,
-    "status": "queued"
+    "run": 40207156226,
+    "artifact": 12604141028,
+    "head": "2c0657e651c96e6361bfd204314c7fb9cf95a2de",
+    "tree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "testedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "conclusion": "success",
+    "tests": 11,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "format": "passed",
+    "compilation": "passed",
+    "testExecution": "fresh --rerun",
+    "verifiedPatchEmpty": true
   }
 }
