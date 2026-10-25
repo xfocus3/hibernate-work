@@ -1,0 +1,15 @@
+{
+  "issue": 40,
+  "jira": "HHH-18831",
+  "runId": "40173355616",
+  "runAttempt": "2",
+  "stageId": "53789205-cbc0-44c3-8f07-7808be7b3e5e",
+  "inputHash": "e254d51fd9d238f10e13855894d4eea91d789ee34d04b91b7255b716b0c58401",
+  "requestId": "b935a14e-00b7-4db5-a4e3-5ca69a1bf4cc",
+  "requestHash": "6f444c09092e1760101e79b610bcd6b6d867f5fbc2ec66334e3a37adbbd65b46",
+  "status": "produce response published; consumption pending",
+  "upstreamHead": "37616099b745e01500f65eb580f9cef270550cdb",
+  "changedPaths": [],
+  "verdict": "needs-a-human",
+  "next": "Verify produce consumed, answer actual extraction request, verify terminal plan. No implementation before plan and raw RED review."
+}
