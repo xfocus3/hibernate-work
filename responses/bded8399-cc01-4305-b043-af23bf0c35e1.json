@@ -1,0 +1,11 @@
+{
+  "id": "bded8399-cc01-4305-b043-af23bf0c35e1",
+  "requestHash": "443bd29e02afd17c947e23b7cd3d54594367f5409c7fdb619607489282c2085e",
+  "runId": "40207319697",
+  "runAttempt": "1",
+  "head": "2c0657e651c96e6361bfd204314c7fb9cf95a2de",
+  "resultHead": "2c0657e651c96e6361bfd204314c7fb9cf95a2de",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed exact head 2c0657e651c96e6361bfd204314c7fb9cf95a2de, tree 5d83caeca818b0984abfeab0500e826fa9a510a6, against baseline 37616099b745e01500f65eb580f9cef270550cdb and Gavin King's requested follow-up. Independent review found no blocking issues or necessary changes. No additional commit was made.\n\nAll four requested cases are present as distinct methods in the real compilation harness: NumericValue<String> retains NumericAttribute with its exact parameterized value type; TemporalValue<String> retains TemporalAttribute; raw Comparable RawNumber and RawTemporal use SingularAttribute with exact classes. The abstract fixture classes preserve the requested type contracts without unrelated runtime stubs. Existing direct/inherited raw and parameterized Comparable controls, JPA 4 specializations and statement-reference tests remain present. The follow-up changes only three existing test files; the original two-line JPA classifier fix is unchanged, and the Data classifier, dependencies and spatial mapping remain untouched.\n\nFresh exact-head Actions verification https://github.com/xfocus3/hibernate-work/actions/runs/40207156226 passed compilation, processor format checks and eleven tests with zero failures, errors or skips. Artifact 12604141028 was read directly: source and tested trees match the reviewed tree and verified.patch is empty. The --rerun test task executed rather than being served from cache. The prior patch verification run 40206803198 independently produced the same tree and eleven passing tests. Original genuine regression RED/GREEN evidence remains preserved in checkpoints/HHH-11931-explore.json.\n\nThe full upstream integration/database matrix is not claimed as passed. There are no unresolved human inline review threads requiring replies. No production changes, upstream-facing publication, merge, release or access change occurred during this review.\n\n<promise>COMPLETE</promise>"
+}
