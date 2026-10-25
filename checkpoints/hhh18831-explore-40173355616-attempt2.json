@@ -6,12 +6,20 @@
   "stageId": "53789205-cbc0-44c3-8f07-7808be7b3e5e",
   "inputHash": "e254d51fd9d238f10e13855894d4eea91d789ee34d04b91b7255b716b0c58401",
   "produceRequestId": "b935a14e-00b7-4db5-a4e3-5ca69a1bf4cc",
-  "produceConsumed": true,
   "extractionRequestId": "7c35f936-0f76-4bbb-9c82-ceb315fba885",
-  "requestHash": "0380583e27741baee1bf0a3ea7b661c18d1a220426c934079aef1280aca72e91",
-  "status": "extraction response published; consumption and terminal apply pending",
+  "produceConsumed": true,
+  "extractionConsumed": true,
+  "status": "completed",
+  "conclusion": "success",
+  "verifiedAt": "2026-10-25T07:50:45Z",
   "upstreamHead": "37616099b745e01500f65eb580f9cef270550cdb",
   "changedPaths": [],
   "verdict": "needs-a-human",
-  "next": "Verify extraction consumed and terminal plan applied. No implementation before plan and raw RED review."
+  "issueLabels": [
+    "ready-for-human"
+  ],
+  "planComment": "https://github.com/xfocus3/hibernate-work/issues/40#issuecomment-6395063325",
+  "planArtifact": 12591123356,
+  "next": "Parent reviews precise diagnostic and compatibility plan before authorizing tests-only RED on unchanged production. No implementation active.",
+  "testsRun": false
 }
