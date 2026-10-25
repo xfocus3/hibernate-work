@@ -1,0 +1,57 @@
+{
+  "issue": "HHH-18831",
+  "workIssue": "https://github.com/xfocus3/hibernate-work/issues/40",
+  "recordedAt": "2026-10-25T07:54:50Z",
+  "status": "stopped",
+  "automaticResume": false,
+  "nextAction": "Do not resume automatically.",
+  "exploration": {
+    "runId": 40173355616,
+    "runAttempt": 2,
+    "status": "completed",
+    "conclusion": "success",
+    "checkpoint": "checkpoints/hhh18831-explore-40173355616-attempt2.json",
+    "planComment": "https://github.com/xfocus3/hibernate-work/issues/40#issuecomment-6395063325"
+  },
+  "implementation": {
+    "runId": 40174436094,
+    "runAttempt": 1,
+    "url": "https://github.com/xfocus3/hibernate-work/actions/runs/40174436094",
+    "status": "completed",
+    "conclusion": "cancelled",
+    "updatedAt": "2026-10-25T07:53:50Z",
+    "workflowHead": "aa570c495bb0df336fbf27b46efb4012d4419852",
+    "upstreamHead": "37616099b745e01500f65eb580f9cef270550cdb",
+    "artifacts": [],
+    "pendingRequests": [],
+    "implementationAgentStep": "skipped",
+    "buildStep": "skipped",
+    "pushBranchStep": "skipped",
+    "openDraftPrStep": "skipped",
+    "requestReviewStep": "skipped",
+    "cleanupInProgressLabel": "success"
+  },
+  "verification": {
+    "issueLabels": [
+      "ready-for-human"
+    ],
+    "remoteImplementationBranchAbsent": true,
+    "workPullRequestAbsent": true,
+    "activeWorkflowRuns": {
+      "in_progress": 0,
+      "queued": 0,
+      "waiting": 0,
+      "pending": 0,
+      "requested": 0
+    },
+    "runtimeTestsExecuted": 0,
+    "productionChangesProduced": false,
+    "fixVerified": false,
+    "officialPrPublished": false
+  },
+  "notes": [
+    "The workflow was stopped before the implementation agent executed.",
+    "No regression result or production fix is established.",
+    "Existing exploration findings are retained; this checkpoint records no successful implementation or resume."
+  ]
+}
