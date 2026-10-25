@@ -1,0 +1,117 @@
+diff --git a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/ParameterizedComparableEntity.java b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/ParameterizedComparableEntity.java
+index 2ec95462d3368415f8c712e83b28b8b40d35b4d6..1296f31dedd84a192aaaa8a2cb473d3bd869ae4b 100644
+--- a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/ParameterizedComparableEntity.java
++++ b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/ParameterizedComparableEntity.java
+@@ -1,6 +1,7 @@
+ package org.hibernate.processor.test.jpa4;
+ 
+ import java.io.Serializable;
++import java.time.temporal.Temporal;
+ 
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
+@@ -14,6 +15,10 @@ class ParameterizedComparableEntity {
+ 
+ 	Child inherited;
+ 
++	NumericValue<String> number;
++
++	TemporalValue<String> temporal;
++
+ 	static class Value<T> implements Comparable<Value<T>>, Serializable {
+ 		@Override
+ 		public int compareTo(Value<T> other) {
+@@ -30,4 +35,10 @@ public int compareTo(Base<T> other) {
+ 
+ 	static class Child extends Base<String> {
+ 	}
++
++	abstract static class NumericValue<T> extends Number implements Comparable<NumericValue<T>> {
++	}
++
++	abstract static class TemporalValue<T> implements Temporal, Comparable<TemporalValue<T>>, Serializable {
++	}
+ }
+diff --git a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableEntity.java b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableEntity.java
+index 6fdf952f5339c7706c30b8b4797321c1f4317f5b..cd1f1965170baeea4d38e4d99eba35a60530915d 100644
+--- a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableEntity.java
++++ b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableEntity.java
+@@ -1,6 +1,7 @@
+ package org.hibernate.processor.test.jpa4;
+ 
+ import java.io.Serializable;
++import java.time.temporal.Temporal;
+ 
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
+@@ -14,6 +15,10 @@ class RawComparableEntity {
+ 
+ 	InheritedRawValue inherited;
+ 
++	RawNumber number;
++
++	RawTemporal temporal;
++
+ 	static class RawValue implements Comparable, Serializable {
+ 		@Override
+ 		public int compareTo(Object other) {
+@@ -23,4 +28,10 @@ public int compareTo(Object other) {
+ 
+ 	static class InheritedRawValue extends RawValue {
+ 	}
++
++	abstract static class RawNumber extends Number implements Comparable {
++	}
++
++	abstract static class RawTemporal implements Temporal, Comparable, Serializable {
++	}
+ }
+diff --git a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableMetamodelTest.java b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableMetamodelTest.java
+index 3447277776f1d123a35750a153caa927af2fc471..dddb75daaffd33e95e1b568facdc8e51e8e293be 100644
+--- a/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableMetamodelTest.java
++++ b/tooling/metamodel-generator/src/test/java/org/hibernate/processor/test/jpa4/RawComparableMetamodelTest.java
+@@ -4,7 +4,9 @@
+ import java.lang.reflect.Type;
+ 
+ import jakarta.persistence.metamodel.ComparableAttribute;
++import jakarta.persistence.metamodel.NumericAttribute;
+ import jakarta.persistence.metamodel.SingularAttribute;
++import jakarta.persistence.metamodel.TemporalAttribute;
+ import org.hibernate.processor.test.util.CompilationTest;
+ import org.hibernate.processor.test.util.TestForIssue;
+ import org.hibernate.processor.test.util.WithClasses;
+@@ -36,6 +38,34 @@ void parameterizedComparableAttributesRetainTheirSpecialization() throws Excepti
+ 				ParameterizedComparableEntity.Child.class );
+ 	}
+ 
++	@Test
++	@WithClasses(ParameterizedComparableEntity.class)
++	void parameterizedNumericAttributeRetainsItsSpecialization() throws Exception {
++		assertAttribute( ParameterizedComparableEntity.class, "number", NumericAttribute.class,
++				ParameterizedComparableEntity.class.getDeclaredField( "number" ).getGenericType() );
++	}
++
++	@Test
++	@WithClasses(ParameterizedComparableEntity.class)
++	void parameterizedTemporalAttributeRetainsItsSpecialization() throws Exception {
++		assertAttribute( ParameterizedComparableEntity.class, "temporal", TemporalAttribute.class,
++				ParameterizedComparableEntity.class.getDeclaredField( "temporal" ).getGenericType() );
++	}
++
++	@Test
++	@WithClasses(RawComparableEntity.class)
++	void rawComparableNumericAttributeRetainsItsValueType() {
++		assertAttribute( RawComparableEntity.class, "number", SingularAttribute.class,
++				RawComparableEntity.RawNumber.class );
++	}
++
++	@Test
++	@WithClasses(RawComparableEntity.class)
++	void rawComparableTemporalAttributeRetainsItsValueType() {
++		assertAttribute( RawComparableEntity.class, "temporal", SingularAttribute.class,
++				RawComparableEntity.RawTemporal.class );
++	}
++
+ 	private static void assertAttribute(
+ 			Class<?> entityType, String fieldName, Class<?> expectedRawType, Type expectedValueType) {
+ 		final var field = getFieldFromMetamodelFor( entityType, fieldName );
