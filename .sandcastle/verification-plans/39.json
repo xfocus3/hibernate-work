@@ -5,6 +5,7 @@
   "arguments": [
     "hibernate-processor:formatChecks",
     "hibernate-processor:test",
+    "--rerun",
     "--tests",
     "org.hibernate.processor.test.jpa4.*",
     "--tests",
@@ -22,5 +23,5 @@
     "--continue",
     "-Pdb=h2"
   ],
-  "reason": "Verify HHH-11931 at the exact current PR head. Seven real Hibernate Processor compilation tests cover direct and inherited raw Comparable fallback to typed SingularAttribute, parameterized self-comparable values, comparable-supertype inheritance, existing JPA4 specialized types and statement references, and generic/raw-type neighbors. Exact candidate tree 6c0cf3d7e255972262aec216022c8c416721029e passed this scope and formatting. No database service is required; h2 is the build configuration. Unrelated processor integration tasks are explicitly excluded. The full upstream database matrix is outside this focused plan."
+  "reason": "Verify HHH-11931 at the exact current PR head with fresh test execution. The real Hibernate Processor compilation harness covers direct and inherited raw Comparable fallback, parameterized Comparable values, the requested generic NumericValue and TemporalValue specialization, raw numeric and temporal fallback, existing JPA 4 behavior, and generic/raw-type neighbors. h2 is only the build configuration; no database service is required. Unrelated integration tasks and the full upstream database matrix are excluded."
 }
