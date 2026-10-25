@@ -23,7 +23,7 @@
     "workPRDraft": false,
     "workPRLabels": []
   },
-  "status": "Original follow-up complete; clean publication candidate prepared in the user-owned fork and exact-commit verification active.",
+  "status": "Original follow-up and clean publication-candidate exact-commit verification complete; official PR branch update awaits independent coordination.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -88,7 +88,7 @@
     "readbackVerified": true
   },
   "pendingRequests": [],
-  "next": "Inspect exact publication-commit verification artifacts and stop for independent coordination before updating the official PR branch. Preserve the original RED evidence, Jira link, licensing block and checklist.",
+  "next": "Await independent authorization to move the existing official PR branch to the exact tested publication commit. Preserve the original RED evidence, Jira link, licensing block and checklist; no new PR or merge.",
   "independentReview": {
     "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
   },
@@ -126,8 +126,22 @@
       "run": 40207901327,
       "controller": "c1681f01ecab2a03571b527d1df8c7d62bb939ca",
       "controllerBranch": "sandcastle/dot-check/HHH-11931-followup-publication-20261025",
-      "status": "in_progress",
-      "scope": "Same focused plan 39 tasks and filters, with fresh --rerun test execution; checks the exact candidate commit in xfocus3/hibernate-orm."
+      "status": "completed",
+      "scope": "Same focused plan 39 tasks and filters, with fresh --rerun test execution; checks the exact candidate commit in xfocus3/hibernate-orm.",
+      "conclusion": "success",
+      "artifact": 12604656752,
+      "sourceCommit": "b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6",
+      "tree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+      "testedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+      "verifiedPatchEmpty": true,
+      "tests": 11,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "format": "passed",
+      "compilation": "passed with build cache; identical source compiled freshly in work-head verification",
+      "testExecution": "fresh --rerun",
+      "jdk": "Temurin 25.0.4.1+1"
     }
   }
 }
