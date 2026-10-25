@@ -23,7 +23,7 @@
     "workPRDraft": false,
     "workPRLabels": []
   },
-  "status": "Original follow-up implementation, exact-head verification and review completed. Publication preparation blocked before a candidate commit or official branch update.",
+  "status": "Original follow-up complete; clean publication candidate prepared in the user-owned fork and exact-commit verification active.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -88,7 +88,7 @@
     "readbackVerified": true
   },
   "pendingRequests": [],
-  "next": "Resolve the publication-preparation authorization blocker before any further publication attempt. Preserve the unchanged official head and original RED evidence. Do not retry or substitute another publication route.",
+  "next": "Inspect exact publication-commit verification artifacts and stop for independent coordination before updating the official PR branch. Preserve the original RED evidence, Jira link, licensing block and checklist.",
   "independentReview": {
     "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
   },
@@ -111,12 +111,23 @@
   },
   "publicationPreparation": {
     "targetRepository": "xfocus3/hibernate-orm",
-    "plannedParent": "6c8e08c0f65d5967d491f24ec32934cd917419c1",
+    "repositoryId": 1270631247,
+    "parent": "6c8e08c0f65d5967d491f24ec32934cd917419c1",
     "reviewedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
-    "action": "create_tree",
-    "outcome": "rejected",
-    "candidateCommit": null,
+    "candidateCommit": "b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6",
+    "preservationBranch": "8.0-HHH-11931-followup-checkpoint-20261025",
+    "candidateRemoteVerified": true,
     "officialBranchUpdated": false,
-    "attempts": 1
+    "treePreparation": {
+      "firstAttempt": "rejected",
+      "secondAttempt": "succeeded after target identity and preparation scope were verified"
+    },
+    "verification": {
+      "run": 40207901327,
+      "controller": "c1681f01ecab2a03571b527d1df8c7d62bb939ca",
+      "controllerBranch": "sandcastle/dot-check/HHH-11931-followup-publication-20261025",
+      "status": "in_progress",
+      "scope": "Same focused plan 39 tasks and filters, with fresh --rerun test execution; checks the exact candidate commit in xfocus3/hibernate-orm."
+    }
   }
 }
