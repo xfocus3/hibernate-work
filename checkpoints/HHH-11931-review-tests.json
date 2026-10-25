@@ -23,7 +23,7 @@
     "workPRDraft": false,
     "workPRLabels": []
   },
-  "status": "Original follow-up and clean publication-candidate exact-commit verification complete; official PR branch update awaits independent coordination.",
+  "status": "Reviewed test additions published to the existing official draft PR; exact new head verified. PR body update denied by integration permissions; reviewer reply remains unsent.",
   "originalEvidence": "checkpoints/HHH-11931-explore.json",
   "implementation": {
     "run": 40206375429,
@@ -88,7 +88,7 @@
     "readbackVerified": true
   },
   "pendingRequests": [],
-  "next": "Await independent authorization to move the existing official PR branch to the exact tested publication commit. Preserve the original RED evidence, Jira link, licensing block and checklist; no new PR or merge.",
+  "next": "Continue upstream CI and maintainer monitoring on exact head b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6. The PR body still needs the prepared manual update from seven tests to eleven with the new exact verification link and numeric/temporal coverage; the reviewer reply has not been posted. Preserve Jira, licensing and bot checklist. No retry of denied metadata operation or alternative publication route.",
   "independentReview": {
     "result": "No findings on the exact patch/tree; all four new tests and existing controls verified against actual Actions artifact."
   },
@@ -117,7 +117,7 @@
     "candidateCommit": "b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6",
     "preservationBranch": "8.0-HHH-11931-followup-checkpoint-20261025",
     "candidateRemoteVerified": true,
-    "officialBranchUpdated": false,
+    "officialBranchUpdated": true,
     "treePreparation": {
       "firstAttempt": "rejected",
       "secondAttempt": "succeeded after target identity and preparation scope were verified"
@@ -142,6 +142,55 @@
       "compilation": "passed with build cache; identical source compiled freshly in work-head verification",
       "testExecution": "fresh --rerun",
       "jdk": "Temurin 25.0.4.1+1"
+    }
+  },
+  "publication": {
+    "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13757",
+    "repository": "xfocus3/hibernate-orm",
+    "branch": "8.0-HHH-11931-raw-comparable",
+    "head": "b9b01ce85955bb30eb80a3b2bfbeb54ad81500c6",
+    "parent": "6c8e08c0f65d5967d491f24ec32934cd917419c1",
+    "base": "37616099b745e01500f65eb580f9cef270550cdb",
+    "tree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "remoteVerified": true,
+    "draft": true,
+    "commits": 2,
+    "totalChangedFiles": 4,
+    "followupChangedFiles": 3,
+    "contributionRules": {
+      "check": 121213543204,
+      "conclusion": "success"
+    },
+    "ci": [
+      {
+        "run": 40208185861,
+        "name": "CI",
+        "conclusion": "action_required"
+      },
+      {
+        "run": 40208186000,
+        "name": "GitHub Actions linter",
+        "conclusion": "action_required"
+      }
+    ],
+    "jenkins": {
+      "check": 121213597564,
+      "status": "in_progress"
+    },
+    "buildReports": {
+      "check": 121213629760,
+      "status": "in_progress"
+    },
+    "quarkus": "skipped",
+    "metadata": {
+      "bodyUpdated": false,
+      "operation": "update_pull_request",
+      "target": "hibernate/hibernate-orm#13757",
+      "httpStatus": 403,
+      "message": "Resource not accessible by integration",
+      "unchangedBodyVerified": true,
+      "retried": false,
+      "reviewerReplyPosted": false
     }
   }
 }
