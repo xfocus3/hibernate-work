@@ -1,0 +1,50 @@
+{
+  "issue": "HHH-11931",
+  "workPR": 39,
+  "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13757",
+  "review": "https://github.com/hibernate/hibernate-orm/pull/13757#pullrequestreview-5642998632",
+  "status": "Maintainer-requested test additions await focused verification; no upstream-facing branch changes.",
+  "originalEvidence": "checkpoints/HHH-11931-explore.json",
+  "implementation": {
+    "run": 40206375429,
+    "attempt": 1,
+    "inputHead": "e4e44fc05ef2ec0e501ae2a7319f7ac89753e2e2",
+    "inputTree": "6c0cf3d7e255972262aec216022c8c416721029e",
+    "request": "33bc4355-4681-4686-8162-3348634b7f25",
+    "requestHash": "456a076cd72edffe7f613410086e695549c8ab92aec63938a66bfc5eb12871ae",
+    "requestArtifact": 12603813235,
+    "stage": "a6361ec6-ed8d-4562-926b-b49693fee0eb",
+    "stageArtifact": 12603359336,
+    "stageHash": "a3b76690637ed858150a29deab646c1bff8594ddcb986653495ac65ffa295515",
+    "expiresAt": "2026-10-25T16:05:33.864Z",
+    "snapshot": {
+      "files": 0,
+      "merge": false,
+      "taskRefs": [
+        "main",
+        "origin/upstream-main"
+      ],
+      "sourceReconstruction": "All tracked source restored from the request index object pack; its exact tree matched the input tree. No pending worktree changes."
+    },
+    "consumed": false
+  },
+  "verification": {
+    "controller": "d268bd36d5c523e1f21ccc6a862b41662655c30a",
+    "controllerParent": "17ccf7ed1b89f5704ae10a2957207546d4f302c2",
+    "branch": "sandcastle/dot-check/HHH-11931-review-tests-20261025",
+    "patchPath": "patches/HHH-11931-review-tests.patch",
+    "expectedTree": "5d83caeca818b0984abfeab0500e826fa9a510a6",
+    "run": 40206803198,
+    "expectedTests": 11,
+    "scope": "JPA 4 compilation tests and selected generic/raw-type neighbors; processor format checks; fresh test execution with --rerun. No broad database matrix."
+  },
+  "plan": {
+    "path": ".sandcastle/verification-plans/39.json",
+    "commit": "17ccf7ed1b89f5704ae10a2957207546d4f302c2",
+    "readbackVerified": true
+  },
+  "pendingRequests": [
+    "33bc4355-4681-4686-8162-3348634b7f25"
+  ],
+  "next": "Consume the original implementation request only after actual focused test and format evidence; verify downstream extraction, work-branch push and exact-head checks. Independent review before upstream-facing publication."
+}
