@@ -9,12 +9,13 @@ import java.util.Set;
 
 import org.hibernate.annotations.SoftDelete;
 import org.hibernate.annotations.SoftDeleteType;
-import org.hibernate.mapping.Index;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.DomainModelScope;
 import org.hibernate.testing.orm.junit.Jira;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.Setting;
 import org.junit.jupiter.api.Test;
 
 import jakarta.persistence.CollectionTable;
@@ -32,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 		SoftDeleteElementCollectionReaddTest.DeletedSoftDeleteCollectionOwner.class
 } )
 @SessionFactory
+@ServiceRegistry( settings = @Setting( name = "hibernate.hbm2ddl.halt_on_error", value = "true" ) )
 @Jira( "https://hibernate.atlassian.net/browse/HHH-20585" )
 public class SoftDeleteElementCollectionReaddTest {
 	@Test
@@ -61,9 +63,21 @@ public class SoftDeleteElementCollectionReaddTest {
 	}
 
 	@Test
-	void booleanSoftDeleteCollectionTablesUseUniqueIndexWithLiveRowExpression(DomainModelScope scope) {
-		assertLiveRowIndex( scope, ActiveSoftDeleteCollectionOwner.class, "active", "true" );
-		assertLiveRowIndex( scope, DeletedSoftDeleteCollectionOwner.class, "deleted", "false" );
+	void timestampSoftDeleteCollectionKeyIncludesDeletionTime(DomainModelScope scope) {
+		final var table = scope.getDomainModel()
+				.getCollectionBinding( TimestampSoftDeleteCollectionOwner.class.getName() + ".mobiles" )
+				.getCollectionTable();
+		assertThat( table.getUniqueKeys().values() )
+				.singleElement()
+				.satisfies( key -> assertThat( key.getColumns() )
+						.extracting( org.hibernate.mapping.Column::getName )
+						.containsExactlyInAnyOrder( "owner_id", "mobiles", "deleted_at" ) );
+	}
+
+	@Test
+	void booleanSoftDeleteCollectionTablesHaveNoImplicitUniqueConstraint(DomainModelScope scope) {
+		assertNoImplicitUniqueConstraint( scope, ActiveSoftDeleteCollectionOwner.class );
+		assertNoImplicitUniqueConstraint( scope, DeletedSoftDeleteCollectionOwner.class );
 	}
 
 	@Test
@@ -130,26 +144,13 @@ public class SoftDeleteElementCollectionReaddTest {
 		} );
 	}
 
-	private static void assertLiveRowIndex(
-			DomainModelScope scope,
-			Class<?> collectionOwner,
-			String softDeleteColumnName,
-			String liveRowLiteral) {
+	private static void assertNoImplicitUniqueConstraint(DomainModelScope scope, Class<?> collectionOwner) {
 		final org.hibernate.mapping.Table table = scope.getDomainModel()
 				.getCollectionBinding( collectionOwner.getName() + ".mobiles" )
 				.getCollectionTable();
-
+		assertThat( table.hasPrimaryKey() ).isFalse();
 		assertThat( table.getUniqueKeys() ).isEmpty();
-		assertThat( table.getIndexes().values() )
-				.singleElement()
-				.satisfies( index -> assertLiveRowIndex( index, softDeleteColumnName, liveRowLiteral ) );
-	}
-
-	private static void assertLiveRowIndex(Index index, String softDeleteColumnName, String liveRowLiteral) {
-		assertThat( index.isUnique() ).isTrue();
-		assertThat( index.getSelectables() ).hasSize( 3 );
-		assertThat( index.getSelectables().get( 2 ).getText() )
-				.contains( "case when", softDeleteColumnName, liveRowLiteral );
+		assertThat( table.getIndexes() ).isEmpty();
 	}
 
 	@Entity( name = "SoftDeleteCollectionOwner" )

@@ -19,8 +19,6 @@ import org.hibernate.type.OrderedSetType;
 import org.hibernate.type.SetType;
 import org.hibernate.type.SortedSetType;
 import org.hibernate.type.MappingContext;
-import org.hibernate.type.descriptor.converter.spi.BasicValueConverter;
-import org.hibernate.type.descriptor.jdbc.JdbcLiteralFormatter;
 import org.hibernate.usertype.UserCollectionType;
 
 /**
@@ -90,8 +88,10 @@ public non-sealed class Set extends Collection {
 			if ( !collectionTable.hasPrimaryKey()
 					&& collectionTable.getUniqueKeys().isEmpty() ) {
 				final var softDeleteColumn = getSoftDeleteColumn();
-				final boolean useLiveRowUniqueIndex =
-						softDeleteColumn != null && getSoftDeleteStrategy() != SoftDeleteType.TIMESTAMP;
+				if ( softDeleteColumn != null && getSoftDeleteStrategy() != SoftDeleteType.TIMESTAMP ) {
+					// Boolean markers cannot distinguish multiple historical rows for the same element.
+					return;
+				}
 				for ( var selectable : getElement().getSelectables() ) {
 					if ( selectable instanceof Column column ) {
 						try {
@@ -104,38 +104,33 @@ public non-sealed class Set extends Collection {
 						}
 					}
 				}
-				if ( useLiveRowUniqueIndex ) {
-					createLiveRowUniqueIndex( collectionTable, softDeleteColumn );
+				final boolean useUniqueKey = getElement().isNullable()
+						|| softDeleteColumn != null && softDeleteColumn.isNullable();
+				final Constraint key;
+				if ( useUniqueKey ) {
+					final var uniqueKey = new UniqueKey( collectionTable );
+					uniqueKey.setNullsNotDistinct( true );
+					key = uniqueKey;
 				}
 				else {
-					final boolean useUniqueKey = getElement().isNullable()
-							|| softDeleteColumn != null && softDeleteColumn.isNullable();
-					final Constraint key;
+					key = new PrimaryKey( collectionTable );
+				}
+				key.addColumns( getKey() );
+				for ( var selectable : getElement().getSelectables() ) {
+					if ( selectable instanceof Column column ) {
+						key.addColumn( column );
+					}
+				}
+				if ( softDeleteColumn != null ) {
+					key.addColumn( softDeleteColumn );
+				}
+				key.setName( determineUniqueKeyName( key.getColumns() ) );
+				if ( key.getColumnSpan() > getKey().getColumnSpan() ) {
 					if ( useUniqueKey ) {
-						final var uniqueKey = new UniqueKey( collectionTable );
-						uniqueKey.setNullsNotDistinct( true );
-						key = uniqueKey;
+						collectionTable.addUniqueKey( (UniqueKey) key );
 					}
 					else {
-						key = new PrimaryKey( collectionTable );
-					}
-					key.addColumns( getKey() );
-					for ( var selectable : getElement().getSelectables() ) {
-						if ( selectable instanceof Column column ) {
-							key.addColumn( column );
-						}
-					}
-					if ( softDeleteColumn != null ) {
-						key.addColumn( softDeleteColumn );
-					}
-					key.setName( determineUniqueKeyName( key.getColumns() ) );
-					if ( key.getColumnSpan() > getKey().getColumnSpan() ) {
-						if ( useUniqueKey ) {
-							collectionTable.addUniqueKey( (UniqueKey) key );
-						}
-						else {
-							collectionTable.setPrimaryKey( (PrimaryKey) key );
-						}
+						collectionTable.setPrimaryKey( (PrimaryKey) key );
 					}
 				}
 //				else {
@@ -148,51 +143,6 @@ public non-sealed class Set extends Collection {
 //		else {
 			//create an index on the key columns??
 //		}
-	}
-
-	private void createLiveRowUniqueIndex(Table collectionTable, Column softDeleteColumn) {
-		final List<Column> keyColumns = new ArrayList<>();
-		for ( var selectable : getKey().getSelectables() ) {
-			if ( selectable instanceof Column column ) {
-				keyColumns.add( column );
-			}
-		}
-		for ( var selectable : getElement().getSelectables() ) {
-			if ( selectable instanceof Column column ) {
-				keyColumns.add( column );
-			}
-		}
-		keyColumns.add( softDeleteColumn );
-
-		final var index = collectionTable.getOrCreateIndex( determineUniqueKeyName( keyColumns ) );
-		index.setUnique( true );
-		for ( int i = 0; i < keyColumns.size() - 1; i++ ) {
-			index.addColumn( keyColumns.get( i ) );
-		}
-		index.addColumn( new Formula( liveRowSoftDeleteFormula( softDeleteColumn ) ) );
-	}
-
-	private String liveRowSoftDeleteFormula(Column softDeleteColumn) {
-		final String nonDeletedLiteral = softDeleteNonDeletedLiteral( (BasicValue) softDeleteColumn.getValue() );
-		return "(case when " + softDeleteColumn.getQuotedName( getMetadata().getDatabase().getDialect() )
-				+ " = " + nonDeletedLiteral + " then 1 end)";
-	}
-
-	private String softDeleteNonDeletedLiteral(BasicValue softDeleteValue) {
-		final var resolution = softDeleteValue.resolve();
-		@SuppressWarnings("unchecked")
-		final var converter = (BasicValueConverter<Boolean, ?>) resolution.getValueConverter();
-		// BasicValue already reverses ACTIVE converters, so false means a live row
-		// for both strategies when using the resolved converter.
-		final Object nonDeletedValue = converter == null
-				? getSoftDeleteStrategy() == SoftDeleteType.ACTIVE
-						? true
-						: false
-				: converter.toRelationalValue( false );
-		@SuppressWarnings("unchecked")
-		final var literalFormatter =
-				(JdbcLiteralFormatter<Object>) resolution.getJdbcMapping().getJdbcLiteralFormatter();
-		return literalFormatter.toJdbcLiteral( nonDeletedValue, getMetadata().getDatabase().getDialect(), null );
 	}
 
 	private String determineUniqueKeyName(List<Column> columns) {
