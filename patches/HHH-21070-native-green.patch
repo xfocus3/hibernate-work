@@ -1,0 +1,65 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/AbstractJdbcParameter.java b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/AbstractJdbcParameter.java
+index e0f655d..e21fc4c 100644
+--- a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/AbstractJdbcParameter.java
++++ b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/AbstractJdbcParameter.java
+@@ -131,7 +131,7 @@ private JdbcMapping guessBindType(ExecutionContext executionContext, Object bind
+ 					executionContext.getSession().getFactory().getMappingMetamodel()
+ 							.resolveParameterBindType( bindValue );
+ 			return parameterType == null && bindValue instanceof Enum<?> enumValue
+-					? createEnumType( executionContext, enumValue.getClass() )
++					? createEnumType( executionContext, enumValue.getDeclaringClass() )
+ 					: parameterType instanceof JdbcMapping ? (JdbcMapping) parameterType : null;
+ 		}
+ 	}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/query/binding/EnumConstantBodyParameterTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/query/binding/EnumConstantBodyParameterTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/query/binding/EnumConstantBodyParameterTest.java
+@@ -0,0 +1,47 @@
++package org.hibernate.orm.test.query.binding;
++
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.RequiresDialect;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.junit.jupiter.api.Test;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@JiraKey("HHH-21070")
++@DomainModel(annotatedClasses = EnumConstantBodyParameterTest.Item.class)
++@SessionFactory
++public class EnumConstantBodyParameterTest {
++
++	@Test
++	@RequiresDialect(H2Dialect.class)
++	public void testNativeQueryParameter(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Integer result = session.createNativeQuery( "select cast(:value as integer)", Integer.class )
++					.setParameter( "value", ColorWithClassBody.GREEN )
++					.getSingleResult();
++			assertThat( result ).isEqualTo( 1 );
++		} );
++	}
++
++	public enum ColorWithClassBody {
++		RED,
++		GREEN {
++			@Override
++			public String toString() {
++				return "green";
++			}
++		}
++	}
++
++	@Entity(name = "Item")
++	public static class Item {
++		@Id
++		private Long id;
++	}
++}
