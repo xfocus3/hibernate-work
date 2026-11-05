@@ -1,0 +1,33 @@
+{
+  "issue": "HHH-21070",
+  "work_issue": "https://github.com/xfocus3/hibernate-work/issues/41",
+  "baseline": "d3b56d7e5aad20f842f7ce364cb53200a395c586",
+  "baseline_tree": "92d35e25a0377dae7bcbbb94569a80bb6f7a6930",
+  "explore": {
+    "run_id": 42102172274,
+    "status": "completed",
+    "conclusion": "success",
+    "request_ids": [
+      "c1974159-1a87-4beb-bbc9-2a50495f09d8",
+      "566fb74d-a581-4ea4-8448-1cf42e1f55e8"
+    ],
+    "responses_consumed": true,
+    "comment": "https://github.com/xfocus3/hibernate-work/issues/41#issuecomment-6668419710"
+  },
+  "native_red": {
+    "run_id": 42103175038,
+    "status": "in_progress",
+    "patch_ref": "d4eddea18b4f92c6c6d6fd437fa5d034b74405ef",
+    "patch_path": "patches/HHH-21070-native-red.patch",
+    "production_changed": false
+  },
+  "unintended_baseline_ci": {
+    "run_id": 42102247267,
+    "conclusion": "cancelled",
+    "completed_checks": [
+      "Code formatting checks"
+    ],
+    "note": "Baseline sync triggered upstream CI on upstream-main. Cancelled during initial build; not regression evidence."
+  },
+  "next": "Inspect actual native regression XML. Only after genuine RED, activate the implementation handoff, apply the minimal candidate and verify focused GREEN. Prepare the work PR and sanitized upstream text; upstream publication remains outside this cycle's current scope."
+}
