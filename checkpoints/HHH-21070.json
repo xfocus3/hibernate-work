@@ -38,7 +38,7 @@
     ],
     "note": "Baseline sync triggered upstream CI on upstream-main. Cancelled during initial build; not regression evidence."
   },
-  "next": "Inspect final exact-revision test XML and formatter diff. Publish only the verified implementation checkpoint and return the pending Sandcastle response, then verify consumption and the draft work PR. Configure scoped exact-head checks and continue independent workflow review. Upstream publication remains outside current scope.",
+  "next": "Inspect exact-head scoped checks, monitor the original review handoffs and verify each response is consumed. Prepare sanitized upstream PR text; upstream publication remains outside current scope.",
   "native_green": {
     "run_id": 42103928296,
     "status": "completed",
@@ -71,16 +71,45 @@
     "request_id": "0812fbdf-f57a-4f81-abf8-4fb950225ded",
     "request_hash": "d0ae4dc7a0c3742b2bc147efbbaaff6a3585bbec766f5fae46b1d0048ca6b98a",
     "expires_at": "2026-11-05T21:15:28.257Z",
-    "status": "waiting_for_response",
-    "branch": "agent/issue-41-hhh-21070-bind-enum-constants-with-class-bodies-us"
+    "status": "completed",
+    "branch": "agent/issue-41-hhh-21070-bind-enum-constants-with-class-bodies-us",
+    "conclusion": "success",
+    "response_consumed": true,
+    "result_head": "64eccc82e18bb245962bf972d341a686d83462d7",
+    "response_commit": "1a6a6a1b2392a4f236622557ef36bd829de56b41"
   },
   "final_verification": {
     "run_id": 42106038838,
-    "status": "in_progress",
+    "status": "completed",
     "patch_ref": "11cb256099dba2426d1119841a541a34fb1929e8",
     "patch_path": "patches/HHH-21070-final-green.patch",
     "expected_tree": "a52e3639e739ccfe9e96c049f5f1944cb9511eff",
-    "scope": "Six regression and binding controls, four neighboring test classes, compilation and formatChecks with JDK 25/H2"
+    "scope": "Six regression and binding controls, four neighboring test classes, compilation and formatChecks with JDK 25/H2",
+    "conclusion": "success",
+    "tests": {
+      "total": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "artifact_id": 13451013335,
+    "tested_tree": "a52e3639e739ccfe9e96c049f5f1944cb9511eff",
+    "format_checks": "passed"
   },
-  "independent_static_review": "No actionable findings; CI validation pending"
+  "independent_static_review": "No actionable findings; CI validation pending",
+  "work_pr": {
+    "number": 42,
+    "url": "https://github.com/xfocus3/hibernate-work/pull/42",
+    "draft": true,
+    "head": "64eccc82e18bb245962bf972d341a686d83462d7",
+    "base": "upstream-main"
+  },
+  "review_verification": {
+    "first_run": 42107112308,
+    "first_conclusion": "failure",
+    "first_reason": "PR-specific plan was absent at the automatically selected controller commit; no tests ran.",
+    "plan_commit": "f00df497df1b95b55cfd7f62e903ec72c2f62603",
+    "run_id": 42107277500,
+    "status": "in_progress"
+  }
 }
