@@ -38,7 +38,7 @@
     ],
     "note": "Baseline sync triggered upstream CI on upstream-main. Cancelled during initial build; not regression evidence."
   },
-  "next": "Inspect exact-head scoped checks, monitor the original review handoffs and verify each response is consumed. Prepare sanitized upstream PR text; upstream publication remains outside current scope.",
+  "next": "Implementation, exact-head focused verification and original Sandcastle review are complete. No pending handoff. Upstream PR text is prepared but not submitted. Obtain explicit upstream publication approval including current licensing terms, prepare a clean publication commit without the work-only skip-CI marker, verify its exact fork head, and recheck overlapping work before any approved official submission. No merge or release.",
   "native_green": {
     "run_id": 42103928296,
     "status": "completed",
@@ -96,13 +96,15 @@
     "tested_tree": "a52e3639e739ccfe9e96c049f5f1944cb9511eff",
     "format_checks": "passed"
   },
-  "independent_static_review": "No actionable findings; CI validation pending",
+  "independent_static_review": "No actionable findings; source and RED/GREEN artifacts verified independently.",
   "work_pr": {
     "number": 42,
     "url": "https://github.com/xfocus3/hibernate-work/pull/42",
-    "draft": true,
+    "draft": false,
     "head": "64eccc82e18bb245962bf972d341a686d83462d7",
-    "base": "upstream-main"
+    "base": "upstream-main",
+    "state": "open",
+    "ready_by_workflow": true
   },
   "review_verification": {
     "first_run": 42107112308,
@@ -110,6 +112,28 @@
     "first_reason": "PR-specific plan was absent at the automatically selected controller commit; no tests ran.",
     "plan_commit": "f00df497df1b95b55cfd7f62e903ec72c2f62603",
     "run_id": 42107277500,
-    "status": "in_progress"
+    "status": "completed",
+    "conclusion": "success",
+    "artifact_id": 13453162256,
+    "tests": {
+      "total": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "tested_tree": "a52e3639e739ccfe9e96c049f5f1944cb9511eff"
+  },
+  "review": {
+    "run_id": 42108411378,
+    "status": "completed",
+    "conclusion": "success",
+    "requests": [
+      "6dbbac49-f96f-422a-88ea-21358770d503",
+      "36f6b465-5d2b-450a-a739-13a9fc771e98"
+    ],
+    "responses_consumed": true,
+    "verdict": "clean",
+    "review_url": "https://github.com/xfocus3/hibernate-work/pull/42#pullrequestreview-5792093984",
+    "code_changes": false
   }
 }
