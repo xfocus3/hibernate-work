@@ -1,0 +1,22 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--rerun",
+    "--tests",
+    "org.hibernate.orm.test.query.binding.EnumConstantBodyParameterTest",
+    "--tests",
+    "org.hibernate.orm.test.query.criteria.EnumConstantBodyLiteralTest",
+    "--tests",
+    "org.hibernate.orm.test.query.sql.NativeQueryParameterTests",
+    "--tests",
+    "org.hibernate.orm.test.query.binding.ParameterBindTypeTest",
+    "--tests",
+    "org.hibernate.orm.test.ops.EnumsParameterTest",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "Verify HHH-21070 at the exact current work PR head with fresh focused test execution. Six new controls cover native and HQL unknown enum parameters with constant-specific class bodies, ordinary enums, mapped STRING enum binding and mapped null binding. Neighboring class-body literals, native parameters, bind-type resolution and enum parameter tests protect existing behavior. JDK 25/H2, test compilation and repository formatChecks are included. The full upstream database matrix is deliberately excluded."
+}
