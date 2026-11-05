@@ -1,0 +1,11 @@
+{
+  "id": "36f6b465-5d2b-450a-a739-13a9fc771e98",
+  "requestHash": "f3a4dce7be2d400385e2f12a17f189e9e4de87e2ef518868bc37943da522dc93",
+  "runId": "42108411378",
+  "runAttempt": "1",
+  "head": "64eccc82e18bb245962bf972d341a686d83462d7",
+  "resultHead": "64eccc82e18bb245962bf972d341a686d83462d7",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed commit 64eccc82e18bb245962bf972d341a686d83462d7 for HHH-21070. No actionable findings or review changes. Using Enum.getDeclaringClass() supplies the real enum declaration to the existing unknown-parameter fallback while preserving explicit/contextual mappings, registered parameter types, SQL-type indicators and null handling. The six new tests keep unmapped enums separate from the mapped STRING control and cover both query paths, ordinary enum values and null binding.\\n\\nBoth [native baseline RED](https://github.com/xfocus3/hibernate-work/actions/runs/42103175038) and [HQL baseline RED](https://github.com/xfocus3/hibernate-work/actions/runs/42105360337) each failed one regression with the intended EnumJavaType NPE. The [exact-head scoped recheck](https://github.com/xfocus3/hibernate-work/actions/runs/42107277500) passed all 18 tests across five classes, with zero failures, errors or skips, plus compilation and repository formatChecks on JDK 25/H2. Artifact 13453162256 confirms the current PR commit, identical source/tested tree a52e3639e739ccfe9e96c049f5f1944cb9511eff and no post-formatter changes. Independent source and artifact review also found no issues.\\n\\nCoverage is focused, not the full Hibernate suite or cross-dialect matrix. Native regressions are H2-specific; explicit supplied-type precedence is supported by unchanged control flow rather than a new dedicated test. No human review threads required replies. No local Java execution, upstream PR publication, merge or release was performed.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
