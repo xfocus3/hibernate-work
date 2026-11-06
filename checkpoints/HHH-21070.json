@@ -38,7 +38,7 @@
     ],
     "note": "Baseline sync triggered upstream CI on upstream-main. Cancelled during initial build; not regression evidence."
   },
-  "next": "Implementation, exact-head focused verification and original Sandcastle review are complete. No pending handoff. Upstream PR text is prepared but not submitted. Obtain explicit upstream publication approval including current licensing terms, prepare a clean publication commit without the work-only skip-CI marker, verify its exact fork head, and recheck overlapping work before any approved official submission. No merge or release.",
+  "next": "Official upstream PR #13861 is open and ready for review at 5be48187ff597ea1c1303e4c765d55a836388307. Contribution rules passed. CI and actionlint await maintainer approval; Jenkins is paused at Configure awaiting approval, not a test failure. No pending Sandcastle handoff. Continue read-only monitoring for maintainer feedback and exact-head CI results. No merge or release.",
   "native_green": {
     "run_id": 42103928296,
     "status": "completed",
@@ -135,5 +135,35 @@
     "verdict": "clean",
     "review_url": "https://github.com/xfocus3/hibernate-work/pull/42#pullrequestreview-5792093984",
     "code_changes": false
+  },
+  "upstream_pr": {
+    "number": 13861,
+    "url": "https://github.com/hibernate/hibernate-orm/pull/13861",
+    "head": "5be48187ff597ea1c1303e4c765d55a836388307",
+    "state": "open",
+    "draft": false,
+    "ready_for_review": true,
+    "checked_at": "2026-11-06T09:28:00Z",
+    "contribution_rules": {
+      "conclusion": "success",
+      "url": "https://github.com/hibernate/hibernate-orm/pull/13861/checks?check_run_id=127807228549"
+    },
+    "ci": {
+      "status": "awaiting_maintainer_approval",
+      "run_id": 42191773179,
+      "url": "https://github.com/hibernate/hibernate-orm/actions/runs/42191773179"
+    },
+    "actionlint": {
+      "status": "awaiting_maintainer_approval",
+      "run_id": 42191773514,
+      "url": "https://github.com/hibernate/hibernate-orm/actions/runs/42191773514"
+    },
+    "jenkins": {
+      "status": "paused_awaiting_approval",
+      "stage": "Configure",
+      "url": "https://ci.hibernate.org/job/hibernate-orm-pipeline/job/PR-13861/1/stages/"
+    },
+    "maintainer_feedback": "No comments or reviews observed.",
+    "pending_handoff": false
   }
 }
