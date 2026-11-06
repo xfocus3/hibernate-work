@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "jira": "HHH-21072",
+  "issue": "https://github.com/xfocus3/hibernate-work/issues/43",
+  "status": "implementation-active",
+  "updatedAt": "2026-11-06T10:27:00Z",
+  "upstreamBase": "18584773ee25a3aa63c541fd560bbc0b707b6fb2",
+  "explore": {
+    "runId": 42200584270,
+    "status": "success",
+    "responses": [
+      "0805d118-c85c-41dc-8b6c-cdc4c652923a",
+      "db6803b7-f639-432d-8527-b5e468eb12f1"
+    ],
+    "consumed": true
+  },
+  "red": {
+    "runId": 42201953020,
+    "patchCommit": "4a3306a8ed2d53264c7ada54b06415f07e86f45c",
+    "patchPath": "patches/HHH-21072-red-v2.patch",
+    "testedTree": "a5588d0390ab3f8a215f749535d2f7968fe46053",
+    "tests": 4,
+    "failures": 2,
+    "skipped": 0,
+    "summary": "Both constant-body cases fail at visitLiteral:6024 with AssertionError; ordinary enum controls pass."
+  },
+  "implementation": {
+    "runId": 42202483084,
+    "branch": "agent/issue-43-hhh-21072-fix-criteria-enum-literals-with-constant",
+    "requestId": "7685ee57-7f37-490d-ada5-b699c9916ecf",
+    "requestHash": "bd8d373eb67e1162e6b66532786e7155d0b3472f6fd2f17b3e3ef074de495a0e",
+    "runAttempt": "1",
+    "expiresAt": "2026-11-06T11:11:26.735Z",
+    "responseSubmitted": false
+  },
+  "green": {
+    "runId": 42202706662,
+    "patchCommit": "b7ab7bdda99879d40fd3f7357e5187ebb96299dd",
+    "patchPath": "patches/HHH-21072-green.patch",
+    "status": "in_progress"
+  },
+  "next": "Inspect GREEN exact-tree artifacts, publish verified source commit, answer implementation request before expiry and verify consumption, then verify/review work PR. Do not start a duplicate workflow or separate Codex task.",
+  "notes": [
+    "First RED run42201411223 reproduced the source failure but had invalid ordinary controls after one-time fixture data was cleared by failure recovery. Superseded by per-test setup RED42201953020.",
+    "Incidental full-matrix run42200636376 created by upstream synchronization was cancelled; focused verification remains authoritative."
+  ]
+}
