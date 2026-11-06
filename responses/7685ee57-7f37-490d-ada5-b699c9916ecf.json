@@ -1,0 +1,14 @@
+{
+  "id": "7685ee57-7f37-490d-ada5-b699c9916ecf",
+  "requestHash": "bd8d373eb67e1162e6b66532786e7155d0b3472f6fd2f17b3e3ef074de495a0e",
+  "runId": "42202483084",
+  "runAttempt": "1",
+  "head": "18584773ee25a3aa63c541fd560bbc0b707b6fb2",
+  "resultHead": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/tree/spi/expression/SqmLiteral.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/criteria/EnumLiteralWithoutMappingTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-21072 by resolving enum literal Java types from Enum.getDeclaringClass() in SqmLiteral when no inherent type is available. This preserves contextual mapping inference and fixes constant-specific class bodies. Added four regression/control tests covering selected literals and isNotNull without mapped enum attributes. Clean RED on upstream 18584773ee25a3aa63c541fd560bbc0b707b6fb2: run 42201953020, two constant-body AssertionErrors at BaseSqmToSqlAstConverter.visitLiteral:6024, both ordinary enum controls passed. GREEN run 42202706662 succeeded: 21 tests across five classes, zero failures/errors/skips, plus formatChecks. Published result tree 39f5af6ab02d40cd18baea7eecc6b8f92a7ccb6d exactly equals the artifact tested_tree; no formatter changes. Independent static review found no blocking issues. Latest upstream and all-state duplicate PR checks remain unchanged. No full test/database matrix claimed. <promise>COMPLETE</promise>"
+}
