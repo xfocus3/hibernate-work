@@ -1,0 +1,184 @@
+diff --git a/hibernate-envers/src/test/java/org/hibernate/orm/test/envers/integration/query/FunctionBasedOrderByTest.java b/hibernate-envers/src/test/java/org/hibernate/orm/test/envers/integration/query/FunctionBasedOrderByTest.java
+new file mode 100644
+index 0000000..4dc4856
+--- /dev/null
++++ b/hibernate-envers/src/test/java/org/hibernate/orm/test/envers/integration/query/FunctionBasedOrderByTest.java
+@@ -0,0 +1,178 @@
++package org.hibernate.orm.test.envers.integration.query;
++
++import java.util.ArrayList;
++import java.util.List;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.ManyToMany;
++import jakarta.persistence.OrderBy;
++
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.envers.AuditReaderFactory;
++import org.hibernate.envers.Audited;
++import org.hibernate.envers.RelationTargetAuditMode;
++
++import org.hibernate.testing.envers.junit.EnversTest;
++import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.Jpa;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import static org.assertj.core.api.Assertions.assertThat;
++import static org.assertj.core.api.Assertions.tuple;
++
++@Jpa(
++		annotatedClasses = {
++				FunctionBasedOrderByTest.Owner.class,
++				FunctionBasedOrderByTest.ReferenceTag.class,
++				FunctionBasedOrderByTest.AuditedTag.class
++		},
++		properties = @Setting(name = AvailableSettings.JPA_ORDER_BY_MAPPING_COMPLIANCE, value = "false")
++)
++@EnversTest
++@JiraKey("HHH-21062")
++public class FunctionBasedOrderByTest {
++	@BeforeEach
++	public void initData(EntityManagerFactoryScope scope) {
++		// Recreate the schema and revision sequence for each test, even after a preceding failure.
++		// Releasing the factory retains the integration settings, including the active audit strategy.
++		scope.releaseEntityManagerFactory();
++
++		// Revision 1: insertion order differs from lower(name) order.
++		scope.inTransaction( em -> {
++			final Owner owner = new Owner();
++			owner.id = 1;
++			final String[] names = { "Beta", "alpha", "gamma" };
++			for ( int i = 0; i < names.length; i++ ) {
++				final ReferenceTag referenceTag = new ReferenceTag( i + 1, names[i] );
++				final AuditedTag auditedTag = new AuditedTag( i + 1, names[i] );
++				em.persist( referenceTag );
++				em.persist( auditedTag );
++				if ( i < 2 ) {
++					owner.referenceTags.add( referenceTag );
++					owner.auditedTags.add( auditedTag );
++				}
++			}
++			em.persist( owner );
++		} );
++
++		// Revision 2: change membership and both the current and audited sort keys.
++		scope.inTransaction( em -> {
++			final Owner owner = em.find( Owner.class, 1 );
++			owner.referenceTags.remove( em.find( ReferenceTag.class, 2 ) );
++			owner.referenceTags.add( em.find( ReferenceTag.class, 3 ) );
++			owner.auditedTags.remove( em.find( AuditedTag.class, 2 ) );
++			owner.auditedTags.add( em.find( AuditedTag.class, 3 ) );
++			em.find( ReferenceTag.class, 1 ).name = "zeta";
++			em.find( AuditedTag.class, 1 ).name = "zeta";
++		} );
++	}
++
++	@Test
++	public void testNotAuditedTargetAtRevision1(EntityManagerFactoryScope scope) {
++		assertReferenceTags( scope, 1, 2, "alpha" );
++	}
++
++	@Test
++	public void testNotAuditedTargetAtRevision2(EntityManagerFactoryScope scope) {
++		assertReferenceTags( scope, 2, 3, "gamma" );
++	}
++
++	@Test
++	public void testAuditedTargetAtRevision1(EntityManagerFactoryScope scope) {
++		assertAuditedTags( scope, 1, 2, "alpha", "Beta" );
++	}
++
++	@Test
++	public void testAuditedTargetAtRevision2(EntityManagerFactoryScope scope) {
++		assertAuditedTags( scope, 2, 3, "gamma", "zeta" );
++	}
++
++	private void assertReferenceTags(EntityManagerFactoryScope scope, int revision, int firstId, String firstName) {
++		scope.inEntityManager( em -> {
++			final Owner owner = AuditReaderFactory.get( em ).find( Owner.class, 1, revision );
++			assertThat( owner ).isNotNull();
++			// Historical membership, but current target names and ordering.
++			assertThat( owner.referenceTags )
++					.extracting( ReferenceTag::getId, ReferenceTag::getName )
++					.containsExactly( tuple( firstId, firstName ), tuple( 1, "zeta" ) );
++		} );
++	}
++
++	private void assertAuditedTags(
++			EntityManagerFactoryScope scope, int revision, int firstId, String firstName, String secondName) {
++		scope.inEntityManager( em -> {
++			final Owner owner = AuditReaderFactory.get( em ).find( Owner.class, 1, revision );
++			assertThat( owner ).isNotNull();
++			assertThat( owner.auditedTags )
++					.extracting( AuditedTag::getId, AuditedTag::getName )
++					.containsExactly( tuple( firstId, firstName ), tuple( 1, secondName ) );
++		} );
++	}
++
++	@Entity(name = "OrderByOwner")
++	@Audited
++	public static class Owner {
++		@Id
++		private Integer id;
++
++		@ManyToMany
++		@Audited(targetAuditMode = RelationTargetAuditMode.NOT_AUDITED)
++		@OrderBy("lower(name)")
++		private List<ReferenceTag> referenceTags = new ArrayList<>();
++
++		@ManyToMany
++		@OrderBy("lower(name)")
++		private List<AuditedTag> auditedTags = new ArrayList<>();
++	}
++
++	@Entity(name = "ReferenceTag")
++	public static class ReferenceTag {
++		@Id
++		private Integer id;
++		private String name;
++
++		public ReferenceTag() {
++		}
++
++		public ReferenceTag(Integer id, String name) {
++			this.id = id;
++			this.name = name;
++		}
++
++		public Integer getId() {
++			return id;
++		}
++
++		public String getName() {
++			return name;
++		}
++	}
++
++	@Entity(name = "AuditedTag")
++	@Audited
++	public static class AuditedTag {
++		@Id
++		private Integer id;
++		private String name;
++
++		public AuditedTag() {
++		}
++
++		public AuditedTag(Integer id, String name) {
++			this.id = id;
++			this.name = name;
++		}
++
++		public Integer getId() {
++			return id;
++		}
++
++		public String getName() {
++			return name;
++		}
++	}
++}
