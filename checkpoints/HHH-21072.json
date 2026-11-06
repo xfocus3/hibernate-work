@@ -2,8 +2,8 @@
   "version": 1,
   "jira": "HHH-21072",
   "issue": "https://github.com/xfocus3/hibernate-work/issues/43",
-  "status": "work-pr-ready",
-  "updatedAt": "2026-11-06T10:49:00Z",
+  "status": "upstream-published",
+  "updatedAt": "2026-11-06T10:57:00Z",
   "upstreamBase": "18584773ee25a3aa63c541fd560bbc0b707b6fb2",
   "explore": {
     "runId": 42200584270,
@@ -48,7 +48,7 @@
     "skipped": 0,
     "formatChecks": "success"
   },
-  "next": "Work PR44 is ready for upstream publication review. Recheck official upstream and all-state duplicate PRs before publication. Preserve the two-file verified change and public reporter attribution. No merge or release; no duplicate implementation or separate Codex task.",
+  "next": "Official PR13866 is open and ready for review. Contribution rules pass; upstream CI/actionlint and Jenkins await maintainer approval. No pending Sandcastle handoff. Continue discovery through the browser and monitor authorized upstream work; no merge or release.",
   "notes": [
     "First RED run42201411223 reproduced the source failure but had invalid ordinary controls after one-time fixture data was cleared by failure recovery. Superseded by per-test setup RED42201953020.",
     "Incidental full-matrix run42200636376 created by upstream synchronization was cancelled; focused verification remains authoritative."
@@ -79,5 +79,42 @@
     "sourceChanged": false,
     "workPrReady": true
   },
-  "activeHandoff": null
+  "activeHandoff": null,
+  "upstreamPr": {
+    "number": 13866,
+    "url": "https://github.com/hibernate/hibernate-orm/pull/13866",
+    "state": "open",
+    "draft": false,
+    "head": "d1ad4c0f70ce740f6db69f3be1920e9cdae6ba27",
+    "verifiedTree": "39f5af6ab02d40cd18baea7eecc6b8f92a7ccb6d",
+    "branch": "HHH-21072-enum-literal-declaring-class",
+    "contributionRules": {
+      "status": "success",
+      "url": "https://github.com/hibernate/hibernate-orm/pull/13866/checks?check_run_id=127853763342",
+      "tasks": [
+        "Bug regression added and RED confirmed",
+        "No breaking changes requiring migration entry"
+      ]
+    },
+    "ci": {
+      "status": "awaiting_maintainer_approval",
+      "url": "https://github.com/hibernate/hibernate-orm/actions/runs/42206191187"
+    },
+    "actionlint": {
+      "status": "awaiting_maintainer_approval",
+      "url": "https://github.com/hibernate/hibernate-orm/actions/runs/42206191417"
+    },
+    "jenkins": {
+      "status": "paused_awaiting_approval",
+      "stage": "Configure",
+      "url": "https://ci.hibernate.org/job/hibernate-orm-pipeline/job/PR-13866/1/stages/"
+    },
+    "maintainerEdits": false
+  },
+  "forkCi": {
+    "runId": 42205866428,
+    "status": "cancellation_requested",
+    "codeFormatting": "success",
+    "reason": "Incidental full matrix triggered by clean publication push; focused exact-tree verification already passed."
+  }
 }
