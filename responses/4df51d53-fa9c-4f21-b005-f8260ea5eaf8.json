@@ -1,0 +1,11 @@
+{
+  "id": "4df51d53-fa9c-4f21-b005-f8260ea5eaf8",
+  "requestHash": "f30c28bd53fec7da99f19e6841ab05b9759ca454a870ddb2035c4731b083bf23",
+  "runId": "42204797243",
+  "runAttempt": "1",
+  "head": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "resultHead": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed HHH-21072 at `08406741c41e200ae3e4edceebf467eb118ebfc1`. No blocking findings and no code changes were needed. Resolving the null-inherent-type Java descriptor from `Enum.getDeclaringClass()` fixes constant-specific enum subclasses while preserving contextual mapping inference, null handling, and non-enum behavior. The four public-API regressions cover selected literals and `isNotNull`, with ordinary-enum controls and independent per-test fixtures. Independent static review agreed.\\n\\n[Clean RED](https://github.com/xfocus3/hibernate-work/actions/runs/42201953020) on unchanged upstream `18584773ee25a3aa63c541fd560bbc0b707b6fb2` reproduced both constant-body failures at `BaseSqmToSqlAstConverter.visitLiteral:6024`; both ordinary controls passed. [Exact-head verification](https://github.com/xfocus3/hibernate-work/actions/runs/42204003063) passed all 21 tests across five classes with zero failures, errors, or skips, including compilation and `formatChecks` on JDK 25/H2. The artifact records tree and tested tree `39f5af6ab02d40cd18baea7eecc6b8f92a7ccb6d`, with an empty post-verification patch. The earlier [GREEN run](https://github.com/xfocus3/hibernate-work/actions/runs/42202706662) agrees.\\n\\nCoverage is focused; the full ORM suite, database matrix, and reported older-version comparisons were not run. There are no unresolved human review threads requiring replies.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
