@@ -1,0 +1,16 @@
+{
+  "issue": "HHH-21062",
+  "workIssue": 45,
+  "workIssueUrl": "https://github.com/xfocus3/hibernate-work/issues/45",
+  "status": "exploration-handoff",
+  "baseline": "18584773ee25a3aa63c541fd560bbc0b707b6fb2",
+  "baselineTree": "49a3bb253a507cabd9f5e8f906adbb0ed65ac65a",
+  "exploreRun": "42207727312",
+  "activeHandoff": {
+    "id": "2eabc4b1-0987-4c2e-863a-c4030c02b9ec",
+    "expiresAt": "2026-11-06T11:52:50.259Z",
+    "responseCommit": "02b36d9f502d24cb020599963c74b5f8be7de79b",
+    "consumption": "pending verification"
+  },
+  "next": "Consume exploration and extraction, then run clean RED before implementation; maintain the PR #13866 cycle."
+}
