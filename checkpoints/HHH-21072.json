@@ -2,8 +2,8 @@
   "version": 1,
   "jira": "HHH-21072",
   "issue": "https://github.com/xfocus3/hibernate-work/issues/43",
-  "status": "work-pr-verifying",
-  "updatedAt": "2026-11-06T10:38:00Z",
+  "status": "work-pr-ready",
+  "updatedAt": "2026-11-06T10:49:00Z",
   "upstreamBase": "18584773ee25a3aa63c541fd560bbc0b707b6fb2",
   "explore": {
     "runId": 42200584270,
@@ -48,10 +48,36 @@
     "skipped": 0,
     "formatChecks": "success"
   },
-  "next": "Inspect automatically dispatched exact-head scoped Java verification for work PR44, answer and verify review handoffs, then report readiness. No active implementation handoff.",
+  "next": "Work PR44 is ready for upstream publication review. Recheck official upstream and all-state duplicate PRs before publication. Preserve the two-file verified change and public reporter attribution. No merge or release; no duplicate implementation or separate Codex task.",
   "notes": [
     "First RED run42201411223 reproduced the source failure but had invalid ordinary controls after one-time fixture data was cleared by failure recovery. Superseded by per-test setup RED42201953020.",
     "Incidental full-matrix run42200636376 created by upstream synchronization was cancelled; focused verification remains authoritative."
   ],
-  "workPr": "https://github.com/xfocus3/hibernate-work/pull/44"
+  "workPr": "https://github.com/xfocus3/hibernate-work/pull/44",
+  "scopedVerification": {
+    "runId": 42204003063,
+    "status": "success",
+    "source": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+    "testedTree": "39f5af6ab02d40cd18baea7eecc6b8f92a7ccb6d",
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "success",
+    "verifiedPatchEmpty": true,
+    "currentHeadRecheck": "success"
+  },
+  "review": {
+    "runId": 42204797243,
+    "status": "success",
+    "verdict": "clean",
+    "responses": [
+      "590d7940-8c16-4e51-9cc2-e38865dd3211",
+      "4df51d53-fa9c-4f21-b005-f8260ea5eaf8"
+    ],
+    "consumed": true,
+    "sourceChanged": false,
+    "workPrReady": true
+  },
+  "activeHandoff": null
 }
