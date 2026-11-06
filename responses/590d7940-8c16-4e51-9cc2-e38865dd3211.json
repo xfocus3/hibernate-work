@@ -1,0 +1,11 @@
+{
+  "id": "590d7940-8c16-4e51-9cc2-e38865dd3211",
+  "requestHash": "0acbab3cbae67037d904527050549403eee6c42164ae4b34759869c0ec9b15a7",
+  "runId": "42204797243",
+  "runAttempt": "1",
+  "head": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "resultHead": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed the exact two-file HHH-21072 diff at 08406741c41e200ae3e4edceebf467eb118ebfc1 and linked report. No blocking findings or useful code changes, no human review threads to answer. SqmLiteral must use the enum declaring class to obtain EnumJavaType for anonymous constant-specific subclasses, while leaving inherentType null for contextual JDBC mapping. Null uses its separate constructor; non-enum and ordinary-enum behavior are unchanged; copy rebuilds via this constructor. Per-test fixture setup isolates expected failures. The tests exercise public Criteria APIs and both reported paths. Independent static review agrees. Sandcastle coding standards and applicable Hibernate lessons reviewed; target has no CONTEXT.md or CODING_STANDARDS.md. Clean RED42201953020 on unchanged upstream1858477: both constant-body tests fail at visitLiteral:6024, both ordinary controls pass. GREEN42202706662 and exact-head scoped42204003063 each passed21 tests across five classes, zero failures/errors/skips, JDK25/H2 and formatChecks; exact-head artifact tree=tested_tree39f5af6ab02d40cd18baea7eecc6b8f92a7ccb6d with empty verified.patch. Compilation ran through the configured Actions Gradle test task. No full ORM/dialect matrix or older reported versions were tested. No commit, push, comment, label edit or thread resolution performed in this review response. <promise>COMPLETE</promise>"
+}
