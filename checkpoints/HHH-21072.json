@@ -113,7 +113,7 @@
   },
   "forkCi": {
     "runId": 42205866428,
-    "status": "cancellation_requested",
+    "status": "cancelled",
     "codeFormatting": "success",
     "reason": "Incidental full matrix triggered by clean publication push; focused exact-tree verification already passed."
   }
