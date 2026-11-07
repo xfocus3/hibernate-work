@@ -1,0 +1,50 @@
+name: Preserve HHH-21073 handoff artifacts
+on:
+  push:
+    branches: [sandcastle/dot-checkpoint/HHH-21073-20261107]
+    paths: [.github/workflows/hhh21073-preserve.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42396366045'
+          artifact-ids: '13583143426,13583606740,13583702051'
+          path: checkpoints/HHH-21073/explore
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42397135631'
+          artifact-ids: '13584365335,13583373643'
+          path: checkpoints/HHH-21073/implement
+      - name: Verify recorded identities and preserve source snapshots
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          expected = {'03651659-7cfd-41e7-8b54-f4f63c0543c4': '42396366045', '3fccba7d-0abe-4816-bd59-711b37f0e0b6': '42396366045', '59a758b7-cedc-4dce-985b-81e7a24ab052': '42396366045', '4b2c14a1-5ed1-4931-8a8e-52a7a6565244': '42397135631', 'a5c80652-4297-43c9-82a4-e0d762e456bb': '42397135631'}
+          seen = set()
+          for path in pathlib.Path('checkpoints/HHH-21073').rglob('*.json'):
+              data = json.loads(path.read_text())
+              assert data['id'] in expected
+              assert str(data['runId']) == expected[data['id']]
+              assert data['repository'] == 'xfocus3/hibernate-work'
+              assert data['runAttempt'] == '1'
+              assert data['snapshot']['head'] == 'a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25'
+              assert data['snapshot']['files'] == []
+              seen.add(data['id'])
+          assert seen == set(expected)
+          PY
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git add checkpoints/HHH-21073
+          git diff --cached --check
+          git commit -m "chore: preserve HHH-21073 original source checkpoints [skip ci]"
+          git push origin HEAD:sandcastle/dot-checkpoint/HHH-21073-20261107
