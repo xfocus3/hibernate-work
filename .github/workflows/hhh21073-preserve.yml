@@ -28,14 +28,14 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: '42402412259'
-          artifact-ids: '13586595546,13586400704'
+          artifact-ids: '13586595546,13586400704,13586660029'
           path: checkpoints/HHH-21073/review
       - name: Verify recorded identities and preserve source snapshots
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib
-          expected = {'03651659-7cfd-41e7-8b54-f4f63c0543c4': '42396366045', '3fccba7d-0abe-4816-bd59-711b37f0e0b6': '42396366045', '59a758b7-cedc-4dce-985b-81e7a24ab052': '42396366045', '4b2c14a1-5ed1-4931-8a8e-52a7a6565244': '42397135631', 'a5c80652-4297-43c9-82a4-e0d762e456bb': '42397135631', 'a5833b1d-f336-4d60-9505-305944feaa2a': '42397135631', 'f236a291-65b0-43ae-aafc-44e3040b42c5': '42397135631', '0d5cd3b4-211b-4872-9e00-11d78877a6d3': '42402412259', 'e6ff911b-33f0-4bda-a845-afcff707d177': '42402412259'}
+          expected = {'03651659-7cfd-41e7-8b54-f4f63c0543c4': '42396366045', '3fccba7d-0abe-4816-bd59-711b37f0e0b6': '42396366045', '59a758b7-cedc-4dce-985b-81e7a24ab052': '42396366045', '4b2c14a1-5ed1-4931-8a8e-52a7a6565244': '42397135631', 'a5c80652-4297-43c9-82a4-e0d762e456bb': '42397135631', 'a5833b1d-f336-4d60-9505-305944feaa2a': '42397135631', 'f236a291-65b0-43ae-aafc-44e3040b42c5': '42397135631', '0d5cd3b4-211b-4872-9e00-11d78877a6d3': '42402412259', 'e6ff911b-33f0-4bda-a845-afcff707d177': '42402412259', '9b31e3a8-9497-4e54-888c-ef1190a7aaae': '42402412259'}
           seen = set()
           for path in pathlib.Path('checkpoints/HHH-21073').rglob('*.json'):
               data = json.loads(path.read_text())
