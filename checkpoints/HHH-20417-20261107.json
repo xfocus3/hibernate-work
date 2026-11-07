@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Original review succeeded; clean fork publication complete; exact-fork checks running before official draft PR",
+  "status": "Original cycle completed and official draft PR published; upstream CI pending",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -68,7 +68,7 @@
   },
   "red3Commit": "da8c2a2b3a4152457fbcaefb6947b0447fdf6bd2",
   "red3Run": 42408316793,
-  "nextStep": "Verify exact-fork focused tests and formatting, then submit browser-prepared official draft PR; no merge.",
+  "nextStep": "Observe upstream checks and maintainer feedback through existing authorized monitoring. No merge, release, permission changes, or separate task.",
   "implementationResult": "success",
   "blockedResponseCommit": "8fa041eefba58924f50d40d08a98f1c7da89021f",
   "blockedConsumedAt": "2026-11-07T19:58:41Z",
@@ -186,5 +186,23 @@
   "redundantControlCiCancelled": [
     42415082901,
     42415302588
-  ]
+  ],
+  "officialPR": "https://github.com/hibernate/hibernate-orm/pull/13881",
+  "officialHead": "b2b3cb99d1a72024a804d8d58de966f4a2c1cb7c",
+  "finalForkResult": {
+    "tests": 320,
+    "passed": 277,
+    "skipped": 43,
+    "failures": 0,
+    "errors": 0,
+    "newRegressionExecutions": 15,
+    "formatChecks": "passed",
+    "compilation": "passed",
+    "testedTree": "bb14a3b475008746a591fbdf1215e180ddea44b4",
+    "verifiedPatch": "empty"
+  },
+  "contributionRules": "success",
+  "officialDraft": true,
+  "maintainerCanModify": false,
+  "upstreamChecks": "Jenkins and build reports in progress; Quarkus skipped; GitHub workflows await maintainer approval"
 }
