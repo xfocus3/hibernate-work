@@ -1,0 +1,64 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
+new file mode 100644
+index 0000000000..adba6efaec
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
+@@ -0,0 +1,58 @@
++package org.hibernate.orm.test.paging.keybased;
++
++import java.util.List;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++
++import org.hibernate.query.Order;
++import org.hibernate.query.Page;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.Jira;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
++
++@SessionFactory
++@DomainModel(annotatedClasses = NullableKeyBasedPagingTest.Book.class)
++@Jira("https://hibernate.atlassian.net/browse/HHH-21073")
++class NullableKeyBasedPagingTest {
++
++	@Test
++	void testAscendingNullsLast(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			for ( long id = 1; id <= 4; id++ ) {
++				final var book = new Book();
++				book.id = id;
++				book.pages = id == 4 ? null : (int) id * 100;
++				session.persist( book );
++			}
++		} );
++
++		scope.inSession( session -> {
++			final var query = session.createSelectionQuery( "from Book", Book.class );
++			final var first = query.getKeyedResultList( Page.first( 2 ).keyedBy( List.of(
++					Order.asc( Book.class, "pages" ).withNullsLast(),
++					Order.asc( Book.class, "id" )
++			) ) );
++			assertEquals( List.of( 1L, 2L ), first.getResultList().stream().map( book -> book.id ).toList() );
++			assertNotNull( first.getNextPage() );
++
++			final var second = query.getKeyedResultList( first.getNextPage() );
++			assertEquals( List.of( 3L, 4L ), second.getResultList().stream().map( book -> book.id ).toList() );
++			assertTrue( second.isLastPage() );
++		} );
++	}
++
++	@Entity(name = "Book")
++	static class Book {
++		@Id
++		Long id;
++		Integer pages;
++	}
++}
