@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Final broad GREEN and independent approval; result returned to original attempt2, awaiting consumption",
+  "status": "Original scoped verification GREEN; original independent review active",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -69,7 +69,7 @@
   "red3Commit": "da8c2a2b3a4152457fbcaefb6947b0447fdf6bd2",
   "red3Run": 42408316793,
   "nextStep": "Finish joined-subclass and cache-failure tracer bullets, run neighboring locking/cache and relevant coordinator coverage, independent review, then recover original implementation only after terminal verification. No COMPLETE or PR yet.",
-  "implementationResult": "failure",
+  "implementationResult": "success",
   "blockedResponseCommit": "8fa041eefba58924f50d40d08a98f1c7da89021f",
   "blockedConsumedAt": "2026-11-07T19:58:41Z",
   "red3Result": {
@@ -148,5 +148,28 @@
   "sourceCheckpointRun": 42412994266,
   "resultHead": "e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5",
   "implementationResponseCommit": "22589b00174f0a3ab35701b5129c22e9effbcb6c",
-  "attempt2PreservedRun": 42412197992
+  "attempt2PreservedRun": 42412197992,
+  "workPR": 51,
+  "workPRHead": "e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5",
+  "scopedRun": 42413525184,
+  "scopedResult": {
+    "tests": 320,
+    "passed": 277,
+    "skipped": 43,
+    "failures": 0,
+    "errors": 0,
+    "formatChecks": "passed",
+    "treeUnchanged": true
+  },
+  "reviewRun": 42413900771,
+  "reviewRequest": "8317170c-22ca-4665-8baf-17a7450d3e3d",
+  "reviewRequestHash": "dbc5cfc78fcb99d92682a968e1ad0bb793e4360560c6dcae74f13d21cf241d0f",
+  "reviewExpiresAt": "2026-11-07T21:49:22.441Z",
+  "reviewControllerHead": "3d4322264c49efb073a36df53ca614888a333272",
+  "reviewStage": {
+    "id": "e1e81430-36b1-4b72-8368-8d0f05913b4f",
+    "inputHash": "e877d343fd95812aeeb20861f779b361d05e25a60d64bcb6d39020860ba0d105",
+    "script": ".sandcastle/agent-workflows/review/review.ts"
+  },
+  "reviewArtifacts": "Original Actions artifacts retained; public checkpoint contains sanitized identifiers and source/test receipts only"
 }
