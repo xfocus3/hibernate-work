@@ -1,0 +1,35 @@
+name: Preserve HHH-20417 handoff artifacts
+on:
+  push:
+    branches: [sandcastle/dot-checkpoint/HHH-20417-20261107]
+    paths: [.github/workflows/hhh20417-preserve.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 42404946137
+          pattern: dot-*
+          path: checkpoints/HHH-20417/explore
+      - name: Preserve verified original exchange
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git add checkpoints/HHH-20417/explore
+          git diff --cached --check
+          git commit -m "HHH-20417 preserve original exploration exchange [skip ci]"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          printf '::add-mask::%s\n' "$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD
