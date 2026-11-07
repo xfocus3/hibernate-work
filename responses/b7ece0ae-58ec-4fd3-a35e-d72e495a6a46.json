@@ -1,0 +1,11 @@
+{
+  "id": "b7ece0ae-58ec-4fd3-a35e-d72e495a6a46",
+  "runId": "42405497209",
+  "runAttempt": "1",
+  "requestHash": "eef2cfc1c139ce4a9ef0ba2077127cc6f12be80ab7517b86d21d13851fd4737f",
+  "head": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "resultHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Implementation remains incomplete. Managed-lock RED 42405857828 reproduced database version 0 instead of 1. Managed-lock GREEN 42406576064 passed 1 test and formatChecks. Fresh-find RED 42407181563 reproduced the same delay; pessimistic lock/load GREEN 42407763816 passed both tests, compilation and formatChecks on tested tree 583f6c6e1aa24919e302706aa4eec7d83d7e2669. Joined-subclass RED is running as 42408316793. Supported persister/coordinator delegation and immediate stale/cache-lock failure semantics still need verification and changes, followed by neighboring tests and independent review. Exact source patch is preserved on sandcastle/dot-check/HHH-20417-20261107 at da8c2a2b3a4152457fbcaefb6947b0447fdf6bd2. Original request and stage artifacts were preserved by run 42405826131. Checkpoint: checkpoints/HHH-20417-20261107.json on sandcastle-dot-responses. No completion marker, result source commit, PR, merge or release is claimed. Continue from durable checkpoint through verified original-run recovery after this invocation becomes terminal."
+}
