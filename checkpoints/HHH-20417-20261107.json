@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Fresh-find RED verified after managed-lock GREEN; remaining pessimistic callers GREEN in preparation",
+  "status": "Implementation incomplete: additional supported inheritance and stale/cache regressions remain; handoff will return blocked before deadline",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -54,5 +54,19 @@
     "errors": 0,
     "skipped": 0,
     "reason": "fresh find expected immediate database version 1 but was 0; managed lock passed"
-  }
+  },
+  "green2Run": 42407763816,
+  "green2Commit": "563c86e9cbfd3cacbb924699140b27b83fcce3a1",
+  "green2TestedTree": "583f6c6e1aa24919e302706aa4eec7d83d7e2669",
+  "green2Result": {
+    "tests": 2,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "compilation": "passed"
+  },
+  "red3Commit": "da8c2a2b3a4152457fbcaefb6947b0447fdf6bd2",
+  "red3Run": 42408316793,
+  "nextStep": "Finish joined-subclass and cache-failure tracer bullets, run neighboring locking/cache and relevant coordinator coverage, independent review, then recover original implementation only after terminal verification. No COMPLETE or PR yet."
 }
