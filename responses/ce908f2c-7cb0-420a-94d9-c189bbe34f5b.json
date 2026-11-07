@@ -1,0 +1,14 @@
+{
+  "id": "ce908f2c-7cb0-420a-94d9-c189bbe34f5b",
+  "requestHash": "8e55faae7d90f58c34557d82faf5868ef2a8ad21d6ccfd72af1d7e5d1f06b73c",
+  "runId": "42391299243",
+  "runAttempt": "1",
+  "head": "2f4b9539c89a92fde9602b01ead4f8e682b84291",
+  "resultHead": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/internal/SqmCriteriaNodeBuilder.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/criteria/RegisteredEnumLiteralTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Addressed the new registered-enum mapping review for HHH-21072. resolveInferredType(T) now looks up a registered BasicType using the enum's declaring class, falling back to resolveEnumType only when no registration exists. Added four public Criteria CASE regressions with registered VARCHAR mapping, covering both execution outcomes for a constant-body THEN value and ordinary controls.\n\nIndependent RED: https://github.com/xfocus3/hibernate-work/actions/runs/42391809577 attempt 1. Unchanged production 2f4b9539 plus test-only patch df03fa139a055650fb87bf7bfdead1284975b4ff. Four tests, one expected DataException with SQL THEN 1 ELSE 'OPEN', zero skips; other three passed.\nGREEN: https://github.com/xfocus3/hibernate-work/actions/runs/42392215242 attempt 1, patch 425702571fda1c08a78d0c5d57e0be73d18293b4 on same input. All 27 tests across six classes passed, zero failures/errors/skips; compileJava, compileTestJava, testClasses and formatChecks passed on JDK 25/H2. Tree and tested_tree both 39aa13954b74d78182be275415d13702b91304c1. Source checkpoint 2fd46671577f9b2d7329a16469867a9ddf8ea7c7 exactly matches tested tree and has xfocus3 authorship. Independent code and bounded publication review found no blocker. Full ORM suite and database matrix remain deferred to upstream CI. No upstream PR comment or publication done yet.\n\n<promise>COMPLETE</promise>"
+}
