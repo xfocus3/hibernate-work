@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Focused managed-lock RED running in Actions; original implementation handoff active",
+  "status": "Fresh-find RED verified after managed-lock GREEN; remaining pessimistic callers GREEN in preparation",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -27,5 +27,32 @@
   "explorationPreservedRun": 42405489730,
   "redRun": 42405857828,
   "implementationPreservedRun": 42405826131,
-  "redundantForkCiCancelled": 42404983988
+  "redundantForkCiCancelled": 42404983988,
+  "green1Run": 42406576064,
+  "green1Commit": "371c8e458d1f17a4c948f2852ab3fa5af89c0c64",
+  "green1TestedTree": "2b9061f4179464fb4f9d532d49618038e4a166ed",
+  "redResult": {
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "reason": "expected immediate database version 1 but was 0"
+  },
+  "green1Result": {
+    "tests": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "compilation": "passed"
+  },
+  "red2Run": 42407181563,
+  "red2Commit": "a16627f1fde8f8f63498be5f2113ceda7a0412f4",
+  "red2Result": {
+    "tests": 2,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "reason": "fresh find expected immediate database version 1 but was 0; managed lock passed"
+  }
 }
