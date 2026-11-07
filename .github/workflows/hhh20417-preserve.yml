@@ -17,9 +17,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
-          run-id: 42404946137
+          run-id: 42405497209
           pattern: dot-*
-          path: checkpoints/HHH-20417/explore
+          path: checkpoints/HHH-20417/implement
       - name: Preserve verified original exchange
         env:
           GH_TOKEN: ${{ github.token }}
@@ -27,9 +27,9 @@ jobs:
           set -euo pipefail
           git config user.name xfocus3
           git config user.email xfocus29@gmail.com
-          git add checkpoints/HHH-20417/explore
+          git add checkpoints/HHH-20417/implement
           git diff --cached --check
-          git commit -m "HHH-20417 preserve original exploration exchange [skip ci]"
+          git commit -m "HHH-20417 preserve original implementation exchange [skip ci]"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           printf '::add-mask::%s\n' "$auth"
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD
