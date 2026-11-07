@@ -1,0 +1,11 @@
+{
+  "id": "7cb831e8-2c5a-4ce6-b31c-494be01ff3a5",
+  "requestHash": "129f1b23fe30fa9e86b2555deee23335f09f5203e171f6739289e1fe32db5473",
+  "runId": "42377622512",
+  "runAttempt": "1",
+  "head": "2f4b9539c89a92fde9602b01ead4f8e682b84291",
+  "resultHead": "2f4b9539c89a92fde9602b01ead4f8e682b84291",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"threadReplies\": [],\n  \"newInlineComments\": [],\n  \"topLevelComments\": [\n    {\n      \"body\": \"Addressed the two upstream review requests in 2f4b9539c89a92fde9602b01ead4f8e682b84291: extracted the SqmLiteral Java-type helper and fixed the equivalent inferred-enum bug in SqmCriteriaNodeBuilder.resolveEnumType() using Enum.getDeclaringClass(). Added Criteria CASE regressions for constant-specific enum bodies and ordinary-enum controls.\\n\\n[RED](https://github.com/xfocus3/hibernate-work/actions/runs/42378187547) reproduced the expected resolveEnumType NullPointerException: one failure, five passing controls, zero skips. [GREEN](https://github.com/xfocus3/hibernate-work/actions/runs/42378893927) passed all 23 tests across five classes with zero failures, errors or skips on JDK 25/H2, including compilation and formatChecks. The result commit matches tested tree 708e218aa119f40637d96f0675acaab4418cd3a8. Independent review found no blocking defect.\\n\\nThe full ORM suite and database matrix remain deferred to upstream CI. Official PR publication and maintainer acceptance are separate from this verified source checkpoint.\"\n    }\n  ]\n}\n</output>"
+}
