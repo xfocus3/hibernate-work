@@ -76,10 +76,10 @@ index df41222f74..3b3aff7a65 100644
  		sqm = (SqmSelectStatement<R>) paginate(
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
 new file mode 100644
-index 0000000000..adba6efaec
+index 0000000000..6cb8969140
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,94 @@
 +package org.hibernate.orm.test.paging.keybased;
 +
 +import java.util.List;
@@ -94,6 +94,7 @@ index 0000000000..adba6efaec
 +import org.hibernate.testing.orm.junit.SessionFactory;
 +import org.hibernate.testing.orm.junit.SessionFactoryScope;
 +
++import org.junit.jupiter.api.AfterEach;
 +import org.junit.jupiter.api.Test;
 +
 +import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,6 +105,11 @@ index 0000000000..adba6efaec
 +@DomainModel(annotatedClasses = NullableKeyBasedPagingTest.Book.class)
 +@Jira("https://hibernate.atlassian.net/browse/HHH-21073")
 +class NullableKeyBasedPagingTest {
++
++	@AfterEach
++	void cleanUp(SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.createMutationQuery( "delete from Book" ).executeUpdate() );
++	}
 +
 +	@Test
 +	void testAscendingNullsLast(SessionFactoryScope scope) {
@@ -128,6 +134,36 @@ index 0000000000..adba6efaec
 +			final var second = query.getKeyedResultList( first.getNextPage() );
 +			assertEquals( List.of( 3L, 4L ), second.getResultList().stream().map( book -> book.id ).toList() );
 +			assertTrue( second.isLastPage() );
++		} );
++	}
++
++	@Test
++	void testAscendingNullsFirstBoundary(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			for ( long id = 1; id <= 3; id++ ) {
++				final var book = new Book();
++				book.id = id;
++				book.pages = id == 3 ? 100 : null;
++				session.persist( book );
++			}
++		} );
++
++		scope.inSession( session -> {
++			final var query = session.createSelectionQuery( "from Book", Book.class );
++			final var first = query.getKeyedResultList( Page.first( 1 ).keyedBy( List.of(
++					Order.asc( Book.class, "pages" ).withNullsFirst(),
++					Order.asc( Book.class, "id" )
++			) ) );
++			assertEquals( List.of( 1L ), first.getResultList().stream().map( book -> book.id ).toList() );
++			assertNotNull( first.getNextPage() );
++
++			final var second = query.getKeyedResultList( first.getNextPage() );
++			assertEquals( List.of( 2L ), second.getResultList().stream().map( book -> book.id ).toList() );
++			assertNotNull( second.getNextPage() );
++
++			final var third = query.getKeyedResultList( second.getNextPage() );
++			assertEquals( List.of( 3L ), third.getResultList().stream().map( book -> book.id ).toList() );
++			assertTrue( third.isLastPage() );
 +		} );
 +	}
 +
