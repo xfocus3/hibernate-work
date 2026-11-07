@@ -1,0 +1,11 @@
+{
+  "id": "b1259943-f7cc-4525-a860-92ee995cf680",
+  "requestHash": "088f0ae3bdf8b2ace3290f4a1a2dc5618d227e4563df24777a347e51ea3d8395",
+  "runId": "42391299243",
+  "runAttempt": "1",
+  "head": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "resultHead": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"threadReplies\": [],\n  \"newInlineComments\": [],\n  \"topLevelComments\": [\n    {\n      \"body\": \"Addressed the registered-type review in 2fd46671577f9b2d7329a16469867a9ddf8ea7c7. resolveInferredType now uses the enum's declaring class for the registered BasicType lookup and preserves the fallback when no registration exists. Added four registered VARCHAR CASE tests covering both outcomes of a constant-body THEN value and ordinary controls.\\n\\n[Independent RED](https://github.com/xfocus3/hibernate-work/actions/runs/42391809577) reproduced the expected mixed ordinal/string CASE failure on unchanged production: four tests, one DataException, zero skips. [GREEN](https://github.com/xfocus3/hibernate-work/actions/runs/42392215242) passed all 27 tests across six classes, compilation and formatChecks on JDK 25/H2, with zero failures/errors/skips. The result commit matches tested tree 39aa13954b74d78182be275415d13702b91304c1. Independent review found no blocking defect.\\n\\nThe full ORM suite and database matrix remain deferred to upstream CI.\"\n    }\n  ]\n}\n</output>"
+}
