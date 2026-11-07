@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Original cycle completed and official draft PR published; upstream CI pending",
+  "status": "Original cycle completed; official PR published and ready for review; upstream CI pending",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -202,7 +202,7 @@
     "verifiedPatch": "empty"
   },
   "contributionRules": "success",
-  "officialDraft": true,
+  "officialDraft": false,
   "maintainerCanModify": false,
   "upstreamChecks": "Jenkins and build reports in progress; Quarkus skipped; GitHub workflows await maintainer approval"
 }
