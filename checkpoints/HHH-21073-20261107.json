@@ -1,0 +1,23 @@
+{
+  "issue": "HHH-21073",
+  "workIssue": 48,
+  "exploreRun": 42396366045,
+  "exploreStageArtifact": 13583143426,
+  "exploreRequestArtifact": 13583606740,
+  "exploreExtractionArtifact": 13583702051,
+  "exploreResponseCommit": "cc9afb8b40c6e37efe303856813980b71c50aa6e",
+  "exploreExtractionResponseCommit": "d9008a8bddae894df1184dabc4dd05c4656016b7",
+  "implementationRun": 42397135631,
+  "implementationStageArtifact": 13584365335,
+  "implementationRequestArtifact": 13583373643,
+  "implementationRequestId": "4b2c14a1-5ed1-4931-8a8e-52a7a6565244",
+  "implementationRequestHash": "f54b4e7ec5fc356eef2ac43ab643c21cdc38b56d222dfff2ff0b1c12f85f0e08",
+  "implementationExpiresAt": "2026-11-07T18:22:43.584Z",
+  "inputHead": "a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25",
+  "taskBranch": "agent/issue-48-hhh-21073-preserve-nullable-keys-in-key-based-pagi",
+  "redRun": 42397389560,
+  "redCommit": "dbc21d67bf39fec56dd3ec8f73d06fad7be802a9",
+  "status": "Original implementation waiting; one focused regression authored, production unchanged. Await observed behavioral RED before fix.",
+  "artifactExpiry": "2026-11-14",
+  "next": "Preserve original full artifacts before expiry; complete RED/GREEN then original extraction/review."
+}
