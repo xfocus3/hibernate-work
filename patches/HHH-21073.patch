@@ -92,10 +92,10 @@ index df41222f74..3b3aff7a65 100644
  		sqm = (SqmSelectStatement<R>) paginate(
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
 new file mode 100644
-index 0000000000..6cb8969140
+index 0000000000..59a6555a3a
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,125 @@
 +package org.hibernate.orm.test.paging.keybased;
 +
 +import java.util.List;
@@ -180,6 +180,37 @@ index 0000000000..6cb8969140
 +			final var third = query.getKeyedResultList( second.getNextPage() );
 +			assertEquals( List.of( 3L ), third.getResultList().stream().map( book -> book.id ).toList() );
 +			assertTrue( third.isLastPage() );
++		} );
++	}
++
++	@Test
++	void testBackwardNullsLastBoundary(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			for ( long id = 1; id <= 3; id++ ) {
++				final var book = new Book();
++				book.id = id;
++				book.pages = id == 1 ? 100 : null;
++				session.persist( book );
++			}
++		} );
++
++		scope.inSession( session -> {
++			final var query = session.createSelectionQuery( "from Book", Book.class );
++			final var first = query.getKeyedResultList( Page.first( 1 ).keyedBy( List.of(
++					Order.asc( Book.class, "pages" ).withNullsLast(),
++					Order.asc( Book.class, "id" )
++			) ) );
++			assertEquals( List.of( 1L ), first.getResultList().stream().map( book -> book.id ).toList() );
++			assertNotNull( first.getNextPage() );
++
++			final var second = query.getKeyedResultList( first.getNextPage() );
++			assertEquals( List.of( 2L ), second.getResultList().stream().map( book -> book.id ).toList() );
++			assertNotNull( second.getNextPage() );
++			assertNotNull( second.getPreviousPage() );
++
++			final var previous = query.getKeyedResultList( second.getPreviousPage() );
++			assertEquals( List.of( 1L ), previous.getResultList().stream().map( book -> book.id ).toList() );
++			assertTrue( previous.isFirstPage() );
 +		} );
 +	}
 +
