@@ -1,0 +1,11 @@
+{
+  "id": "05ce759c-d09f-4e47-a5be-c49c876b8903",
+  "requestHash": "7a8a4212e71b2c92345a09c4f4eb8082171683b8860c52f62559d7cce0b26ef7",
+  "runId": "42393427161",
+  "runAttempt": "1",
+  "head": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "resultHead": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed HHH-21072 at 2fd46671577f9b2d7329a16469867a9ddf8ea7c7 against the linked issue, CONTRIBUTING and pinned standards. No actionable findings or code changes were needed. Enum declaring-class normalization consistently preserves registered BasicType mappings, contextual inference, null handling and non-enum behavior. Public Criteria regressions exercise the affected paths with ordinary-enum controls and per-test isolation. Independent static review agreed.\\n\\n[Independent RED](https://github.com/xfocus3/hibernate-work/actions/runs/42391809577) reproduced the registered VARCHAR CASE failure on unchanged production. [Exact-head verification](https://github.com/xfocus3/hibernate-work/actions/runs/42392950277) passed 27 tests across six classes, compilation and formatChecks on JDK 25/H2 with zero failures, errors or skips. The verified source tree is 39aa13954b74d78182be275415d13702b91304c1, unchanged by verification.\\n\\nThe full ORM suite, database matrix and reported older-version comparisons remain unverified here and deferred to upstream CI. There are no unresolved human review threads requiring replies.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
