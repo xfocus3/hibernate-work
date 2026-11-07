@@ -11,7 +11,7 @@ jobs:
       target_sha: a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25
       patch_ref: ${{ github.sha }}
       patch_path: patches/HHH-21073.patch
-      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.paging.keybased.NullableKeyBasedPagingTest","-Pdb=h2","formatChecks"]'
+      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.paging.keybased.*","-Pdb=h2","formatChecks"]'
       database: h2
       java_version: '25'
       build_tool: gradle
