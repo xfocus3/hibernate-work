@@ -11,7 +11,7 @@ jobs:
       target_sha: 2f4b9539c89a92fde9602b01ead4f8e682b84291
       patch_ref: ${{ github.sha }}
       patch_path: patches/HHH-21072-registered.patch
-      arguments: '["hibernate-core:test","--tests","org.hibernate.orm.test.query.criteria.RegisteredEnumLiteralTest","-Pdb=h2"]'
+      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.query.criteria.RegisteredEnumLiteralTest","--tests","org.hibernate.orm.test.query.criteria.EnumLiteralWithoutMappingTest","--tests","org.hibernate.orm.test.query.criteria.EnumConstantBodyLiteralTest","--tests","org.hibernate.orm.test.query.SelectUnknownEnumLiteralTest","--tests","org.hibernate.orm.test.query.criteria.BasicCriteriaExecutionTests","--tests","org.hibernate.orm.test.jpa.criteria.nulliteral.CriteriaLiteralInSelectExpressionTest","-Pdb=h2","formatChecks"]'
       database: h2
       java_version: '25'
       build_tool: gradle
