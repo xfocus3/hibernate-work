@@ -1,0 +1,14 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--rerun",
+    "--tests",
+    "org.hibernate.orm.test.paging.keybased.*",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-21073 changes nullable key pagination predicates and effective ordering. Run the regression and neighboring key-based pagination suite, with compilation and repository formatting. Full database matrix is deferred to upstream CI."
+}
