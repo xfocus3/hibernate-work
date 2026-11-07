@@ -1,0 +1,15 @@
+{
+  "id": "53566553-c7bd-49e9-964e-0babb9366a91",
+  "requestHash": "08c38df2697917590a9ceca3241feae245a45ad21c28312ba3da6190d2b1147e",
+  "runId": "42377622512",
+  "runAttempt": "1",
+  "head": "08406741c41e200ae3e4edceebf467eb118ebfc1",
+  "resultHead": "2f4b9539c89a92fde9602b01ead4f8e682b84291",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/internal/SqmCriteriaNodeBuilder.java",
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/tree/spi/expression/SqmLiteral.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/query/criteria/EnumLiteralWithoutMappingTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented both requested HHH-21072 changes: extracted Java type resolution from the SqmLiteral constructor and normalized inferred enum literal types using Enum.getDeclaringClass() in SqmCriteriaNodeBuilder.resolveEnumType(). Added public Criteria CASE regressions for constant-specific enum bodies and ordinary enum controls.\n\nRED: https://github.com/xfocus3/hibernate-work/actions/runs/42378187547 (attempt 1), input 08406741c41e200ae3e4edceebf467eb118ebfc1 plus regression patch d2890f1bca7c02bd2f90165775780e7fb7537cf5. Six tests, one expected NullPointerException in resolveEnumType, five controls passed, zero skips.\nGREEN: https://github.com/xfocus3/hibernate-work/actions/runs/42378893927 (attempt 1), input 08406741c41e200ae3e4edceebf467eb118ebfc1 plus patch e94f3a41f646bf39b60aefc78f02aa04e41cd89c. JDK 25/H2: 23 tests across five classes, zero failures, errors or skips. compileJava, compileTestJava, testClasses and repository formatChecks passed. Tree and tested tree both 708e218aa119f40637d96f0675acaab4418cd3a8; no formatter source drift.\n\nReviewed source checkpoint 2f4b9539c89a92fde9602b01ead4f8e682b84291 has exactly the tested tree and three intended files. Independent static review found no blocking defect. Full ORM suite and database matrix remain deferred to upstream CI. No PR comments or review-thread resolutions were made.\n\n<promise>COMPLETE</promise>"
+}
