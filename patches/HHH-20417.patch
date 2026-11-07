@@ -79,14 +79,16 @@ index df0138a9..6b973806 100644
  					}
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
 new file mode 100644
-index 00000000..861a172b
+index 00000000..c759a606
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,149 @@
 +package org.hibernate.orm.test.locking;
 +
 +import jakarta.persistence.Entity;
 +import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
 +import jakarta.persistence.LockModeType;
 +import jakarta.persistence.Table;
 +import jakarta.persistence.Version;
@@ -105,7 +107,11 @@ index 00000000..861a172b
 +
 +import static org.assertj.core.api.Assertions.assertThat;
 +
-+@DomainModel(annotatedClasses = PessimisticForceIncrementBatchingTest.VersionedEntity.class)
++@DomainModel(annotatedClasses = {
++		PessimisticForceIncrementBatchingTest.VersionedEntity.class,
++		PessimisticForceIncrementBatchingTest.JoinedEntity.class,
++		PessimisticForceIncrementBatchingTest.JoinedChild.class
++})
 +@ServiceRegistry(settings = @Setting(name = AvailableSettings.STATEMENT_BATCH_SIZE, value = "10"))
 +@SessionFactory
 +@JiraKey("HHH-20417")
@@ -161,6 +167,27 @@ index 00000000..861a172b
 +		} );
 +	}
 +
++	@Test
++	void testJoinedSubclassLockExecutesImmediately(SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.persist( new JoinedChild( 2L ) ) );
++		scope.inTransaction( session -> {
++			final JoinedEntity entity = session.find( JoinedChild.class, 2L );
++			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( entity.version ).isEqualTo( 1L );
++			final long databaseVersion = session.doReturningWork( connection -> {
++				try ( var statement = connection.prepareStatement(
++						"select version from force_increment_joined where id = ?" ) ) {
++					statement.setLong( 1, entity.id );
++					try ( var resultSet = statement.executeQuery() ) {
++						assertThat( resultSet.next() ).isTrue();
++						return resultSet.getLong( 1 );
++					}
++				}
++			} );
++			assertThat( databaseVersion ).isEqualTo( 1L );
++		} );
++	}
++
 +	@Entity(name = "VersionedEntity")
 +	@Table(name = "force_increment_entity")
 +	public static class VersionedEntity {
@@ -176,4 +203,32 @@ index 00000000..861a172b
 +			this.id = id;
 +		}
 +	}
++	@Entity(name = "JoinedEntity")
++	@Table(name = "force_increment_joined")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	public static class JoinedEntity {
++		@Id
++		private Long id;
++		@Version
++		private long version;
++
++		public JoinedEntity() {
++		}
++
++		JoinedEntity(Long id) {
++			this.id = id;
++		}
++	}
++
++	@Entity(name = "JoinedChild")
++	@Table(name = "force_increment_child")
++	public static class JoinedChild extends JoinedEntity {
++		public JoinedChild() {
++		}
++
++		JoinedChild(Long id) {
++			super( id );
++		}
++	}
++
 +}
