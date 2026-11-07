@@ -65,6 +65,97 @@ index c5320127..411639d1 100644
  				}
  				else if ( entry.isExistsInDatabase() ) {
  					final var eventMonitor = session.getEventMonitor();
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/JoinedSubclassEntityPersister.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/JoinedSubclassEntityPersister.java
+index 586ac74e..f046e18a 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/entity/JoinedSubclassEntityPersister.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/JoinedSubclassEntityPersister.java
+@@ -1049,7 +1049,7 @@ public Object forceVersionIncrement(
+ 			@Nonnull SharedSessionContractImplementor session) throws HibernateException {
+ 		final var superMappingType = getSuperMappingType();
+ 		return superMappingType != null
+-				? superMappingType.getEntityPersister().forceVersionIncrement( id, currentVersion, session )
++				? superMappingType.getEntityPersister().forceVersionIncrement( id, currentVersion, batching, session )
+ 				: super.forceVersionIncrement( id, currentVersion, batching, session );
+ 	}
+ 
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
+index c419ab0a..68e89b79 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
+@@ -179,4 +179,14 @@ public void forceVersionIncrement(
+ 			@Nonnull SharedSessionContractImplementor session) {
+ 		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, session );
+ 	}
++
++	@Override
++	public void forceVersionIncrement(
++			@Nonnull Object id,
++			@Nullable Object currentVersion,
++			@Nonnull Object nextVersion,
++			boolean batching,
++			@Nonnull SharedSessionContractImplementor session) {
++		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
++	}
+ }
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
+index f2f818c9..74374cbe 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
+@@ -70,6 +70,16 @@ public void forceVersionIncrement(
+ 		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, session );
+ 	}
+ 
++	@Override
++	public void forceVersionIncrement(
++			@Nonnull Object id,
++			@Nullable Object currentVersion,
++			@Nonnull Object nextVersion,
++			boolean batching,
++			@Nonnull SharedSessionContractImplementor session) {
++		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
++	}
++
+ 	boolean shouldAuditUpdate(@Nullable int[] dirtyAttributeIndexes, boolean hasDirtyCollection) {
+ 		if ( dirtyAttributeIndexes == null || dirtyAttributeIndexes.length == 0 ) {
+ 			return true;
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
+index ffbf7107..64ed0e82 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
+@@ -523,4 +523,14 @@ public void forceVersionIncrement(
+ 			@Nonnull SharedSessionContractImplementor session) {
+ 		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, session );
+ 	}
++
++	@Override
++	public void forceVersionIncrement(
++			@Nonnull Object id,
++			@Nullable Object currentVersion,
++			@Nonnull Object nextVersion,
++			boolean batching,
++			@Nonnull SharedSessionContractImplementor session) {
++		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
++	}
+ }
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
+index 072bf194..d16d1cb3 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
+@@ -113,4 +113,14 @@ public void forceVersionIncrement(
+ 			@Nonnull SharedSessionContractImplementor session) {
+ 		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, session );
+ 	}
++
++	@Override
++	public void forceVersionIncrement(
++			@Nonnull Object id,
++			@Nullable Object currentVersion,
++			@Nonnull Object nextVersion,
++			boolean batching,
++			@Nonnull SharedSessionContractImplementor session) {
++		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
++	}
+ }
 diff --git a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
 index df0138a9..6b973806 100644
 --- a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
