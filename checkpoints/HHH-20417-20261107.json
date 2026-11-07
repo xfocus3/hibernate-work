@@ -1,0 +1,29 @@
+{
+  "id": "23c9e98e-8ff3-4b06-aabc-3a4ffeb4aa74",
+  "runId": "42404946137",
+  "runAttempt": "1",
+  "controllerHead": "1fc2f385c696119958d9e7973b84cfd65f0e55ac",
+  "expiresAt": "2026-11-07T19:57:18.912Z",
+  "stage": {
+    "id": "2c1a9a68-7efd-44ed-a31d-a9ef33260a12",
+    "inputHash": "bc3b9d0524160e1f75080b71bf14b8e1a9d008b8c436ad16fd24fdcda256d361",
+    "script": ".sandcastle/agent-workflows/explore/explore.ts"
+  },
+  "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
+  "issue": "HHH-20417",
+  "workIssue": 50,
+  "status": "Original implementation active; focused behavioral RED running",
+  "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "exploreResult": "success",
+  "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
+  "extractionRequest": "3ab8e61a-3ff9-4f86-b351-de9a1b96e1d0",
+  "extractionResponseCommit": "8cb16100861b9df931bd998521b34e5bf3e2ed71",
+  "implementationRun": "42405497209",
+  "implementationRequest": "b7ece0ae-58ec-4fd3-a35e-d72e495a6a46",
+  "implementationExpiresAt": "2026-11-07T20:04:36.968Z",
+  "implementationHash": "eef2cfc1c139ce4a9ef0ba2077127cc6f12be80ab7517b86d21d13851fd4737f",
+  "taskBranch": "agent/issue-50-hhh-20417-execute-pessimistic-force-increments-imm",
+  "redCommit": "9112b96d83b1b8cd7bac096d4be79ae49888cdde",
+  "explorationPreservedRun": 42405489730,
+  "redRun": 42405857828
+}
