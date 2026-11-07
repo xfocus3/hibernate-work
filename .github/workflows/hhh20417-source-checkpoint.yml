@@ -1,0 +1,59 @@
+name: Preserve reviewed HHH-20417 result
+on:
+  push:
+    branches: [sandcastle/dot-checkpoint/HHH-20417-20261107]
+    paths: [.github/workflows/hhh20417-source-checkpoint.yml]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: hhh-20417-result-checkpoint
+  cancel-in-progress: false
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 30e07c88a192526493bfcfed0a9729407726e6dc
+          path: evidence
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 99489d519a023b37cb83c1a89b73ae499113e089
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+      - name: Verify tested evidence and original branch lease
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checked = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: 42412488514 })).data;
+            if (checked.status !== 'completed' || checked.conclusion !== 'success' || checked.head_sha !== '30e07c88a192526493bfcfed0a9729407726e6dc' || checked.path !== '.github/workflows/hhh20417-check.yml' || checked.run_attempt !== 1) throw new Error('Exact evidence run not successful');
+            const original = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: 42405497209 })).data;
+            if (original.run_attempt !== 2 || original.head_sha !== '1fc2f385c696119958d9e7973b84cfd65f0e55ac' || !(original.status === 'in_progress' || (original.status === 'completed' && original.conclusion === 'failure'))) throw new Error('Original implementation identity or state changed');
+            let existing;
+            try { existing = (await github.rest.git.getRef({ ...context.repo, ref: 'heads/agent/issue-50-hhh-20417-execute-pessimistic-force-increments-imm' })).data; }
+            catch (error) { if (error.status !== 404) throw error; }
+            if (existing) throw new Error('Original task branch was published unexpectedly');
+      - name: Publish only reviewed source checkpoint
+        working-directory: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git apply --check ../evidence/patches/HHH-20417.patch
+          git apply --index ../evidence/patches/HHH-20417.patch
+          test "$(git write-tree)" = 'bb14a3b475008746a591fbdf1215e180ddea44b4'
+          git diff --cached --check
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git commit -m "fix: HHH-20417 execute pessimistic force increments immediately"
+          test "$(git show -s --format='%an <%ae>|%cn <%ce>')" = 'xfocus3 <xfocus29@gmail.com>|xfocus3 <xfocus29@gmail.com>'
+          ref=refs/heads/sandcastle/dot-result/HHH-20417-20261107
+          test -z "$(git ls-remote --heads origin "$ref")"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          printf '::add-mask::%s\n' "$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="$ref:" origin "HEAD:$ref"
+          git rev-parse HEAD
