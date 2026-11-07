@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Original implementation active; focused behavioral RED running",
+  "status": "Focused managed-lock RED running in Actions; original implementation handoff active",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -25,5 +25,7 @@
   "taskBranch": "agent/issue-50-hhh-20417-execute-pessimistic-force-increments-imm",
   "redCommit": "9112b96d83b1b8cd7bac096d4be79ae49888cdde",
   "explorationPreservedRun": 42405489730,
-  "redRun": 42405857828
+  "redRun": 42405857828,
+  "implementationPreservedRun": 42405826131,
+  "redundantForkCiCancelled": 42404983988
 }
