@@ -117,10 +117,10 @@ index df41222f74..b99956a399 100644
  		sqm = (SqmSelectStatement<R>) paginate(
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
 new file mode 100644
-index 0000000000..ac2b4fcfe3
+index 0000000000..0a735fad2c
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,203 @@
 +package org.hibernate.orm.test.paging.keybased;
 +
 +import java.util.List;
@@ -146,7 +146,6 @@ index 0000000000..ac2b4fcfe3
 +import static org.junit.jupiter.api.Assertions.assertNotNull;
 +import static org.junit.jupiter.api.Assertions.assertTrue;
 +
-+@SessionFactory
 +@ServiceRegistry(settings = @Setting(name = DEFAULT_NULL_ORDERING, value = "none"))
 +@DomainModel(annotatedClasses = NullableKeyBasedPagingTest.Book.class)
 +@Jira("https://hibernate.atlassian.net/browse/HHH-21073")
@@ -158,6 +157,7 @@ index 0000000000..ac2b4fcfe3
 +	}
 +
 +	@Test
++	@SessionFactory
 +	void testAscendingNullsLast(SessionFactoryScope scope) {
 +		scope.inTransaction( session -> {
 +			for ( long id = 1; id <= 4; id++ ) {
@@ -184,6 +184,7 @@ index 0000000000..ac2b4fcfe3
 +	}
 +
 +	@Test
++	@SessionFactory
 +	void testAscendingNullsFirstBoundary(SessionFactoryScope scope) {
 +		scope.inTransaction( session -> {
 +			for ( long id = 1; id <= 3; id++ ) {
@@ -214,6 +215,7 @@ index 0000000000..ac2b4fcfe3
 +	}
 +
 +	@Test
++	@SessionFactory
 +	void testBackwardNullsLastBoundary(SessionFactoryScope scope) {
 +		scope.inTransaction( session -> {
 +			for ( long id = 1; id <= 3; id++ ) {
@@ -245,6 +247,7 @@ index 0000000000..ac2b4fcfe3
 +	}
 +
 +	@Test
++	@SessionFactory
 +	void testDescendingWithRestriction(SessionFactoryScope scope) {
 +		persistBooks( scope, 100, 200, 300, null, null );
 +		scope.inSession( session -> {
@@ -257,6 +260,7 @@ index 0000000000..ac2b4fcfe3
 +	}
 +
 +	@Test
++	@SessionFactory
 +	void testDialectDefaultNullPrecedence(SessionFactoryScope scope) {
 +		persistBooks( scope, 100, null, null );
 +		scope.inSession( session -> {
