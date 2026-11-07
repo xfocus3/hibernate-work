@@ -25,7 +25,7 @@ index 48641f34..3a49f3ed 100644
  					case OPTIMISTIC_FORCE_INCREMENT:
  						session.getActionQueue()
 diff --git a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java b/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
-index dcfbf381..739da584 100644
+index dcfbf381..6ff31975 100644
 --- a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
 +++ b/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
 @@ -22,6 +22,14 @@ private OptimisticLockHelper() {
@@ -43,12 +43,26 @@ index dcfbf381..739da584 100644
  		final var persister = entry.getPersister();
  		RootTenantCache.invalidateEntity( entry.getId(), persister, session );
  		final Object previousVersion = entry.getVersion();
-@@ -35,7 +43,7 @@ public static void forceVersionIncrement(Object object, EntityEntry entry, Share
+@@ -35,7 +43,21 @@ public static void forceVersionIncrement(Object object, EntityEntry entry, Share
  			final var lock = cache.lockItem( session, cacheKey, previousVersion );
  			return new CacheLock( cache, cacheKey, lock );
  		}, null );
 -		final Object nextVersion = persister.forceVersionIncrement( entry.getId(), previousVersion, session );
-+		final Object nextVersion = persister.forceVersionIncrement( entry.getId(), previousVersion, batching, session );
++		final Object nextVersion;
++		try {
++			nextVersion = persister.forceVersionIncrement( entry.getId(), previousVersion, batching, session );
++		}
++		catch (RuntimeException | Error failure) {
++			if ( cacheLock != null ) {
++				try {
++					cacheLock.cache().unlockItem( session, cacheLock.cacheKey(), cacheLock.lock() );
++				}
++				catch (RuntimeException | Error cleanupFailure) {
++					failure.addSuppressed( cleanupFailure );
++				}
++			}
++			throw failure;
++		}
  		entry.forceLocked( object, nextVersion );
  		if ( cacheLock != null ) {
  			final Object cacheEntry = updateCacheItem(
