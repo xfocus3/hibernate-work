@@ -1,3 +1,29 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/dialect/lock/internal/PessimisticForceIncrementLockingStrategy.java b/hibernate-core/src/main/java/org/hibernate/dialect/lock/internal/PessimisticForceIncrementLockingStrategy.java
+index b8ce0cce..dd1e1faf 100644
+--- a/hibernate-core/src/main/java/org/hibernate/dialect/lock/internal/PessimisticForceIncrementLockingStrategy.java
++++ b/hibernate-core/src/main/java/org/hibernate/dialect/lock/internal/PessimisticForceIncrementLockingStrategy.java
+@@ -46,7 +46,7 @@ public PessimisticForceIncrementLockingStrategy(EntityPersister lockable, LockMo
+ 	@Override
+ 	public void lock(Object id, Object version, Object object, Timeout timeout, SharedSessionContractImplementor session) {
+ 		final var entry = session.getPersistenceContextInternal().getEntry( object );
+-		OptimisticLockHelper.forceVersionIncrement( object, entry, session );
++		OptimisticLockHelper.forceVersionIncrement( object, entry, false, session );
+ 	}
+ 
+ 	/**
+diff --git a/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultPostLoadEventListener.java b/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultPostLoadEventListener.java
+index 48641f34..3a49f3ed 100644
+--- a/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultPostLoadEventListener.java
++++ b/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultPostLoadEventListener.java
+@@ -36,7 +36,7 @@ public void onPostLoad(@Nonnull PostLoadEvent event) {
+ 			if ( persister.isVersioned() ) {
+ 				switch ( lockMode ) {
+ 					case PESSIMISTIC_FORCE_INCREMENT:
+-						OptimisticLockHelper.forceVersionIncrement( entity, entry, session );
++						OptimisticLockHelper.forceVersionIncrement( entity, entry, false, session );
+ 						break;
+ 					case OPTIMISTIC_FORCE_INCREMENT:
+ 						session.getActionQueue()
 diff --git a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java b/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
 index dcfbf381..739da584 100644
 --- a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
@@ -39,6 +65,18 @@ index c5320127..411639d1 100644
  				}
  				else if ( entry.isExistsInDatabase() ) {
  					final var eventMonitor = session.getEventMonitor();
+diff --git a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
+index df0138a9..6b973806 100644
+--- a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
++++ b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
+@@ -153,6 +153,7 @@ protected void performPostAction(ExecutionContext executionContext, LoadedValues
+ 						OptimisticLockHelper.forceVersionIncrement(
+ 								entityDetails.instance(),
+ 								entityDetails.entry(),
++								false,
+ 								session
+ 						);
+ 					}
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
 new file mode 100644
 index 00000000..861a172b
