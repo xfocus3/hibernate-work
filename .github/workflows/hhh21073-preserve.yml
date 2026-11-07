@@ -24,12 +24,18 @@ jobs:
           run-id: '42397135631'
           artifact-ids: '13584365335,13583373643,13585438185,13585229235'
           path: checkpoints/HHH-21073/implement
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42402412259'
+          artifact-ids: '13586595546,13586400704'
+          path: checkpoints/HHH-21073/review
       - name: Verify recorded identities and preserve source snapshots
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib
-          expected = {'03651659-7cfd-41e7-8b54-f4f63c0543c4': '42396366045', '3fccba7d-0abe-4816-bd59-711b37f0e0b6': '42396366045', '59a758b7-cedc-4dce-985b-81e7a24ab052': '42396366045', '4b2c14a1-5ed1-4931-8a8e-52a7a6565244': '42397135631', 'a5c80652-4297-43c9-82a4-e0d762e456bb': '42397135631', 'a5833b1d-f336-4d60-9505-305944feaa2a': '42397135631', 'f236a291-65b0-43ae-aafc-44e3040b42c5': '42397135631'}
+          expected = {'03651659-7cfd-41e7-8b54-f4f63c0543c4': '42396366045', '3fccba7d-0abe-4816-bd59-711b37f0e0b6': '42396366045', '59a758b7-cedc-4dce-985b-81e7a24ab052': '42396366045', '4b2c14a1-5ed1-4931-8a8e-52a7a6565244': '42397135631', 'a5c80652-4297-43c9-82a4-e0d762e456bb': '42397135631', 'a5833b1d-f336-4d60-9505-305944feaa2a': '42397135631', 'f236a291-65b0-43ae-aafc-44e3040b42c5': '42397135631', '0d5cd3b4-211b-4872-9e00-11d78877a6d3': '42402412259', 'e6ff911b-33f0-4bda-a845-afcff707d177': '42402412259'}
           seen = set()
           for path in pathlib.Path('checkpoints/HHH-21073').rglob('*.json'):
               data = json.loads(path.read_text())
@@ -37,7 +43,7 @@ jobs:
               assert str(data['runId']) == expected[data['id']]
               assert data['repository'] == 'xfocus3/hibernate-work'
               assert data['runAttempt'] == ('2' if data['id'] in ['a5833b1d-f336-4d60-9505-305944feaa2a', 'f236a291-65b0-43ae-aafc-44e3040b42c5'] else '1')
-              assert data['snapshot']['head'] == 'a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25'
+              assert data['snapshot']['head'] == ('5227b22b97bd04af7d9fdf0603599b31b2bce245' if str(data['runId']) == '42402412259' else 'a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25')
               assert data['snapshot']['files'] == []
               seen.add(data['id'])
           assert seen == set(expected)
