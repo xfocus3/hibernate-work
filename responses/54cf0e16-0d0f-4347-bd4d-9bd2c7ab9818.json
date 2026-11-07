@@ -1,0 +1,11 @@
+{
+  "id": "54cf0e16-0d0f-4347-bd4d-9bd2c7ab9818",
+  "runId": "42413900771",
+  "runAttempt": "1",
+  "requestHash": "e4de7c6c68582c6cd78f4866954380ffa528a67c060dfd1434e92ca9199442fe",
+  "head": "e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5",
+  "resultHead": "e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Reviewed exact head e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5. Approved with no blocking code findings; no changes or review commit necessary. Pessimistic callers select immediate execution, joined and coordinator delegation preserve the choice, and helper-owned cache-lock cleanup preserves the original SQL failure without advancing the managed version. Optimistic timing and ordinary batching remain unchanged.\\n\\nExact-source H2/JDK25 compilation, formatting and selected locking/cache/temporal suites passed:320 executions,277 passed,43 existing declared skips,zero failures/errors; every new regression ran and passed (run42413525184). Classification generation completed; validation failed identically on head and pristine main:5347 existing errors,zero new/removed,byte-identical reports (comparison42414643638). Five added declarations are INTERNAL without SPI roles. This baseline-identical failure is not a validator pass.\\n\\nThe separate committed-history mismatch was reproduced on unchanged main with batching disabled. The history regression covers immediate execution and rollback; it does not change that preexisting synchronization issue. MergeCoordinatorTemporal forwarding has inspection coverage only. PostgreSQL,native/partitioned temporal features,the complete module build and full database/JDK matrix remain deferred to upstream CI.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
