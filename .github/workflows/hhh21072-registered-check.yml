@@ -1,0 +1,17 @@
+name: Verify HHH-21072 registered enum literals
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-21072-registered-20261107]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: 2f4b9539c89a92fde9602b01ead4f8e682b84291
+      patch_ref: ${{ github.sha }}
+      patch_path: patches/HHH-21072-registered.patch
+      arguments: '["hibernate-core:test","--tests","org.hibernate.orm.test.query.criteria.RegisteredEnumLiteralTest","-Pdb=h2"]'
+      database: h2
+      java_version: '25'
+      build_tool: gradle
