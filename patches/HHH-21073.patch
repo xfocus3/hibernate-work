@@ -55,7 +55,7 @@ index d7739ea223..813d61e92c 100644
  		return predicate;
  	}
 diff --git a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
-index df41222f74..3b3aff7a65 100644
+index df41222f74..a848a8de47 100644
 --- a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
 +++ b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
 @@ -14,6 +14,7 @@
@@ -66,25 +66,29 @@ index df41222f74..3b3aff7a65 100644
  import jakarta.persistence.metamodel.Type;
  import jakarta.persistence.sql.ResultSetMapping;
  import org.hibernate.CacheMode;
-@@ -248,10 +249,22 @@ public <E> SelectionQueryImpl(@SuppressWarnings("rawtypes") SelectionQueryImpl o
+@@ -248,10 +249,23 @@ public <E> SelectionQueryImpl(@SuppressWarnings("rawtypes") SelectionQueryImpl o
  		final var page = keyedPage.getPage();
  		final var key = keyedPage.getKey();
  		final var keyDefinition = keyedPage.getKeyDefinition();
 -		final var appliedKeyDefinition =
-+		final var directedKeyDefinition =
- 				keyedPage.getKeyInterpretation() == KEY_OF_FIRST_ON_NEXT_PAGE
- 						? Order.reverse( keyDefinition )
- 						: keyDefinition;
+-				keyedPage.getKeyInterpretation() == KEY_OF_FIRST_ON_NEXT_PAGE
+-						? Order.reverse( keyDefinition )
+-						: keyDefinition;
++		final boolean backwards = keyedPage.getKeyInterpretation() == KEY_OF_FIRST_ON_NEXT_PAGE;
 +		final var defaultNullPrecedence = getSessionFactory().getSessionFactoryOptions().getDefaultNullPrecedence();
 +		final var nullOrdering = getSessionFactory().getJdbcServices().getDialect()
 +				.getNullOrderingSupport().getDefaultOrdering();
-+		final var appliedKeyDefinition = directedKeyDefinition.stream().<Order<? super E>>map( order -> {
++		final var appliedKeyDefinition = keyDefinition.stream().<Order<? super E>>map( order -> {
 +			final var nullPrecedence = order.nullPrecedence() == Nulls.NONE
 +					? defaultNullPrecedence
 +					: order.nullPrecedence();
 +			final boolean nullsFirst = nullPrecedence == Nulls.NONE
 +					? NullsHelper.isDefaultOrdering( Nulls.FIRST, order.direction(), nullOrdering )
 +					: nullPrecedence == Nulls.FIRST;
++			if ( backwards ) {
++				final var reversedOrder = order.reverse();
++				return nullsFirst ? reversedOrder.withNullsLast() : reversedOrder.withNullsFirst();
++			}
 +			return nullsFirst ? order.withNullsFirst() : order.withNullsLast();
 +		} ).toList();
  
