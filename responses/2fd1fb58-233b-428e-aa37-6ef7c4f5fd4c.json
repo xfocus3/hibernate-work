@@ -1,0 +1,11 @@
+{
+  "id": "2fd1fb58-233b-428e-aa37-6ef7c4f5fd4c",
+  "requestHash": "bdf6f64b601b7cb5b7ba6612fd12136238229b42585ba5a8486f975ba2f8f325",
+  "runId": "42381405698",
+  "runAttempt": "1",
+  "head": "a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25",
+  "resultHead": "a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 46,\n      \"tag\": \"needs-a-human\",\n      \"duplicate_of\": null,\n      \"comment\": \"needs-a-human: the reported String/Long collection-binding exception path is already addressed on current main.\\n\\nInspected upstream a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25. QueryArguments.isInstance() calls JavaType.coerceOrNull(); a whole Collection returns null from StringJavaType.wrapOrNull() and LongJavaType.coerceOrNull(), so this path rejects scalar coercion without constructing the reported exception.\\n\\nThe existing fix is [HHH-20721, ce2ce9a48c](https://github.com/hibernate/hibernate-orm/commit/ce2ce9a48cb28320d2e1c1bb35c32ea491480b0f), an ancestor of the inspected main. No new production change is justified for this reported path.\\n\\nBlast radius would be hibernate-core query binding and Java type coercion; avoid changing Collection handling broadly because custom and plural basic mappings have different contracts. Two-way: this triage does not change code, public API, schema, or persisted data.\\n\\nJira remains New and Unassigned. All-state searches found no HHH-21077 PR; the prior source fix uses HHH-20721. No duplicates were closed.\\n\\nThis is source inspection, independently reviewed, not executable RED/GREEN evidence. No tests or builds were run. Behavior on the reported 7.4.13 line, custom JavaTypes, and backport eligibility remain unverified. A supported-line reproduction/backport decision is needed before implementation; do not submit a duplicate main-branch fix.\"\n    }\n  ]\n}\n</output>"
+}
