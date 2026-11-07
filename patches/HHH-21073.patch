@@ -1,3 +1,79 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/internal/KeyBasedPagination.java b/hibernate-core/src/main/java/org/hibernate/query/internal/KeyBasedPagination.java
+index d7739ea223..6535ac0444 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/internal/KeyBasedPagination.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/internal/KeyBasedPagination.java
+@@ -1,6 +1,7 @@
+ package org.hibernate.query.internal;
+ 
+ import jakarta.persistence.criteria.Expression;
++import jakarta.persistence.criteria.Nulls;
+ import org.hibernate.query.IllegalQueryOperationException;
+ import org.hibernate.query.Order;
+ import org.hibernate.query.SortDirection;
+@@ -80,7 +81,8 @@ private static <R> SqmPredicate keyRestriction(
+ 			final SqmPath key = keyPaths.get(i);
+ 			final Comparable keyValue = keyValues.get(i);
+ 			final List<SqmPath<?>> previousKeys = keyPaths.subList(0, i);
+-			final SqmPredicate predicate = keyPredicate( key, keyValue, direction, previousKeys, keyValues, builder );
++			final SqmPredicate predicate = keyPredicate(
++					key, keyValue, direction, keyDefinition.get(i).nullPrecedence(), previousKeys, keyValues, builder );
+ 			restriction = restriction == null ? predicate : builder.or( restriction, predicate );
+ 		}
+ 		return restriction;
+@@ -115,13 +117,16 @@ private static <R> JpaCompoundSelection<KeyedResult<R>> keyedResultConstructor(
+ 
+ 	@SuppressWarnings("rawtypes")
+ 	private static <C extends Comparable<? super C>> SqmPredicate keyPredicate(
+-			Expression<? extends C> key, C keyValue, SortDirection direction,
++			Expression<? extends C> key, C keyValue, SortDirection direction, Nulls nullPrecedence,
+ 			List<SqmPath<?>> previousKeys, List<Comparable<?>> keyValues,
+ 			NodeBuilder builder) {
+ 		SqmPredicate predicate = switch ( direction ) {
+ 			case ASCENDING -> builder.greaterThan( key, keyValue );
+ 			case DESCENDING -> builder.lessThan( key, keyValue );
+ 		};
++		if ( keyValue != null && nullPrecedence == Nulls.LAST ) {
++			predicate = builder.or( predicate, builder.isNull( key ) );
++		}
+ 		for ( int i = 0; i < previousKeys.size(); i++ ) {
+ 			final SqmPath keyPath = previousKeys.get(i);
+ 			predicate = builder.and( predicate, keyPath.equalTo( keyValues.get(i) ) );
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
+index df41222f74..3b3aff7a65 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/internal/SelectionQueryImpl.java
+@@ -14,6 +14,7 @@
+ import jakarta.persistence.TemporalType;
+ import jakarta.persistence.Timeout;
+ import jakarta.persistence.TypedQuery;
++import jakarta.persistence.criteria.Nulls;
+ import jakarta.persistence.metamodel.Type;
+ import jakarta.persistence.sql.ResultSetMapping;
+ import org.hibernate.CacheMode;
+@@ -248,10 +249,22 @@ public <E> SelectionQueryImpl(@SuppressWarnings("rawtypes") SelectionQueryImpl o
+ 		final var page = keyedPage.getPage();
+ 		final var key = keyedPage.getKey();
+ 		final var keyDefinition = keyedPage.getKeyDefinition();
+-		final var appliedKeyDefinition =
++		final var directedKeyDefinition =
+ 				keyedPage.getKeyInterpretation() == KEY_OF_FIRST_ON_NEXT_PAGE
+ 						? Order.reverse( keyDefinition )
+ 						: keyDefinition;
++		final var defaultNullPrecedence = getSessionFactory().getSessionFactoryOptions().getDefaultNullPrecedence();
++		final var nullOrdering = getSessionFactory().getJdbcServices().getDialect()
++				.getNullOrderingSupport().getDefaultOrdering();
++		final var appliedKeyDefinition = directedKeyDefinition.stream().<Order<? super E>>map( order -> {
++			final var nullPrecedence = order.nullPrecedence() == Nulls.NONE
++					? defaultNullPrecedence
++					: order.nullPrecedence();
++			final boolean nullsFirst = nullPrecedence == Nulls.NONE
++					? NullsHelper.isDefaultOrdering( Nulls.FIRST, order.direction(), nullOrdering )
++					: nullPrecedence == Nulls.FIRST;
++			return nullsFirst ? order.withNullsFirst() : order.withNullsLast();
++		} ).toList();
+ 
+ 		//noinspection unchecked
+ 		sqm = (SqmSelectStatement<R>) paginate(
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/paging/keybased/NullableKeyBasedPagingTest.java
 new file mode 100644
 index 0000000000..adba6efaec
