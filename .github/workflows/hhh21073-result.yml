@@ -1,0 +1,58 @@
+name: Preserve reviewed HHH-21073 result
+on:
+  push:
+    branches: [sandcastle/dot-checkpoint/HHH-21073-20261107]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: hhh-21073-result-checkpoint
+  cancel-in-progress: false
+jobs:
+  checkpoint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a03c2ee95050a549a0bf4f6b5de70d89b2a8ea6b
+          path: evidence
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: a27b439b2dc96cf0bd0bf8f76ab33ff6d5664b25
+          fetch-depth: 0
+          path: target
+          persist-credentials: false
+      - name: Verify tested evidence and original branch lease
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const checked = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: 42400594115 })).data;
+            if (checked.status !== 'completed' || checked.conclusion !== 'success' || checked.head_sha !== 'a03c2ee95050a549a0bf4f6b5de70d89b2a8ea6b' || checked.path !== '.github/workflows/hhh21073-check.yml' || checked.run_attempt !== 1) throw new Error('Exact evidence run not successful');
+            const original = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: 42397135631 })).data;
+            if (original.run_attempt !== 2 || original.head_sha !== 'c621da81bd00e3a6813746e245e0875cd9938b6c' || !(original.status === 'in_progress' || (original.status === 'completed' && original.conclusion === 'failure'))) throw new Error('Original implementation identity or state changed');
+            let existing;
+            try { existing = (await github.rest.git.getRef({ ...context.repo, ref: 'heads/agent/issue-48-hhh-21073-preserve-nullable-keys-in-key-based-pagi' })).data; }
+            catch (error) { if (error.status !== 404) throw error; }
+            if (existing) throw new Error('Original task branch was published unexpectedly');
+      - name: Publish only reviewed source checkpoint
+        working-directory: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git apply --check ../evidence/patches/HHH-21073.patch
+          git apply --index ../evidence/patches/HHH-21073.patch
+          test "$(git write-tree)" = 'ec873322703920ff1f106abad7107c8f3ce1ab6a'
+          git diff --cached --check
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git commit -m "fix: HHH-21073 preserve nullable key pagination boundaries [skip ci]"
+          test "$(git show -s --format='%an <%ae>|%cn <%ce>')" = 'xfocus3 <xfocus29@gmail.com>|xfocus3 <xfocus29@gmail.com>'
+          ref=refs/heads/sandcastle/dot-result/HHH-21073-20261107
+          test -z "$(git ls-remote --heads origin "$ref")"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          printf '::add-mask::%s\n' "$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push --force-with-lease="$ref:" origin "HEAD:$ref"
+          git rev-parse HEAD
