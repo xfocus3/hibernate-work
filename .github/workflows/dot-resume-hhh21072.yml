@@ -59,7 +59,7 @@ jobs:
           const record = { stage, exchanges: [{ request }], lease: { ref: 'refs/heads/' + stage.env.BRANCH, head: stage.snapshot.head } };
           fs.writeFileSync('.sandcastle/recovery/resume.json', JSON.stringify(record));
           NODE
-      - name: Reconcile and replay original stage
+      - name: Reconcile and restart original stage
         uses: actions/github-script@v7
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,11 +67,45 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/dot-stage-output
         with:
           script: |
-            const { spawn } = require('node:child_process');
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { spawn, execFileSync } = require('node:child_process');
+            const { createHash } = require('node:crypto');
+            const root = process.env.GITHUB_WORKSPACE;
+            const target = path.join(root, 'target');
+            const tool = path.join(root, 'sandcastle-tool');
+            const record = JSON.parse(fs.readFileSync(path.join(root, 'recovery/.sandcastle/recovery/resume.json'), 'utf8'));
+            const stage = record.stage;
+            const expectedHead = '08406741c41e200ae3e4edceebf467eb118ebfc1';
+            const old = (await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: 42352032683 })).data;
+            if (old.status !== 'completed' || old.conclusion !== 'cancelled' || old.run_attempt !== 1 || old.event !== 'pull_request_target' || old.head_sha !== expectedHead) throw new Error('Original run identity or terminal state changed');
+            const artifacts = (await github.rest.actions.listWorkflowRunArtifacts({ ...context.repo, run_id: old.id })).data.artifacts;
+            const expected = ['dot-stage-input-' + stage.id, 'dot-request-' + record.exchanges[0].request.id];
+            if (artifacts.length !== 2 || artifacts.some(a => !expected.includes(a.name))) throw new Error('Prior stage effects require reconciliation');
+            try {
+              await github.rest.repos.getContent({ ...context.repo, path: 'responses/' + record.exchanges[0].request.id + '.json', ref: 'sandcastle-dot-responses' });
+              throw new Error('Prior response exists; reconcile before restart');
+            } catch (error) { if (error.status !== 404) throw error; }
+            const ref = (await github.rest.git.getRef({ ...context.repo, ref: 'heads/' + stage.env.BRANCH })).data;
+            if (ref.object.sha !== expectedHead || stage.snapshot.head !== expectedHead) throw new Error('Task branch advanced');
+            for (const status of ['in_progress', 'queued', 'waiting', 'requested', 'pending']) {
+              const runs = (await github.rest.actions.listWorkflowRunsForRepo({ ...context.repo, status, per_page: 100 })).data.workflow_runs;
+              if (runs.some(run => run.id !== context.runId)) throw new Error('Another run may own work; reconcile first');
+            }
+            const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+            const paths = ['src', 'package.json', 'package-lock.json', 'tsconfig.json', 'tsup.config.ts', 'scripts', '.sandcastle/agent-workflows', '.github/workflows'];
+            const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+            const controller = digest({ tool: git(tool, 'ls-tree', '-r', 'HEAD', '--', ...paths), workflows: git(target, 'ls-tree', '-r', 'HEAD', '--', '.github/workflows') });
+            if (controller !== stage.controllerHash) throw new Error('Original controller differs');
+            const restore = { id: stage.id, snapshot: stage.snapshot };
+            const restoreFile = path.join(process.env.RUNNER_TEMP, 'verified-boundary.json');
+            fs.writeFileSync(restoreFile, JSON.stringify({ ...restore, hash: digest(restore) }));
+            execFileSync(process.execPath, [path.join(tool, 'scripts/dot-restore.mjs'), restoreFile, target], { stdio: 'inherit' });
+            console.log('Starting a fresh original implement-pr stage from verified unchanged boundary; this is not checkpoint replay.');
             await new Promise((resolve, reject) => {
-              const child = spawn(process.execPath, ['../sandcastle-tool/node_modules/tsx/dist/cli.mjs', '../sandcastle-tool/scripts/dot/stage.ts', '--resume', '../recovery/.sandcastle/recovery/resume.json'], { cwd: process.env.GITHUB_WORKSPACE + '/target', stdio: 'inherit', env: process.env });
+              const child = spawn(process.execPath, [path.join(tool, 'node_modules/tsx/dist/cli.mjs'), path.join(tool, 'scripts/dot/stage.ts'), stage.script], { cwd: target, stdio: 'inherit', env: { ...process.env, ...stage.env } });
               child.on('error', reject);
-              child.on('close', code => code === 0 ? resolve() : reject(new Error('Recovery stage exited with code ' + code)));
+              child.on('close', code => code === 0 ? resolve() : reject(new Error('Fresh stage exited with code ' + code)));
             });
       - name: Preserve stage result
         if: always()
