@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Joined-subclass GREEN verified; preparing READ_WRITE stale/cache failure RED",
+  "status": "READ_WRITE stale/cache cleanup GREEN verified; wrapper coverage and invariant controls in preparation",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -85,6 +85,27 @@
   "green3TestedTree": "6d3129deda87f630fcb3bb1cb5aa3ad344a8473b",
   "green3Result": {
     "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "compilation": "passed"
+  },
+  "red4Run": 42409535801,
+  "red4Commit": "083e1cad8903f43e964d19a32685268768a7a250",
+  "red4TestedTree": "64eb4ce3c74a373286731c8773316a0913e9d7f4",
+  "red4Result": {
+    "tests": 4,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "reason": "stale exception and unchanged managed version passed, cache soft lock remains unwritable after rollback; prior three locking tests passed"
+  },
+  "green4Run": 42410100244,
+  "green4Commit": "3510d49c36680c8f2766e9d25f20b14b85b7a604",
+  "green4TestedTree": "9234c9a019bf9efe4bcac422d92bd08a42e45edd",
+  "green4Result": {
+    "tests": 4,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
