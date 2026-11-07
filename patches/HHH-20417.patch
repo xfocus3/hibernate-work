@@ -92,84 +92,6 @@ index 586ac74e..f046e18a 100644
  				: super.forceVersionIncrement( id, currentVersion, batching, session );
  	}
  
-diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
-index c419ab0a..68e89b79 100644
---- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
-+++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/MergeCoordinatorTemporal.java
-@@ -179,4 +179,14 @@ public void forceVersionIncrement(
- 			@Nonnull SharedSessionContractImplementor session) {
- 		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, session );
- 	}
-+
-+	@Override
-+	public void forceVersionIncrement(
-+			@Nonnull Object id,
-+			@Nullable Object currentVersion,
-+			@Nonnull Object nextVersion,
-+			boolean batching,
-+			@Nonnull SharedSessionContractImplementor session) {
-+		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
-+	}
- }
-diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
-index f2f818c9..74374cbe 100644
---- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
-+++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorAudit.java
-@@ -70,6 +70,16 @@ public void forceVersionIncrement(
- 		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, session );
- 	}
- 
-+	@Override
-+	public void forceVersionIncrement(
-+			@Nonnull Object id,
-+			@Nullable Object currentVersion,
-+			@Nonnull Object nextVersion,
-+			boolean batching,
-+			@Nonnull SharedSessionContractImplementor session) {
-+		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
-+	}
-+
- 	boolean shouldAuditUpdate(@Nullable int[] dirtyAttributeIndexes, boolean hasDirtyCollection) {
- 		if ( dirtyAttributeIndexes == null || dirtyAttributeIndexes.length == 0 ) {
- 			return true;
-diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
-index ffbf7107..64ed0e82 100644
---- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
-+++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorHistory.java
-@@ -523,4 +523,14 @@ public void forceVersionIncrement(
- 			@Nonnull SharedSessionContractImplementor session) {
- 		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, session );
- 	}
-+
-+	@Override
-+	public void forceVersionIncrement(
-+			@Nonnull Object id,
-+			@Nullable Object currentVersion,
-+			@Nonnull Object nextVersion,
-+			boolean batching,
-+			@Nonnull SharedSessionContractImplementor session) {
-+		currentUpdateCoordinator.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
-+	}
- }
-diff --git a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
-index 072bf194..d16d1cb3 100644
---- a/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
-+++ b/hibernate-core/src/main/java/org/hibernate/persister/entity/mutation/UpdateCoordinatorTemporal.java
-@@ -113,4 +113,14 @@ public void forceVersionIncrement(
- 			@Nonnull SharedSessionContractImplementor session) {
- 		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, session );
- 	}
-+
-+	@Override
-+	public void forceVersionIncrement(
-+			@Nonnull Object id,
-+			@Nullable Object currentVersion,
-+			@Nonnull Object nextVersion,
-+			boolean batching,
-+			@Nonnull SharedSessionContractImplementor session) {
-+		versionUpdateDelegate.forceVersionIncrement( id, currentVersion, nextVersion, batching, session );
-+	}
- }
 diff --git a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java b/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
 index df0138a9..6b973806 100644
 --- a/hibernate-core/src/main/java/org/hibernate/sql/exec/internal/lock/FollowOnLockingAction.java
@@ -282,10 +204,10 @@ index 00000000..65631a6a
 +}
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
 new file mode 100644
-index 00000000..c759a606
+index 00000000..671d204a
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,261 @@
 +package org.hibernate.orm.test.locking;
 +
 +import jakarta.persistence.Entity;
@@ -297,6 +219,11 @@ index 00000000..c759a606
 +import jakarta.persistence.Version;
 +
 +import org.hibernate.LockMode;
++import org.hibernate.Locking;
++import org.hibernate.Session;
++import org.hibernate.SessionEventListener;
++
++import java.util.concurrent.atomic.AtomicInteger;
 +import org.hibernate.cfg.AvailableSettings;
 +import org.hibernate.testing.orm.junit.DomainModel;
 +import org.hibernate.testing.orm.junit.JiraKey;
@@ -391,6 +318,112 @@ index 00000000..c759a606
 +		} );
 +	}
 +
++	@Test
++	void testSessionBatchSizeOverride(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			session.setJdbcBatchSize( 20 );
++			final var entity = session.find( VersionedEntity.class, 1L );
++			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( databaseVersion( session ) ).isEqualTo( 1L );
++		} );
++	}
++
++	@Test
++	void testBatchingDisabled(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			session.setJdbcBatchSize( 0 );
++			final var entity = session.find( VersionedEntity.class, 1L );
++			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( databaseVersion( session ) ).isEqualTo( 1L );
++		} );
++	}
++
++	@Test
++	void testRefreshExecutesImmediately(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 1L );
++			session.refresh( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( entity.version ).isEqualTo( 1L );
++			assertThat( databaseVersion( session ) ).isEqualTo( 1L );
++		} );
++	}
++
++	@Test
++	void testFollowOnLockExecutesImmediately(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.createSelectionQuery( "from VersionedEntity", VersionedEntity.class )
++					.setLockMode( LockModeType.PESSIMISTIC_FORCE_INCREMENT )
++					.setFollowOnStrategy( Locking.FollowOn.FORCE )
++					.getSingleResult();
++			assertThat( entity.version ).isEqualTo( 1L );
++			assertThat( databaseVersion( session ) ).isEqualTo( 1L );
++		} );
++	}
++
++	@Test
++	void testOptimisticIncrementRemainsDeferred(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 1L );
++			session.lock( entity, LockMode.OPTIMISTIC_FORCE_INCREMENT );
++			assertThat( entity.version ).isZero();
++			assertThat( databaseVersion( session ) ).isZero();
++			session.flush();
++			assertThat( entity.version ).isZero();
++			assertThat( databaseVersion( session ) ).isZero();
++		} );
++		scope.inTransaction( session -> assertThat( databaseVersion( session ) ).isEqualTo( 1L ) );
++	}
++
++	@Test
++	void testOrdinaryUpdatesStillUseBatching(SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.persist( new VersionedEntity( 2L ) ) );
++		final var batches = new AtomicInteger();
++		scope.inTransaction( session -> {
++			session.addEventListeners( new SessionEventListener() {
++				@Override
++				public void jdbcExecuteBatchStart() {
++					batches.incrementAndGet();
++				}
++			} );
++			final var first = session.find( VersionedEntity.class, 1L );
++			final var second = session.find( VersionedEntity.class, 2L );
++			session.lock( first, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( batches.get() ).isZero();
++			first.name = "updated first";
++			second.name = "updated second";
++			session.flush();
++			assertThat( batches.get() ).isEqualTo( 1 );
++		} );
++	}
++
++	@Test
++	void testPendingBatchExecutesBeforeLockReturns(SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.persist( new VersionedEntity( 2L ) ) );
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 2L );
++			final var persister = scope.getSessionFactory().getMappingMetamodel()
++					.getEntityDescriptor( VersionedEntity.class );
++			// Queue a real version mutation without a flush, which would drain the batch.
++			persister.forceVersionIncrement( 1L, 0L, true, session );
++			assertThat( databaseVersion( session ) ).isZero();
++			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( entity.version ).isEqualTo( 1L );
++			assertThat( databaseVersion( session ) ).isEqualTo( 1L );
++		} );
++	}
++
++	private static long databaseVersion(Session session) {
++		// Direct JDBC avoids any automatic flush before observing the version.
++		return session.doReturningWork( connection -> {
++			try ( var statement = connection.prepareStatement(
++					"select version from force_increment_entity where id = 1" );
++					var resultSet = statement.executeQuery() ) {
++				assertThat( resultSet.next() ).isTrue();
++				return resultSet.getLong( 1 );
++			}
++		} );
++	}
++
 +	@Entity(name = "VersionedEntity")
 +	@Table(name = "force_increment_entity")
 +	public static class VersionedEntity {
@@ -398,6 +431,7 @@ index 00000000..c759a606
 +		private Long id;
 +		@Version
 +		private long version;
++		private String name;
 +
 +		public VersionedEntity() {
 +		}
@@ -435,3 +469,180 @@ index 00000000..c759a606
 +	}
 +
 +}
+diff --git a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityHistoryTest.java b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityHistoryTest.java
+index 74b75e1a..e672f8b0 100644
+--- a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityHistoryTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityHistoryTest.java
+@@ -9,6 +9,7 @@
+ import jakarta.persistence.OneToMany;
+ import jakarta.persistence.OrderColumn;
+ import jakarta.persistence.Version;
++import org.hibernate.LockMode;
+ import org.hibernate.Hibernate;
+ import org.hibernate.annotations.Temporal;
+ import org.hibernate.cfg.StateManagementSettings;
+@@ -43,6 +44,43 @@
+ @SkipForDialect(dialectClass = MariaDBDialect.class, majorVersion = 10, minorVersion = 11, versionMatchMode = VersionMatchMode.OLDER, reason = "See https://jira.mariadb.org/browse/MDEV-39230")
+ class TemporalEntityHistoryTest {
+ 
++	@Test
++	void testPessimisticForceIncrementExecutesImmediately(SessionFactoryScope scope) {
++		try {
++			scope.inTransaction( session -> {
++				final var entity = new TemporalEntity4();
++				entity.id = 20417L;
++				entity.text = "force increment";
++				session.persist( entity );
++			} );
++			scope.inTransaction( session -> {
++				session.setJdbcBatchSize( 10 );
++				final var entity = session.find( TemporalEntity4.class, 20417L );
++				session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++				assertEquals( 1, entity.version );
++				final int databaseVersion = session.doReturningWork( connection -> {
++					try ( var statement = connection.prepareStatement(
++							"select version from TemporalEntity4 where id = ?" ) ) {
++						statement.setLong( 1, entity.id );
++						try ( var resultSet = statement.executeQuery() ) {
++							assertTrue( resultSet.next() );
++							return resultSet.getInt( 1 );
++						}
++					}
++				} );
++				assertEquals( 1, databaseVersion );
++			} );
++		}
++		finally {
++			scope.inTransaction( session -> {
++				final var entity = session.find( TemporalEntity4.class, 20417L );
++				if ( entity != null ) {
++					session.remove( entity );
++				}
++			} );
++		}
++	}
++
+ 	@Test void test(SessionFactoryScope scope) {
+ 		scope.getSessionFactory().inTransaction(
+ 				session -> {
+diff --git a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityTest.java b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityTest.java
+index 4ca0712c..36cd6f48 100644
+--- a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalEntityTest.java
+@@ -9,6 +9,7 @@
+ import jakarta.persistence.OneToMany;
+ import jakarta.persistence.OrderColumn;
+ import jakarta.persistence.Version;
++import org.hibernate.LockMode;
+ import org.hibernate.Hibernate;
+ import org.hibernate.annotations.Temporal;
+ import org.hibernate.cfg.StateManagementSettings;
+@@ -45,6 +46,43 @@
+ @SkipForDialect(dialectClass = MariaDBDialect.class, majorVersion = 10, minorVersion = 11, versionMatchMode = VersionMatchMode.OLDER, reason = "See https://jira.mariadb.org/browse/MDEV-39230")
+ class TemporalEntityTest {
+ 
++	@Test
++	void testPessimisticForceIncrementExecutesImmediately(SessionFactoryScope scope) {
++		try {
++			scope.inTransaction( session -> {
++				final var entity = new TemporalEntity1();
++				entity.id = 20417L;
++				entity.text = "force increment";
++				session.persist( entity );
++			} );
++			scope.inTransaction( session -> {
++				session.setJdbcBatchSize( 10 );
++				final var entity = session.find( TemporalEntity1.class, 20417L );
++				session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++				assertEquals( 1, entity.version );
++				final int databaseVersion = session.doReturningWork( connection -> {
++					try ( var statement = connection.prepareStatement(
++							"select version from TemporalEntity1 where id = ?" ) ) {
++						statement.setLong( 1, entity.id );
++						try ( var resultSet = statement.executeQuery() ) {
++							assertTrue( resultSet.next() );
++							return resultSet.getInt( 1 );
++						}
++					}
++				} );
++				assertEquals( 1, databaseVersion );
++			} );
++		}
++		finally {
++			scope.inTransaction( session -> {
++				final var entity = session.find( TemporalEntity1.class, 20417L );
++				if ( entity != null ) {
++					session.remove( entity );
++				}
++			} );
++		}
++	}
++
+ 	@Test
+ 	@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsPrimaryKeyUpdate.class )
+ 	void test(SessionFactoryScope scope) {
+diff --git a/hibernate-core/src/test/java/org/hibernate/temporal/audit/AuditEntityTest.java b/hibernate-core/src/test/java/org/hibernate/temporal/audit/AuditEntityTest.java
+index 1bad8eef..d86093c2 100644
+--- a/hibernate-core/src/test/java/org/hibernate/temporal/audit/AuditEntityTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/audit/AuditEntityTest.java
+@@ -6,6 +6,7 @@
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
+ import jakarta.persistence.Version;
++import org.hibernate.LockMode;
+ import org.hibernate.annotations.Audited;
+ import org.hibernate.audit.AuditLogFactory;
+ import org.hibernate.cfg.StateManagementSettings;
+@@ -24,6 +25,7 @@
+ import java.util.Set;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertTrue;
+ import static org.junit.jupiter.api.Assertions.assertNull;
+ import static org.junit.jupiter.api.Assertions.assertSame;
+ 
+@@ -46,6 +48,44 @@ public Integer generateIdentifier(SharedSessionContract session) {
+ 
+ 	}
+ 
++	@Test
++	void testPessimisticForceIncrementExecutesImmediately(SessionFactoryScope scope) {
++		currentTxId = 20417;
++		try {
++			scope.inTransaction( session -> {
++				final var entity = new AuditEntity();
++				entity.id = 20417L;
++				entity.text = "force increment";
++				session.persist( entity );
++			} );
++			scope.inTransaction( session -> {
++				session.setJdbcBatchSize( 10 );
++				final var entity = session.find( AuditEntity.class, 20417L );
++				session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++				assertEquals( 1, entity.version );
++				final int databaseVersion = session.doReturningWork( connection -> {
++					try ( var statement = connection.prepareStatement(
++							"select version from AuditEntity where id = ?" ) ) {
++						statement.setLong( 1, entity.id );
++						try ( var resultSet = statement.executeQuery() ) {
++							assertTrue( resultSet.next() );
++							return resultSet.getInt( 1 );
++						}
++					}
++				} );
++				assertEquals( 1, databaseVersion );
++			} );
++		}
++		finally {
++			scope.inTransaction( session -> {
++				final var entity = session.find( AuditEntity.class, 20417L );
++				if ( entity != null ) {
++					session.remove( entity );
++				}
++			} );
++		}
++	}
++
+ 	@Test
+ 	void test(SessionFactoryScope scope) {
+ 		currentTxId = 0;
