@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Implementation incomplete: additional supported inheritance and stale/cache regressions remain; handoff will return blocked before deadline",
+  "status": "Joined-subclass GREEN verified; preparing READ_WRITE stale/cache failure RED",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -68,5 +68,27 @@
   },
   "red3Commit": "da8c2a2b3a4152457fbcaefb6947b0447fdf6bd2",
   "red3Run": 42408316793,
-  "nextStep": "Finish joined-subclass and cache-failure tracer bullets, run neighboring locking/cache and relevant coordinator coverage, independent review, then recover original implementation only after terminal verification. No COMPLETE or PR yet."
+  "nextStep": "Finish joined-subclass and cache-failure tracer bullets, run neighboring locking/cache and relevant coordinator coverage, independent review, then recover original implementation only after terminal verification. No COMPLETE or PR yet.",
+  "implementationResult": "failure",
+  "blockedResponseCommit": "8fa041eefba58924f50d40d08a98f1c7da89021f",
+  "blockedConsumedAt": "2026-11-07T19:58:41Z",
+  "red3Result": {
+    "tests": 3,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "reason": "joined subclass expected database version 1 but was 0; previous two tests passed"
+  },
+  "red3TestedTree": "e526c5182311467492e24650a67cdb1af6ed46e6",
+  "green3Run": 42408849395,
+  "green3Commit": "e20ae826c00f5a80ed7489423b0feb7d913112d3",
+  "green3TestedTree": "6d3129deda87f630fcb3bb1cb5aa3ad344a8473b",
+  "green3Result": {
+    "tests": 3,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "compilation": "passed"
+  }
 }
