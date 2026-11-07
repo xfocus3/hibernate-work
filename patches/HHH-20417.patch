@@ -1,3 +1,44 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java b/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
+index dcfbf381..739da584 100644
+--- a/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
++++ b/hibernate-core/src/main/java/org/hibernate/internal/OptimisticLockHelper.java
+@@ -22,6 +22,14 @@ private OptimisticLockHelper() {
+ 	}
+ 
+ 	public static void forceVersionIncrement(Object object, EntityEntry entry, SharedSessionContractImplementor session) {
++		forceVersionIncrement( object, entry, true, session );
++	}
++
++	public static void forceVersionIncrement(
++			Object object,
++			EntityEntry entry,
++			boolean batching,
++			SharedSessionContractImplementor session) {
+ 		final var persister = entry.getPersister();
+ 		RootTenantCache.invalidateEntity( entry.getId(), persister, session );
+ 		final Object previousVersion = entry.getVersion();
+@@ -35,7 +43,7 @@ public static void forceVersionIncrement(Object object, EntityEntry entry, Share
+ 			final var lock = cache.lockItem( session, cacheKey, previousVersion );
+ 			return new CacheLock( cache, cacheKey, lock );
+ 		}, null );
+-		final Object nextVersion = persister.forceVersionIncrement( entry.getId(), previousVersion, session );
++		final Object nextVersion = persister.forceVersionIncrement( entry.getId(), previousVersion, batching, session );
+ 		entry.forceLocked( object, nextVersion );
+ 		if ( cacheLock != null ) {
+ 			final Object cacheEntry = updateCacheItem(
+diff --git a/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderHelper.java b/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderHelper.java
+index c5320127..411639d1 100644
+--- a/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderHelper.java
++++ b/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderHelper.java
+@@ -106,7 +106,7 @@ public static void upgradeLock(
+ 
+ 				if ( persister.isVersioned() && requestedLockMode == LockMode.PESSIMISTIC_FORCE_INCREMENT  ) {
+ 					// todo : should we check the current isolation mode explicitly?
+-					OptimisticLockHelper.forceVersionIncrement( object, entry, session );
++					OptimisticLockHelper.forceVersionIncrement( object, entry, false, session );
+ 				}
+ 				else if ( entry.isExistsInDatabase() ) {
+ 					final var eventMonitor = session.getEventMonitor();
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
 new file mode 100644
 index 00000000..be82929a
