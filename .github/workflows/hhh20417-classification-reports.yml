@@ -1,0 +1,47 @@
+name: HHH-20417 classification comparison
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-20417-classification]
+    paths: [.github/workflows/hhh20417-classification-reports.yml]
+permissions:
+  contents: read
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [99489d519a023b37cb83c1a89b73ae499113e089, e8ee28ce9db90c242487d6ab20d9f6383cfbf2d5]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xfocus3/hibernate-work
+          ref: ${{ matrix.revision }}
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: true
+      - name: Record exact source
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ matrix.revision }}"
+          git rev-parse HEAD HEAD^{tree} > classification-revision.txt
+      - name: Generate and validate classifications
+        run: ./gradlew documentation:generateClassificationReports documentation:validateClassifications -Pdb=h2
+      - name: Capture classification reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classifications-${{ matrix.revision }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            classification-revision.txt
+            documentation/target/orm/reports/classification-validation.txt
+            documentation/target/orm/reports/classifications.json
+            documentation/target/orm/reports/classifications.json.gz
+            documentation/target/orm/reports/internal.txt
