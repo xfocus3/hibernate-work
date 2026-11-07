@@ -2,6 +2,7 @@ name: Preserve reviewed HHH-21073 result
 on:
   push:
     branches: [sandcastle/dot-checkpoint/HHH-21073-20261107]
+    paths: [.github/workflows/hhh21073-result.yml]
 permissions:
   contents: write
   actions: read
