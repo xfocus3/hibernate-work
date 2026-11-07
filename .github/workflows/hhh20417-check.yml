@@ -11,7 +11,7 @@ jobs:
       target_sha: 99489d519a023b37cb83c1a89b73ae499113e089
       patch_ref: ${{ github.sha }}
       patch_path: patches/HHH-20417.patch
-      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.locking.PessimisticForceIncrementBatchingTest","-Pdb=h2","formatChecks"]'
+      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.locking.PessimisticForceIncrementBatchingTest","--tests","org.hibernate.orm.test.cache.PessimisticForceIncrementCacheTest","-Pdb=h2","formatChecks"]'
       database: h2
       java_version: '25'
       build_tool: gradle
