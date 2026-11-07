@@ -1,0 +1,11 @@
+{
+  "id": "a7eeba64-96df-4a5c-af36-725650e28afa",
+  "requestHash": "abab90b109e8e4404a435d9dad4c9de9ac5ebf380a9b0b2432e8d21bf2d3992d",
+  "runId": "42393427161",
+  "runAttempt": "1",
+  "head": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "resultHead": "2fd46671577f9b2d7329a16469867a9ddf8ea7c7",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed the full HHH-21072 delta against the linked issue, CONTRIBUTING and pinned review standards. No actionable findings or changes. Enum declaring-class normalization preserves registered BasicType mappings, contextual inference, null and non-enum behavior. Public Criteria regressions and ordinary-enum controls are isolated per test. Independent static review agreed. Independent RED run42391809577 reproduced the registered VARCHAR CASE failure on unchanged production. Exact-head verification https://github.com/xfocus3/hibernate-work/actions/runs/42392950277 passed 27 tests across six classes, compilation and formatChecks on JDK25/H2 with zero failures/errors/skips; unchanged tested tree39aa13954b74d78182be275415d13702b91304c1. No unresolved human threads requiring replies. Full ORM/database matrix remains deferred to upstream CI.\n<promise>COMPLETE</promise>"
+}
