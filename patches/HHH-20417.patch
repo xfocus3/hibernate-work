@@ -41,14 +41,15 @@ index c5320127..411639d1 100644
  					final var eventMonitor = session.getEventMonitor();
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
 new file mode 100644
-index 00000000..be82929a
+index 00000000..861a172b
 --- /dev/null
 +++ b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/PessimisticForceIncrementBatchingTest.java
-@@ -0,0 +1,73 @@
+@@ -0,0 +1,94 @@
 +package org.hibernate.orm.test.locking;
 +
 +import jakarta.persistence.Entity;
 +import jakarta.persistence.Id;
++import jakarta.persistence.LockModeType;
 +import jakarta.persistence.Table;
 +import jakarta.persistence.Version;
 +
@@ -86,6 +87,26 @@ index 00000000..be82929a
 +		scope.inTransaction( session -> {
 +			final var entity = session.find( VersionedEntity.class, 1L );
 +			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertThat( entity.version ).isEqualTo( 1L );
++			// Read on the same connection without triggering an automatic flush.
++			final long databaseVersion = session.doReturningWork( connection -> {
++				try ( var statement = connection.prepareStatement(
++						"select version from force_increment_entity where id = ?" ) ) {
++					statement.setLong( 1, entity.id );
++					try ( var resultSet = statement.executeQuery() ) {
++						assertThat( resultSet.next() ).isTrue();
++						return resultSet.getLong( 1 );
++					}
++				}
++			} );
++			assertThat( databaseVersion ).isEqualTo( 1L );
++		} );
++	}
++
++	@Test
++	void testFindExecutesImmediately(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 1L, LockModeType.PESSIMISTIC_FORCE_INCREMENT );
 +			assertThat( entity.version ).isEqualTo( 1L );
 +			// Read on the same connection without triggering an automatic flush.
 +			final long databaseVersion = session.doReturningWork( connection -> {
