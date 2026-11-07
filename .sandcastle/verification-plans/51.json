@@ -1,0 +1,28 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--rerun",
+    "--tests",
+    "org.hibernate.orm.test.locking.*",
+    "--tests",
+    "org.hibernate.orm.test.cache.PessimisticForceIncrementCacheTest",
+    "--tests",
+    "org.hibernate.orm.test.cache.ForceIncrementCacheTest",
+    "--tests",
+    "org.hibernate.temporal.TemporalEntityTest",
+    "--tests",
+    "org.hibernate.temporal.TemporalEntityHistoryTest",
+    "--tests",
+    "org.hibernate.temporal.audit.AuditEntityTest",
+    "--tests",
+    "org.hibernate.orm.test.tenantid.TenantIdTemporalMutationLegacyTest",
+    "--tests",
+    "org.hibernate.orm.test.jpa.lock.BatchAndLockTest",
+    "-Pdb=h2",
+    "formatChecks"
+  ],
+  "reason": "HHH-20417 requires immediate pessimistic version updates while preserving optimistic timing, batching, stale failure, cache cleanup and inherited/coordinator delegation. Run all locking tests, new and existing force-increment cache tests, temporal/audit mappings, legacy temporal mutation and JPA batch-lock compatibility, with compilation and formatChecks. Native/partitioned temporal and broader database matrix remain for upstream CI."
+}
