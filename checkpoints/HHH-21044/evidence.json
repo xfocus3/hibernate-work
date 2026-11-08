@@ -1,0 +1,68 @@
+{
+  "issue": "HHH-21044",
+  "work_issue": 55,
+  "work_pr": 56,
+  "upstream": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "source_commit": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "source_tree": "b9768fe397571256e9f85634742ec9aa00866d8b",
+  "red": {
+    "run": 42479593923,
+    "tests": 1,
+    "failures": 1,
+    "errors": 0,
+    "skipped": 0,
+    "result": "dimPercent becomes null after refresh; managed identity preserved"
+  },
+  "green": {
+    "run": 42480198702,
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed"
+  },
+  "exact_commit": {
+    "run": 42480678083,
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed",
+    "formatter_patch": "empty"
+  },
+  "compatibility": {
+    "run": 42480360934,
+    "related_pr": "https://github.com/hibernate/hibernate-orm/pull/13755",
+    "related_head": "31f02fce52b120ae042372fd9855175414012e46",
+    "tests": 54,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "nested_refresh_tests": 36,
+    "tested_tree": "5d6450fe5a2d937a16481cbc66084f3ee832cbdc",
+    "scope": "Temporary combined tree; import context adapted only; related PR source excluded from candidate"
+  },
+  "explore": {
+    "run": 42479449923,
+    "status": "success",
+    "responses": [
+      "6bf9cc434badb90dcd87529607ee4496bc6a3db1",
+      "9205f35c8fcac38f33b9389933732d6b4d729aec"
+    ]
+  },
+  "implementation": {
+    "run": 42479966915,
+    "response": "b3bfca8f8016bdce843f216d54b97dbf8657d409",
+    "consumed": true
+  },
+  "independent_source_review": "No blocking findings; constructor safety and compatibility verified",
+  "next": "Standard scoped verification run 42481184214, then original independent review handoff",
+  "untested": [
+    "full upstream suite",
+    "non-H2 database profiles"
+  ],
+  "scope_exclusions": [
+    "pre-existing map-index semantics",
+    "secondary-loader ancestry beyond its root"
+  ]
+}
