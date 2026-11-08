@@ -1,0 +1,35 @@
+name: Preserve HHH-21044 review handoff
+on:
+  push:
+    branches: [sandcastle/verify/HHH-21044-20261108]
+    paths: [.github/workflows/hhh21044-preserve-review.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42481468868'
+          artifact-ids: '13617542965,13617119994'
+          path: checkpoints/HHH-21044/review
+      - name: Validate original public-source review
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+          const expected=new Set(['37b54b0a-5aaf-4134-95cc-ab26b37432e9','56050689-45f9-4850-a4ee-43aa554caae0']),seen=new Set();
+          function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else {if(!e.name.endsWith('.json'))throw Error('Unexpected file');const {hash,...r}=JSON.parse(fs.readFileSync(p,'utf8'));if(!expected.has(r.id)||r.repository!=='xfocus3/hibernate-work'||r.runId!=='42481468868'||r.runAttempt!=='1'||r.snapshot.head!=='094edff6bc17cc290e0be70a28a8c2eba2579ecb'||r.snapshot.files.length||crypto.createHash('sha256').update(JSON.stringify(r)).digest('hex')!==hash)throw Error('Identity mismatch');if(/\/(?:home|Users|workspace|tmp)\//.test(JSON.stringify({...r,snapshot:undefined})))throw Error('Public checkpoint privacy review required');seen.add(r.id);}}}
+          walk('checkpoints/HHH-21044/review');if(seen.size!==expected.size)throw Error('Missing snapshot');
+          JS
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git add checkpoints/HHH-21044/review
+          git diff --cached --check
+          git commit -m "HHH-21044 Preserve verified review handoff [skip ci]"
+          git push origin HEAD:sandcastle/verify/HHH-21044-20261108
