@@ -1,0 +1,11 @@
+{
+  "id": "37b54b0a-5aaf-4134-95cc-ab26b37432e9",
+  "requestHash": "c9efbdd207a38e1746f24b32eff15cd3e7f430d1bfb9e82e9464870e2108776a",
+  "runId": "42481468868",
+  "runAttempt": "1",
+  "head": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "resultHead": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Independent review complete with no blocking findings and no concrete change warranted. No edits or new commit. Reviewed exact candidate 094edff6bc17cc290e0be70a28a8c2eba2579ecb, both changed files, generic initializer parent/model initialization, collection and embeddable boundaries, root behavior, current cascade metadata and HHH-21009 overlap. Constructor fields used by the ancestor walk are initialized before child assembler construction. The current-edge check remains required; a deeper cascade cannot restart refresh beyond a non-cascading ancestor. Root loaders and independent CacheMode.REFRESH_SESSION behavior remain intact. No public/protected API, schema or ownership changes. Regression preserves original four-entity mappings and both cycles, checks managed identity and dirty scalar immediately after refresh, and reaches the committed reload assertion. RED run 42479593923 records the genuine null-value failure on unchanged production. GREEN run 42480198702, exact-commit run 42480678083 and standard scoped run 42481184214 each passed 21 tests with no failures/errors/skips and formatChecks. Independently inspected exact/scoped XML, empty formatter patches and identical input/tested tree b9768fe397571256e9f85634742ec9aa00866d8b. Isolated compatibility run 42480360934 passed 54 tests, including all 36 cases in seven PR13755 nested-refresh classes; its matching tree was verified, and those changes are excluded from this candidate. Full upstream suite and other databases are untested. Pre-existing map-index and secondary-loader ancestry limitations are outside this fix. Optional extra variants are nonblocking. No unresolved human review threads require replies. Original prompt and pinned standards were followed; no external comments or branch changes were made by the reviewer. <promise>COMPLETE</promise>"
+}
