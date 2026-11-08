@@ -1,0 +1,11 @@
+{
+  "id": "ef569664-4a4b-43b7-820c-b13f886fe398",
+  "requestHash": "97d835f75d94ca10fed9bda169324dc57b7624017f70e6e4a9deab77cd9bd760",
+  "runId": "42479449923",
+  "runAttempt": "1",
+  "head": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "resultHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Issue #55 stands alone: related to HHH-21009 / upstream PR #13755, but not verified as a duplicate. Verdict needs-a-human at the executable-evidence and overlap gate. Read-only exploration verified exact upstream 99489d519a023b37cb83c1a89b73ae499113e089 and its complete tracked index against the original request snapshot; no source edits. Jira is New, unassigned and unresolved. The public reporter attachment contains the four-entity test and already asserts 100 both immediately after refresh and after commit/reload. Both association cycles must remain. EntityInitializerImpl.hasCascadeRefresh derives a local association cascade flag; isRefreshingCascadeAssociation combines it with the global REFRESH fetch profile, without checking the entire ancestor path. That is a plausible route for a deeper cascade association to overwrite a dirty managed entity reached through an earlier non-cascading edge, but source inspection is not reproduction. LoaderSelectBuilder controls cascade reachability; DefaultRefreshEventListener is the root refresh entry. Existing PR #13755 changes nested collection preparation and collection-element reachability, not the same four-entity scalar assertion; do not assume it fixes or conflicts until tested. Complexity medium due to cyclic initializer identity and shared refresh semantics. A focused internal correction would be two-way and avoid API/schema changes, but implementation is not yet justified. Current-main JDK 25/H2 test-only verification is running separately at https://github.com/xfocus3/hibernate-work/actions/runs/42479593923 with patch 16284adff1e6dcd9d5c23de372f31d44304ae637; no test outcome is claimed. Require genuine behavioral RED before production edits, then evaluate overlap and preserve nested cascade controls. No duplicates to close. CONTEXT.md and target .sandcastle/CODING_STANDARDS.md are absent from the upstream target; CONTRIBUTING.md was read and the controller standards consulted. <promise>COMPLETE</promise>"
+}
