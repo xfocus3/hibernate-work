@@ -1,0 +1,18 @@
+name: HHH-21044 current-main reproduction
+on:
+  push:
+    branches: [sandcastle/verify/HHH-21044-20261108]
+    paths: [.github/workflows/hhh21044-reproduce.yml]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: 99489d519a023b37cb83c1a89b73ae499113e089
+      patch_ref: 16284adff1e6dcd9d5c23de372f31d44304ae637
+      patch_path: patches/HHH-21044-current-main-reproducer.patch
+      java_version: '25'
+      build_tool: gradle
+      database: h2
+      arguments: '["hibernate-core:cleanTest","hibernate-core:test","--tests","org.hibernate.orm.test.refresh.NonCascadedRefreshDirtyStateTest","-Pdb=h2"]'
