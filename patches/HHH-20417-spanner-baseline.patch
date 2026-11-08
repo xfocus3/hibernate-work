@@ -1,0 +1,120 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/locking/ForceIncrementFollowOnBaselineTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/ForceIncrementFollowOnBaselineTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/locking/ForceIncrementFollowOnBaselineTest.java
+@@ -0,0 +1,115 @@
++package org.hibernate.orm.test.locking;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.LockModeType;
++import jakarta.persistence.Table;
++import jakarta.persistence.Version;
++
++import org.hibernate.LockMode;
++import org.hibernate.Locking;
++import org.hibernate.Session;
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DomainModel(annotatedClasses = ForceIncrementFollowOnBaselineTest.VersionedEntity.class)
++@ServiceRegistry(settings = @Setting(name = AvailableSettings.STATEMENT_BATCH_SIZE, value = "0"))
++@SessionFactory
++public class ForceIncrementFollowOnBaselineTest {
++	@BeforeEach
++	void setUp(SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.persist( new VersionedEntity( 1L ) ) );
++	}
++
++	@AfterEach
++	void tearDown(SessionFactoryScope scope) {
++		scope.getSessionFactory().getSchemaManager().truncate();
++	}
++
++	@Test
++	void testManagedLock(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 1L );
++			session.lock( entity, LockMode.PESSIMISTIC_FORCE_INCREMENT );
++			assertIncremented( session, entity );
++		} );
++	}
++
++	@Test
++	void testFind(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.find( VersionedEntity.class, 1L, LockModeType.PESSIMISTIC_FORCE_INCREMENT );
++			assertIncremented( session, entity );
++		} );
++	}
++
++	@Test
++	void testQueryDefault(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.createSelectionQuery( "from BaselineVersionedEntity", VersionedEntity.class )
++					.setLockMode( LockModeType.PESSIMISTIC_FORCE_INCREMENT )
++					.getSingleResult();
++			assertIncremented( session, entity );
++		} );
++	}
++
++	@Test
++	void testQueryDisallowFollowOn(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.createSelectionQuery( "from BaselineVersionedEntity", VersionedEntity.class )
++					.setLockMode( LockModeType.PESSIMISTIC_FORCE_INCREMENT )
++					.setFollowOnStrategy( Locking.FollowOn.DISALLOW )
++					.getSingleResult();
++			assertIncremented( session, entity );
++		} );
++	}
++
++	@Test
++	void testQueryForcedFollowOn(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var entity = session.createSelectionQuery( "from BaselineVersionedEntity", VersionedEntity.class )
++					.setLockMode( LockModeType.PESSIMISTIC_FORCE_INCREMENT )
++					.setFollowOnStrategy( Locking.FollowOn.FORCE )
++					.getSingleResult();
++			assertIncremented( session, entity );
++		} );
++	}
++
++	private static void assertIncremented(Session session, VersionedEntity entity) {
++		final long databaseVersion = session.doReturningWork( connection -> {
++			try ( var statement = connection.prepareStatement(
++					"select version from baseline_force_increment where id = 1" );
++					var resultSet = statement.executeQuery() ) {
++				assertThat( resultSet.next() ).isTrue();
++				return resultSet.getLong( 1 );
++			}
++		} );
++		assertThat( databaseVersion ).as( "database version before flush or commit" ).isEqualTo( 1L );
++		assertThat( entity.version ).as( "managed version" ).isEqualTo( 1L );
++	}
++
++	@Entity(name = "BaselineVersionedEntity")
++	@Table(name = "baseline_force_increment")
++	public static class VersionedEntity {
++		@Id
++		private Long id;
++		@Version
++		private long version;
++
++		public VersionedEntity() {
++		}
++
++		VersionedEntity(Long id) {
++			this.id = id;
++		}
++	}
++}
