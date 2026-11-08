@@ -10,8 +10,13 @@
   "preservationBranch": "sandcastle/dot-checkpoint/HHH-21078-20261108",
   "testOnlyRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42467001503",
   "testOnlyRevision": "374690690392b6f8c736bc8d0a18e60105b8e6be",
-  "testStatus": "in_progress; no runtime conclusion claimed",
+  "testStatus": "completed; behavioral RED: 4 tests, 1 expected SQL-shape assertion failure, 0 errors/skips; 3 controls pass",
   "productionChanges": "none",
   "design": "Independent review supports selected-owner supplemental FK grouping only when complete owner identifier is already grouped in same query block. Retain restricted target grouping and scalar NULL aggregate semantics. Exact implementation hook remains under review.",
-  "nextStep": "Inspect genuine focused baseline result, then review bounded implementation before original implement stage. No duplicate stage or upstream PR yet."
+  "nextStep": "Refine selected-owner complete-identifier guard to cover actual singular hydration selections, independently review, then original implementation stage. No production changes yet.",
+  "testArtifact": 13611619828,
+  "testArtifactDigest": "de8ebfd827ee16d0d9a0d6b925159829a95179cd57a8bf6dc41378b74558baaa",
+  "testedTree": "a13a3b9950df06280a08481b082aac45404312dc",
+  "redFinding": "SELECT uses physical owner FK plus target identifier from hydration join p1; GROUP BY uses target identifier from separate implicit join p2. Both physical FK and p1 identifier are missing. FK-only append is insufficient.",
+  "format": "Not claimed: failing test may prevent later formatChecks execution."
 }
