@@ -40,5 +40,15 @@
     "result": "Not accepted. Compilation succeeded; four regression tests ran with the original grouped-restriction SQL-shape assertion still failing. Three controls passed, no errors or skips.",
     "review": "Independent review also identified a nongroupable-payload risk in appending unrelated selected columns. Refinement is restricted to mapping-proven FK and target-identifier columns, conservatively skipping any other ungrouped selected column.",
     "next": "Unwrap entity-valued grouping expressions and recheck the refined candidate through original implementation stage."
+  },
+  "refinedCandidate": {
+    "runId": "42468394440",
+    "patchCommit": "5b626b9b555a461e48d12bd8da63fc47dee6d894",
+    "artifactId": 13612262795,
+    "artifactSha256": "6764fdad5cc156649e67d8e5a7be33c2b79ffc4fd68b3bce478cae3c728efbab",
+    "testedTree": "c8056ca3e110d4c56763271d445d67c91fdcaa8e",
+    "verifiedPatchSha256": "cfaf5b54fa02c65bdab42359259f9bd1a096f9445c11fb2ae95850b60753fcca",
+    "result": "Not accepted. Compilation succeeded; original SQL-shape assertion still fails unchanged. Four tests, one failure, zero errors/skips. Source-level review is not runtime validation.",
+    "next": "Determine remaining guard rejection before accepting any production correction. Additional guard tests are prepared but have not run. No SQL Server runtime or successful fix is claimed."
   }
 }
