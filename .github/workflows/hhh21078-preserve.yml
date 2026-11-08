@@ -1,0 +1,37 @@
+name: Preserve HHH-21078 handoff artifacts
+on:
+  push:
+    branches: [sandcastle/dot-checkpoint/HHH-21078-20261108]
+    paths: [.github/workflows/hhh21078-preserve.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42466328472'
+          artifact-ids: '13611274926,13611712939,13612325823'
+          path: checkpoints/HHH-21078/explore
+      - name: Verify identities and preserve source snapshots
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+          const expected = new Set(['9c51d3b4-1e4f-44f6-a24a-43c51c2b445a','bbd283ab-a17a-4b91-9acb-d83fbcb60b8f','ce2bb596-da59-46ff-8b83-49cc7d9bcff0']);
+          const seen = new Set();
+          function walk(dir) { for (const e of fs.readdirSync(dir,{withFileTypes:true})) { const p=path.join(dir,e.name); if(e.isDirectory()) walk(p); else if(e.name.endsWith('.json')) { const {hash,...r}=JSON.parse(fs.readFileSync(p,'utf8')); if(!expected.has(r.id)||r.repository!=='xfocus3/hibernate-work'||r.runId!=='42466328472'||r.runAttempt!=='1'||r.snapshot.head!=='99489d519a023b37cb83c1a89b73ae499113e089'||r.snapshot.files.length||crypto.createHash('sha256').update(JSON.stringify(r)).digest('hex')!==hash) throw Error('Identity mismatch'); seen.add(r.id); } } }
+          walk('checkpoints/HHH-21078/explore');
+          if(seen.size!==expected.size) throw Error('Missing snapshot');
+          JS
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git add checkpoints/HHH-21078
+          git diff --cached --check
+          git commit -m "HHH-21078 Preserve original exploration source checkpoints [skip ci]"
+          git push origin HEAD:sandcastle/dot-checkpoint/HHH-21078-20261108
