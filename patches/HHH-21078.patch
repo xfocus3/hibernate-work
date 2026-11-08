@@ -1,5 +1,5 @@
 diff --git a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
-index f4c44b8d..74f63d1d 100644
+index f4c44b8d..992b434d 100644
 --- a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
 +++ b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
 @@ -379,6 +379,7 @@
@@ -20,7 +20,7 @@ index f4c44b8d..74f63d1d 100644
  
  		final var havingClausePredicate = sqmQuerySpec.getHavingClausePredicate();
  		if ( havingClausePredicate != null ) {
-@@ -2077,6 +2081,112 @@ private QuerySpec querySpec(
+@@ -2077,6 +2081,131 @@ private QuerySpec querySpec(
  		return applyTransformers( sqlQuerySpec );
  	}
  
@@ -48,6 +48,7 @@ index f4c44b8d..74f63d1d 100644
 +		// the functional dependency on the selected root's complete identifier here.
 +		final Set<String> qualifiers = new HashSet<>();
 +		final Set<String> restrictedQualifiers = new HashSet<>();
++		final Set<ColumnReference> restrictedKeyColumns = new HashSet<>();
 +		qualifiers.add( tableGroup.getPrimaryTableReference().getIdentificationVariable() );
 +		for ( var join : tableGroup.getTableGroupJoins() ) {
 +			final var joinedGroup = join.getJoinedGroup();
@@ -66,6 +67,16 @@ index f4c44b8d..74f63d1d 100644
 +				qualifiers.add( qualifier );
 +				if ( toOne.hasWhereRestrictions() ) {
 +					restrictedQualifiers.add( qualifier );
++					toOne.getForeignKeyDescriptor().getKeyPart().forEachSelectable( (index, selectable) ->
++							restrictedKeyColumns.add( new ColumnReference(
++									tableGroup.resolveTableReference(
++											root.getNavigablePath(), selectable.getContainingTableExpression() ),
++									selectable ) ) );
++					toOne.getAssociatedEntityMappingType().getIdentifierMapping().forEachSelectable( (index, selectable) ->
++							restrictedKeyColumns.add( new ColumnReference(
++									joinedGroup.resolveTableReference(
++											joinedGroup.getNavigablePath(), selectable.getContainingTableExpression() ),
++									selectable ) ) );
 +				}
 +			}
 +		}
@@ -97,6 +108,11 @@ index f4c44b8d..74f63d1d 100644
 +			}
 +			hasRestrictedHydration |= restrictedQualifiers.contains( column.getQualifier() );
 +			if ( groupedColumns.add( column ) ) {
++				// Do not expand unrelated state, such as a JSON or LOB property that
++				// a dialect allows selecting by functional dependency but cannot group.
++				if ( !restrictedKeyColumns.contains( column ) ) {
++					return;
++				}
 +				missingColumns.add( column );
 +			}
 +		}
@@ -110,6 +126,9 @@ index f4c44b8d..74f63d1d 100644
 +	}
 +
 +	private static boolean collectGroupingColumns(Expression expression, Set<ColumnReference> columns) {
++		if ( expression instanceof EntityValuedPathInterpretation<?> entityPath ) {
++			return collectGroupingColumns( entityPath.getSqlExpression(), columns );
++		}
 +		if ( expression instanceof SqlSelectionExpression selectionExpression ) {
 +			return collectGroupingColumns( selectionExpression.getSelection().getExpression(), columns );
 +		}
