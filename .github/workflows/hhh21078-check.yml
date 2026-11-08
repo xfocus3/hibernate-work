@@ -1,0 +1,17 @@
+name: Verify HHH-21078 grouped restrictions
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-21078-20261108]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: 99489d519a023b37cb83c1a89b73ae499113e089
+      patch_ref: ${{ github.sha }}
+      patch_path: patches/HHH-21078.patch
+      arguments: '["hibernate-core:test","--rerun","--tests","org.hibernate.orm.test.query.hql.GroupByRestrictedManyToOneTest","-Pdb=h2","formatChecks"]'
+      database: h2
+      java_version: '25'
+      build_tool: gradle
