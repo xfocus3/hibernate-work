@@ -1,0 +1,1127 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/engine/spi/LoadQueryInfluencers.java b/hibernate-core/src/main/java/org/hibernate/engine/spi/LoadQueryInfluencers.java
+index d4ebdbac..b28414ed 100644
+--- a/hibernate-core/src/main/java/org/hibernate/engine/spi/LoadQueryInfluencers.java
++++ b/hibernate-core/src/main/java/org/hibernate/engine/spi/LoadQueryInfluencers.java
+@@ -22,6 +22,7 @@
+ import org.hibernate.graph.spi.RootGraphImplementor;
+ import org.hibernate.internal.FilterImpl;
+ import org.hibernate.engine.creation.internal.SessionCreationOptions;
++import org.hibernate.event.spi.RefreshContext;
+ import org.hibernate.loader.ast.spi.CascadingFetchProfile;
+ import org.hibernate.metamodel.model.domain.EntityDomainType;
+ import org.hibernate.persister.collection.CollectionPersister;
+@@ -53,6 +54,9 @@ public class LoadQueryInfluencers implements Serializable {
+ 	@Nullable
+ 	private CascadingFetchProfile enabledCascadingFetchProfile;
+ 
++	@Nullable
++	private transient RefreshContext refreshContext;
++
+ 	//Lazily initialized!
+ 	@Nullable
+ 	private HashSet<String> enabledFetchProfileNames;
+@@ -138,15 +142,28 @@ public boolean isAllRevisions() {
+ 
+ 	public <T> T fromInternalFetchProfile(@Nonnull CascadingFetchProfile profile, @Nonnull Supplier<T> supplier) {
+ 		final var previous = enabledCascadingFetchProfile;
++		final var previousRefreshContext = refreshContext;
+ 		enabledCascadingFetchProfile = profile;
++		if ( profile == CascadingFetchProfile.REFRESH && refreshContext == null ) {
++			refreshContext = RefreshContext.create();
++		}
+ 		try {
+ 			return supplier.get();
+ 		}
+ 		finally {
+ 			enabledCascadingFetchProfile = previous;
++			refreshContext = previousRefreshContext;
+ 		}
+ 	}
+ 
++	/**
++	 * Register an entity whose collections have been prepared for the current refresh.
++	 */
++	@Internal
++	public boolean registerRefreshingEntity(@Nonnull Object entity) {
++		return refreshContext != null && refreshContext.add( entity );
++	}
++
+ 	/**
+ 	 * Fetch-profile to apply, if one, when building the result-graph
+ 	 * for cascade fetching - for example, the result-graph used when
+diff --git a/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultRefreshEventListener.java b/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultRefreshEventListener.java
+index 3f58b01a..0dd25b8c 100644
+--- a/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultRefreshEventListener.java
++++ b/hibernate-core/src/main/java/org/hibernate/event/internal/DefaultRefreshEventListener.java
+@@ -151,13 +151,10 @@ private static void refresh(
+ 		);
+ 
+ 		persistenceContext.removeEntityHolder( entry.getEntityKey() );
+-		if ( persister.hasCollections() ) {
+-			new EvictVisitor( source, object ).process( object, persister );
+-		}
++		evictCollections( object, persister, id, source );
+ 		persistenceContext.removeEntry( object );
+ 
+ 		evictEntity( object, persister, id, source );
+-		evictCachedCollections( persister, id, source );
+ 
+ 		refresh( event, object, source, persister, null, entry, id, persistenceContext );
+ 	}
+@@ -186,7 +183,12 @@ private static void refresh(
+ 		final Object result =
+ 				source.getLoadQueryInfluencers()
+ 						.fromInternalFetchProfile( CascadingFetchProfile.REFRESH,
+-								() -> doRefresh( event, source, object, entry, persister, initializer, id, context ) );
++								() -> {
++									if ( object != null ) {
++										source.getLoadQueryInfluencers().registerRefreshingEntity( object );
++									}
++									return doRefresh( event, source, object, entry, persister, initializer, id, context );
++								} );
+ 		UnresolvableObjectException.throwIfNull( result, id, persister.getEntityName() );
+ 	}
+ 
+@@ -301,6 +303,20 @@ else if ( lazyInitializer != null ) {
+ 		}
+ 	}
+ 
++	/**
++	 * Prepare an entity's collections before resolving their refresh fetches.
++	 */
++	public static void evictCollections(
++			@Nonnull Object object,
++			@Nonnull EntityPersister persister,
++			@Nonnull Object id,
++			@Nonnull EventSource source) {
++		if ( persister.hasCollections() ) {
++			new EvictVisitor( source, object ).process( object, persister );
++			evictCachedCollections( persister, id, source );
++		}
++	}
++
+ 	private static void evictCachedCollections(
+ 			@Nonnull EntityPersister persister,
+ 			@Nonnull Object id,
+diff --git a/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderSelectBuilder.java b/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderSelectBuilder.java
+index 45335f55..ca489196 100644
+--- a/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderSelectBuilder.java
++++ b/hibernate-core/src/main/java/org/hibernate/loader/ast/internal/LoaderSelectBuilder.java
+@@ -908,7 +908,11 @@ private FetchableConsumer createFetchableConsumer(
+ 
+ 			final boolean isFetchablePluralAttributeMapping = isABag || isPluralAttributeMapping( fetchable );
+ 			final Integer maximumFetchDepth = creationContext.getMaximumFetchDepth();
+-			boolean cascadeReachable = false;
++			boolean cascadeReachable = fetchable instanceof CollectionPart collectionPart
++					&& collectionPart.getNature() == CollectionPart.Nature.ELEMENT
++					&& loadQueryInfluencers.getEnabledCascadingFetchProfile() == CascadingFetchProfile.REFRESH
++					&& collectionPart.getCollectionAttribute().getAttributeMetadata()
++							.getCascadeStyle().doCascade( CascadingActions.REFRESH );
+ 
+ 			if ( !( fetchable instanceof CollectionPart ) ) {
+ 				// 'entity graph' takes precedence over 'fetch profile'
+diff --git a/hibernate-core/src/main/java/org/hibernate/persister/collection/AbstractCollectionPersister.java b/hibernate-core/src/main/java/org/hibernate/persister/collection/AbstractCollectionPersister.java
+index 0a15d55a..85f61ac5 100644
+--- a/hibernate-core/src/main/java/org/hibernate/persister/collection/AbstractCollectionPersister.java
++++ b/hibernate-core/src/main/java/org/hibernate/persister/collection/AbstractCollectionPersister.java
+@@ -29,6 +29,7 @@
+ import org.hibernate.cache.spi.entry.UnstructuredCacheEntry;
+ import org.hibernate.collection.spi.CollectionSemantics;
+ import org.hibernate.collection.spi.PersistentCollection;
++import org.hibernate.cascade.spi.CascadingActions;
+ import org.hibernate.dialect.Dialect;
+ import org.hibernate.engine.jdbc.mutation.ParameterUsage;
+ import org.hibernate.engine.jdbc.mutation.internal.MutationQueryOptions;
+@@ -48,6 +49,7 @@
+ import org.hibernate.loader.ast.internal.LoaderSqlAstCreationState;
+ import org.hibernate.loader.ast.spi.BatchLoaderFactory;
+ import org.hibernate.loader.ast.spi.CollectionLoader;
++import org.hibernate.loader.ast.spi.CascadingFetchProfile;
+ import org.hibernate.mapping.Any;
+ import org.hibernate.mapping.Array;
+ import org.hibernate.mapping.Collection;
+@@ -860,6 +862,11 @@ protected CollectionLoader determineLoaderToUse(@Nonnull Object key, @Nonnull Sh
+ 		}
+ 		else {
+ 			final var influencers = session.getLoadQueryInfluencers();
++			if ( influencers.getEnabledCascadingFetchProfile() == CascadingFetchProfile.REFRESH
++					&& attributeMapping.getAttributeMetadata().getCascadeStyle().doCascade( CascadingActions.REFRESH ) ) {
++				// A refresh needs its cascading fetch graph and must not reload unrelated collection owners.
++				return createSingleKeyCollectionLoader( influencers );
++			}
+ 			if ( influencers.effectiveSubselectFetchEnabled( this ) ) {
+ 				final var subSelectLoader = resolveSubSelectLoader( key, session );
+ 				if ( subSelectLoader != null ) {
+diff --git a/hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java b/hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java
+index 152a9f68..c98c439b 100644
+--- a/hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java
+@@ -36,15 +36,18 @@
+ import org.hibernate.engine.spi.PersistentAttributeInterceptor;
+ import org.hibernate.engine.spi.SharedSessionContractImplementor;
+ import org.hibernate.engine.spi.Status;
++import org.hibernate.event.internal.DefaultRefreshEventListener;
+ import org.hibernate.event.monitor.spi.EventMonitor;
+ import org.hibernate.event.spi.PreLoadEventListener;
+ import org.hibernate.internal.util.ImmutableBitSet;
+ import org.hibernate.loader.ast.spi.CascadingFetchProfile;
+ import org.hibernate.metamodel.mapping.AttributeMapping;
+ import org.hibernate.metamodel.mapping.AttributeMetadata;
++import org.hibernate.metamodel.mapping.CollectionPart;
+ import org.hibernate.metamodel.mapping.CompositeIdentifierMapping;
+ import org.hibernate.metamodel.mapping.EntityValuedModelPart;
+ import org.hibernate.metamodel.mapping.ModelPart;
++import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+ import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
+ import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
+ import org.hibernate.persister.entity.EntityPersister;
+@@ -237,7 +240,8 @@ public EntityInitializerImpl(
+ 		this.isResultInitializer = isResultInitializer;
+ 
+ 		referencedModelPart = resultDescriptor.getEntityValuedModelPart();
+-		affectedByRefreshCascade = hasCascadeRefresh( referencedModelPart );
++		affectedByRefreshCascade = hasCascadeRefresh( referencedModelPart )
++				&& hasCascadeRefreshParents( parent );
+ 		entityDescriptor = (EntityPersister) referencedModelPart.getEntityMappingType();
+ 
+ 		final String rootEntityName = entityDescriptor.getRootEntityName();
+@@ -518,6 +522,24 @@ else if ( referencedModelPart instanceof EntityCollectionPart collectionPart ) {
+ 		return cascadeStyle.getCascadeStyle().doCascade( CascadingActions.REFRESH );
+ 	}
+ 
++	private static boolean hasCascadeRefreshParents(@Nullable InitializerParent<?> parent) {
++		// A cascading association cannot restart refresh after a non-cascading ancestor.
++		while ( parent != null && !parent.isResultInitializer() ) {
++			final var modelPart = parent.getInitializedPart();
++			if ( modelPart instanceof EntityValuedModelPart entityPart ) {
++				if ( !hasCascadeRefresh( entityPart ) ) {
++					return false;
++				}
++			}
++			else if ( modelPart instanceof PluralAttributeMapping pluralPart
++					&& !pluralPart.getAttributeMetadata().getCascadeStyle().doCascade( CascadingActions.REFRESH ) ) {
++				return false;
++			}
++			parent = parent.getParent();
++		}
++		return true;
++	}
++
+ 	private static ImmutableBitSet[] toBitSetArray(BitSet[] lazySets) {
+ 		return Arrays.stream( lazySets )
+ 				.map( ImmutableBitSet::valueOfOrEmpty )
+@@ -1219,6 +1241,7 @@ else if ( lazyInitializer.isUninitialized() ) {
+ 				}
+ 			}
+ 			else {
++				prepareCollectionsForRefresh( data );
+ 				resolveKeySubInitializers( data );
+ 			}
+ 		}
+@@ -1314,6 +1337,8 @@ public void resolveInstance(EntityInitializerData data) {
+ 				}
+ 			}
+ 
++			prepareCollectionsForRefresh( data );
++
+ 			if ( data.getInstance() != null ) {
+ 				upgradeLockMode( data );
+ 				if ( data.getState() == State.INITIALIZED ) {
+@@ -1330,6 +1355,26 @@ public void resolveInstance(EntityInitializerData data) {
+ 		}
+ 	}
+ 
++	private void prepareCollectionsForRefresh(EntityInitializerData data) {
++		if ( referencedModelPart instanceof EntityCollectionPart collectionPart
++				&& collectionPart.getNature() == CollectionPart.Nature.INDEX ) {
++			return;
++		}
++		final var session = data.getRowProcessingState().getSession();
++		if ( isRefreshingCascadeAssociation( data )
++				&& data.entityInstanceForNotify != null
++				&& session.isEventSource()
++				&& session.getLoadQueryInfluencers().registerRefreshingEntity( data.entityInstanceForNotify ) ) {
++			// Evict once per refresh, before a nested collection can reuse its initialized wrapper.
++			DefaultRefreshEventListener.evictCollections(
++					data.entityInstanceForNotify,
++					data.concreteDescriptor,
++					data.entityKey.getIdentifier(),
++					session.asEventSource()
++			);
++		}
++	}
++
+ 	protected void resolveEntityInstance1(EntityInitializerData data) {
+ 		final var entityHolder = data.entityHolder;
+ 		final Object proxy = entityHolder.getProxy();
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdSelectTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdSelectTest.java
+new file mode 100644
+index 00000000..7a2bcc80
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdSelectTest.java
+@@ -0,0 +1,12 @@
++package org.hibernate.orm.test.refresh;
++
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++
++@ServiceRegistry(settings = {
++		@Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"),
++		@Setting(name = AvailableSettings.MAX_FETCH_DEPTH, value = "0")
++})
++class NestedCascadeRefreshCompositeIdSelectTest extends NestedCascadeRefreshCompositeIdTest {
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdTest.java
+new file mode 100644
+index 00000000..31e08ad5
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshCompositeIdTest.java
+@@ -0,0 +1,178 @@
++package org.hibernate.orm.test.refresh;
++
++import java.io.Serializable;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Objects;
++
++import org.hibernate.Hibernate;
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.ValueSource;
++
++import jakarta.persistence.CascadeType;
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.IdClass;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.JoinColumns;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.OneToMany;
++import jakarta.persistence.Table;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DomainModel(annotatedClasses = {
++		NestedCascadeRefreshCompositeIdTest.Root.class,
++		NestedCascadeRefreshCompositeIdTest.Parent.class,
++		NestedCascadeRefreshCompositeIdTest.Child.class,
++		NestedCascadeRefreshCompositeIdTest.Tenant.class
++})
++@SessionFactory
++@ServiceRegistry(settings = @Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"))
++@JiraKey("HHH-21009")
++class NestedCascadeRefreshCompositeIdTest {
++	@AfterEach
++	void tearDown(SessionFactoryScope scope) {
++		scope.dropData();
++	}
++
++	@ParameterizedTest
++	@ValueSource(booleans = { false, true })
++	void refreshInitializedChildren(boolean initializeRoot, SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Tenant tenant = new Tenant();
++			tenant.id = 10L;
++			session.persist( tenant );
++			final Root root = new Root();
++			root.id = 1L;
++			final Parent parent = new Parent();
++			parent.sequence = 2L;
++			parent.tenant = tenant;
++			parent.root = root;
++			root.parents.add( parent );
++			final Child child = new Child();
++			child.id = 3L;
++			child.label = "old";
++			child.parent = parent;
++			parent.children.add( child );
++			session.persist( root );
++		} );
++		scope.inTransaction( session -> {
++			final Root root = session.find( Root.class, 1L );
++			final Parent parent = session.find( Parent.class, new ParentId( 2L, 10L ) );
++			Hibernate.initialize( parent.children );
++			final Child child = parent.children.get( 0 );
++			if ( initializeRoot ) {
++				Hibernate.initialize( root.parents );
++			}
++			assertThat( Hibernate.isInitialized( root.parents ) ).isEqualTo( initializeRoot );
++			assertThat( child.label ).isEqualTo( "old" );
++			session.doWork( connection -> {
++				try ( var statement = connection.createStatement() ) {
++					assertThat( statement.executeUpdate(
++							"update composite_refresh_child set label = 'new' where id = 3" ) ).isEqualTo( 1 );
++					assertThat( statement.executeUpdate(
++							"insert into composite_refresh_child (id, label, parent_sequence, tenant_id)"
++									+ " values (4, 'added', 2, 10)" ) ).isEqualTo( 1 );
++				}
++			} );
++
++			session.refresh( root );
++
++			assertThat( root.parents ).containsExactly( parent );
++			assertThat( session.find( Parent.class, new ParentId( 2L, 10L ) ) ).isSameAs( parent );
++			assertThat( session.find( Child.class, 3L ) ).isSameAs( child );
++			assertThat( child.label ).isEqualTo( "new" );
++			assertThat( parent.children ).contains( child );
++			assertThat( parent.children ).extracting( element -> element.id ).containsExactlyInAnyOrder( 3L, 4L );
++		} );
++	}
++
++	@Entity(name = "CompositeRefreshRoot")
++	@Table(name = "composite_refresh_root")
++	public static class Root {
++		@Id
++		private Long id;
++
++		@OneToMany(mappedBy = "root", cascade = CascadeType.ALL)
++		private List<Parent> parents = new ArrayList<>();
++	}
++
++	@Entity(name = "CompositeRefreshTenant")
++	@Table(name = "composite_refresh_tenant")
++	public static class Tenant {
++		@Id
++		private Long id;
++	}
++
++	@Entity(name = "CompositeRefreshParent")
++	@Table(name = "composite_refresh_parent")
++	@IdClass(ParentId.class)
++	public static class Parent {
++		@Id
++		@Column(name = "parent_sequence")
++		private Long sequence;
++
++		@Id
++		@ManyToOne(fetch = FetchType.LAZY)
++		@JoinColumn(name = "tenant_id")
++		private Tenant tenant;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		private Root root;
++
++		@OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
++		private List<Child> children = new ArrayList<>();
++	}
++
++	public static class ParentId implements Serializable {
++		private Long sequence;
++		private Long tenant;
++
++		public ParentId() {
++		}
++
++		public ParentId(Long sequence, Long tenant) {
++			this.sequence = sequence;
++			this.tenant = tenant;
++		}
++
++		@Override
++		public boolean equals(Object object) {
++			return object instanceof ParentId other
++					&& Objects.equals( sequence, other.sequence )
++					&& Objects.equals( tenant, other.tenant );
++		}
++
++		@Override
++		public int hashCode() {
++			return Objects.hash( sequence, tenant );
++		}
++	}
++
++	@Entity(name = "CompositeRefreshChild")
++	@Table(name = "composite_refresh_child")
++	public static class Child {
++		@Id
++		private Long id;
++
++		private String label;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		@JoinColumns({
++				@JoinColumn(name = "parent_sequence", referencedColumnName = "parent_sequence"),
++				@JoinColumn(name = "tenant_id", referencedColumnName = "tenant_id")
++		})
++		private Parent parent;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeySelectTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeySelectTest.java
+new file mode 100644
+index 00000000..7be2d98a
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeySelectTest.java
+@@ -0,0 +1,12 @@
++package org.hibernate.orm.test.refresh;
++
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++
++@ServiceRegistry(settings = {
++		@Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"),
++		@Setting(name = AvailableSettings.MAX_FETCH_DEPTH, value = "0")
++})
++class NestedCascadeRefreshMapKeySelectTest extends NestedCascadeRefreshMapKeyTest {
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeyTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeyTest.java
+new file mode 100644
+index 00000000..294939a9
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshMapKeyTest.java
+@@ -0,0 +1,146 @@
++package org.hibernate.orm.test.refresh;
++
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++import org.hibernate.Hibernate;
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.Test;
++
++import jakarta.persistence.CascadeType;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.JoinTable;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.MapKeyJoinColumn;
++import jakarta.persistence.OneToMany;
++import jakarta.persistence.Table;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DomainModel(annotatedClasses = {
++		NestedCascadeRefreshMapKeyTest.Root.class,
++		NestedCascadeRefreshMapKeyTest.MapKeyEntity.class,
++		NestedCascadeRefreshMapKeyTest.MapValueEntity.class,
++		NestedCascadeRefreshMapKeyTest.KeyChild.class
++})
++@SessionFactory
++@ServiceRegistry(settings = @Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"))
++@JiraKey("HHH-21009")
++class NestedCascadeRefreshMapKeyTest {
++	@AfterEach
++	void tearDown(SessionFactoryScope scope) {
++		scope.dropData();
++	}
++
++	@Test
++	void refreshValuesDoesNotCascadeThroughMapKeys(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Root root = new Root();
++			root.id = 1L;
++			final MapKeyEntity key = new MapKeyEntity();
++			key.id = 2L;
++			final MapValueEntity value = new MapValueEntity();
++			value.id = 3L;
++			value.label = "old";
++			final KeyChild child = new KeyChild();
++			child.id = 4L;
++			child.label = "old";
++			child.keyOwner = key;
++			key.children.add( child );
++			root.values.put( key, value );
++			session.persist( key );
++			session.persist( value );
++			session.persist( child );
++			session.persist( root );
++		} );
++		scope.inTransaction( session -> {
++			final Root root = session.find( Root.class, 1L );
++			final MapKeyEntity key = session.find( MapKeyEntity.class, 2L );
++			final MapValueEntity value = session.find( MapValueEntity.class, 3L );
++			Hibernate.initialize( key.children );
++			final List<KeyChild> originalChildren = key.children;
++			final KeyChild child = key.children.get( 0 );
++			assertThat( Hibernate.isInitialized( root.values ) ).isFalse();
++			assertThat( key.children ).containsExactly( child );
++			assertThat( value.label ).isEqualTo( "old" );
++			assertThat( child.label ).isEqualTo( "old" );
++			session.doWork( connection -> {
++				try ( var statement = connection.createStatement() ) {
++					assertThat( statement.executeUpdate(
++							"update refresh_map_value set label = 'new' where id = 3" ) ).isEqualTo( 1 );
++					assertThat( statement.executeUpdate(
++							"update refresh_map_key_child set label = 'new' where id = 4" ) ).isEqualTo( 1 );
++				}
++			} );
++
++			session.refresh( root );
++
++			assertThat( key.children ).isSameAs( originalChildren );
++			assertThat( Hibernate.isInitialized( key.children ) ).isTrue();
++
++			assertThat( root.values ).containsOnlyKeys( key );
++			assertThat( root.values.get( key ) ).isSameAs( value );
++			assertThat( value.label ).isEqualTo( "new" );
++			assertThat( session.find( MapKeyEntity.class, 2L ) ).isSameAs( key );
++			assertThat( session.find( KeyChild.class, 4L ) ).isSameAs( child );
++			assertThat( key.children ).containsExactly( child );
++			assertThat( child.label ).isEqualTo( "old" );
++		} );
++	}
++
++	@Entity(name = "MapRefreshRoot")
++	@Table(name = "refresh_map_root")
++	public static class Root {
++		@Id
++		private Long id;
++
++		@OneToMany(cascade = CascadeType.REFRESH)
++		@JoinTable(name = "refresh_map_entry", joinColumns = @JoinColumn(name = "root_id"),
++				inverseJoinColumns = @JoinColumn(name = "value_id"))
++		@MapKeyJoinColumn(name = "key_id")
++		private Map<MapKeyEntity, MapValueEntity> values = new HashMap<>();
++	}
++
++	@Entity(name = "MapRefreshKey")
++	@Table(name = "refresh_map_key")
++	public static class MapKeyEntity {
++		@Id
++		private Long id;
++
++		@OneToMany(mappedBy = "keyOwner", cascade = CascadeType.REFRESH)
++		private List<KeyChild> children = new ArrayList<>();
++	}
++
++	@Entity(name = "MapRefreshValue")
++	@Table(name = "refresh_map_value")
++	public static class MapValueEntity {
++		@Id
++		private Long id;
++
++		private String label;
++	}
++
++	@Entity(name = "MapRefreshKeyChild")
++	@Table(name = "refresh_map_key_child")
++	public static class KeyChild {
++		@Id
++		private Long id;
++
++		private String label;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		private MapKeyEntity keyOwner;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshSelectTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshSelectTest.java
+new file mode 100644
+index 00000000..a698d949
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshSelectTest.java
+@@ -0,0 +1,12 @@
++package org.hibernate.orm.test.refresh;
++
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++
++@ServiceRegistry(settings = {
++		@Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"),
++		@Setting(name = AvailableSettings.MAX_FETCH_DEPTH, value = "0")
++})
++class NestedCascadeRefreshSelectTest extends NestedCascadeRefreshTest {
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshTest.java
+new file mode 100644
+index 00000000..61daab01
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshTest.java
+@@ -0,0 +1,290 @@
++package org.hibernate.orm.test.refresh;
++
++import java.util.ArrayList;
++import java.util.List;
++
++import org.hibernate.Hibernate;
++import org.hibernate.annotations.BatchSize;
++import org.hibernate.annotations.Fetch;
++import org.hibernate.annotations.FetchMode;
++import org.hibernate.annotations.Cache;
++import org.hibernate.annotations.CacheConcurrencyStrategy;
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.params.ParameterizedTest;
++import org.junit.jupiter.params.provider.CsvSource;
++import org.junit.jupiter.params.provider.ValueSource;
++
++import jakarta.persistence.CascadeType;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.OneToMany;
++import jakarta.persistence.Table;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@DomainModel(overrideCacheStrategy = false, annotatedClasses = {
++		NestedCascadeRefreshTest.Root.class,
++		NestedCascadeRefreshTest.Parent.class,
++		NestedCascadeRefreshTest.Child.class
++})
++@SessionFactory
++@ServiceRegistry(settings = @Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "false"))
++@JiraKey("HHH-21009")
++class NestedCascadeRefreshTest {
++	@AfterEach
++	void tearDown(SessionFactoryScope scope) {
++		scope.dropData();
++	}
++
++	@Test
++	void refreshInitializedNestedCollection(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Root root = createRoot();
++			final Parent parent = root.parents.get( 0 );
++			final Child child = parent.children.get( 0 );
++			session.persist( root );
++			session.flush();
++
++			assertThat( session.createNativeMutationQuery( "update nested_refresh_child set label = 'new' where id = 3" )
++					.executeUpdate() ).isEqualTo( 1 );
++			assertThat( child.label ).isEqualTo( "old" );
++
++			session.refresh( root );
++
++			assertThat( child.label ).isEqualTo( "new" );
++			assertThat( root.parents.get( 0 ) ).isSameAs( parent );
++			assertThat( parent.children.get( 0 ) ).isSameAs( child );
++		} );
++	}
++
++	@ParameterizedTest
++	@CsvSource({
++			"false, false, false",
++			"false, true, false",
++			"true, false, false",
++			"true, true, false",
++			"true, true, true"
++	})
++	void refreshManagedGrandchild(
++			boolean initializeRoot,
++			boolean initializeParent,
++			boolean readOnly,
++			SessionFactoryScope scope) {
++		scope.inTransaction( session -> session.persist( createRoot() ) );
++		scope.inTransaction( session -> {
++			final Root root = session.find( Root.class, 1L );
++			final Parent parent = session.find( Parent.class, 2L );
++			final Child child = session.find( Child.class, 3L );
++			if ( initializeRoot ) {
++				Hibernate.initialize( root.parents );
++			}
++			if ( initializeParent ) {
++				Hibernate.initialize( parent.children );
++			}
++			assertThat( Hibernate.isInitialized( root.parents ) ).isEqualTo( initializeRoot );
++			assertThat( Hibernate.isInitialized( parent.children ) ).isEqualTo( initializeParent );
++			session.setReadOnly( parent, readOnly );
++			session.setReadOnly( child, readOnly );
++			session.createNativeMutationQuery( "update nested_refresh_child set label = 'new' where id = 3" )
++					.executeUpdate();
++
++			session.refresh( root );
++
++			assertThat( child.label ).isEqualTo( "new" );
++			assertThat( root.parents ).containsExactly( parent );
++			assertThat( parent.children ).containsExactly( child );
++			assertThat( session.isReadOnly( parent ) ).isEqualTo( readOnly );
++			assertThat( session.isReadOnly( child ) ).isEqualTo( readOnly );
++		} );
++	}
++
++	@Test
++	void refreshNestedCollectionMembership(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Root root = createRoot();
++			final Parent parent = root.parents.get( 0 );
++			final Child removed = new Child();
++			removed.id = 5;
++			removed.label = "removed";
++			removed.parent = parent;
++			parent.children.add( removed );
++			session.persist( root );
++		} );
++		scope.inTransaction( session -> {
++			final Root root = session.find( Root.class, 1L );
++			Hibernate.initialize( root.parents.get( 0 ).children );
++		} );
++		if ( scope.getSessionFactory().getSessionFactoryOptions().isSecondLevelCacheEnabled() ) {
++			assertThat( scope.getSessionFactory().getCache()
++					.containsCollection( Parent.class.getName() + ".children", 2L ) ).isTrue();
++		}
++		scope.inTransaction( session -> {
++			final Root root = session.find( Root.class, 1L );
++			final Parent parent = root.parents.get( 0 );
++			Hibernate.initialize( parent.children );
++			final Child child = session.find( Child.class, 3L );
++			// Bypass Hibernate's mutation cache invalidation as well as its managed state.
++			session.doWork( connection -> {
++				try ( var statement = connection.createStatement() ) {
++					assertThat( statement.executeUpdate( "update nested_refresh_child set label = 'new' where id = 3" ) )
++							.isEqualTo( 1 );
++					assertThat( statement.executeUpdate( "delete from nested_refresh_child where id = 5" ) )
++							.isEqualTo( 1 );
++					assertThat( statement.executeUpdate(
++							"insert into nested_refresh_child (id, label, parent_id) values (4, 'added', 2)" ) )
++							.isEqualTo( 1 );
++				}
++			} );
++
++			session.refresh( root );
++
++			assertThat( child.label ).isEqualTo( "new" );
++			assertThat( parent.children ).contains( child );
++			assertThat( parent.children ).extracting( element -> element.id ).containsExactlyInAnyOrder( 3L, 4L );
++			session.flush();
++			session.doWork( connection -> {
++				try ( var statement = connection.createStatement() ) {
++					statement.executeUpdate( "update nested_refresh_child set label = 'newer' where id = 3" );
++				}
++			} );
++
++			session.refresh( root );
++
++			assertThat( child.label ).isEqualTo( "newer" );
++			assertThat( parent.children ).extracting( element -> element.id ).containsExactlyInAnyOrder( 3L, 4L );
++		} );
++	}
++
++	@Test
++	void refreshStopsAtNonCascadedCollection(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Root root = createRoot();
++			final Parent otherParent = new Parent();
++			otherParent.id = 20;
++			otherParent.uncascadedRoot = root;
++			root.otherParents.add( otherParent );
++			final Child otherChild = new Child();
++			otherChild.id = 30;
++			otherChild.parent = otherParent;
++			otherChild.label = "old";
++			otherParent.children.add( otherChild );
++			session.persist( root );
++		} );
++		scope.inTransaction( session -> {
++			final Child otherChild = session.find( Child.class, 30L );
++			final Root root = session.getReference( Root.class, 1L );
++			assertThat( Hibernate.isInitialized( root ) ).isFalse();
++			session.createNativeMutationQuery( "update nested_refresh_child set label = 'new' where id in (3, 30)" ).executeUpdate();
++
++			session.refresh( root );
++
++			assertThat( otherChild.label ).isEqualTo( "old" );
++			assertThat( session.find( Child.class, 3L ).label ).isEqualTo( "new" );
++		} );
++	}
++
++	@ParameterizedTest
++	@ValueSource(booleans = { false, true })
++	void refreshDoesNotRefreshOtherCollectionOwners(boolean subselect, SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			session.persist( createRoot() );
++			final Root otherRoot = createRoot();
++			otherRoot.id = 10;
++			final Parent otherParent = otherRoot.parents.get( 0 );
++			otherParent.id = 20;
++			otherParent.children.get( 0 ).id = 30;
++			session.persist( otherRoot );
++		} );
++		scope.inTransaction( session -> {
++			session.setSubselectFetchingEnabled( subselect );
++			final Root root = session.find( Root.class, 1L );
++			final List<Parent> parents = session.createSelectionQuery(
++					"from NestedRefreshParent p order by p.id", Parent.class ).getResultList();
++			final Parent otherParent = parents.get( 1 );
++			final Child child = session.find( Child.class, 3L );
++			final Child otherChild = session.find( Child.class, 30L );
++			assertThat( Hibernate.isInitialized( otherParent.children ) ).isFalse();
++			session.doWork( connection -> {
++				try ( var statement = connection.createStatement() ) {
++					assertThat( statement.executeUpdate( "update nested_refresh_child set label = 'new' where id in (3, 30)" ) )
++							.isEqualTo( 2 );
++				}
++			} );
++
++			session.refresh( root );
++
++			assertThat( child.label ).isEqualTo( "new" );
++			assertThat( otherChild.label ).isEqualTo( "old" );
++			assertThat( Hibernate.isInitialized( otherParent.children ) ).isFalse();
++		} );
++	}
++
++	private static Root createRoot() {
++		final Root root = new Root();
++		root.id = 1;
++		final Parent parent = new Parent();
++		parent.id = 2;
++		parent.root = root;
++		root.parents.add( parent );
++		final Child child = new Child();
++		child.id = 3;
++		child.parent = parent;
++		child.label = "old";
++		parent.children.add( child );
++		return root;
++	}
++
++	@Entity(name = "NestedRefreshRoot")
++	@Table(name = "nested_refresh_root")
++	public static class Root {
++		@Id
++		private long id;
++
++		@OneToMany(mappedBy = "root", cascade = CascadeType.ALL)
++		private List<Parent> parents = new ArrayList<>();
++
++		@OneToMany(mappedBy = "uncascadedRoot", cascade = CascadeType.PERSIST, fetch = FetchType.EAGER)
++		@Fetch(FetchMode.SELECT)
++		private List<Parent> otherParents = new ArrayList<>();
++	}
++
++	@Entity(name = "NestedRefreshParent")
++	@Table(name = "nested_refresh_parent")
++	public static class Parent {
++		@Id
++		private long id;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		private Root root;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		private Root uncascadedRoot;
++
++		@OneToMany(mappedBy = "parent", cascade = CascadeType.ALL)
++		@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
++		@BatchSize(size = 10)
++		private List<Child> children = new ArrayList<>();
++	}
++
++	@Entity(name = "NestedRefreshChild")
++	@Table(name = "nested_refresh_child")
++	public static class Child {
++		@Id
++		private long id;
++
++		private String label;
++
++		@ManyToOne(fetch = FetchType.LAZY)
++		private Parent parent;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshWithCacheTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshWithCacheTest.java
+new file mode 100644
+index 00000000..4a38cbeb
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NestedCascadeRefreshWithCacheTest.java
+@@ -0,0 +1,12 @@
++package org.hibernate.orm.test.refresh;
++
++import org.hibernate.cfg.AvailableSettings;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++
++@ServiceRegistry(settings = {
++		@Setting(name = AvailableSettings.USE_SECOND_LEVEL_CACHE, value = "true"),
++		@Setting(name = AvailableSettings.CACHE_REGION_FACTORY, value = "org.hibernate.testing.cache.CachingRegionFactory")
++})
++class NestedCascadeRefreshWithCacheTest extends NestedCascadeRefreshTest {
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NonCascadedRefreshDirtyStateTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NonCascadedRefreshDirtyStateTest.java
+new file mode 100644
+index 00000000..06df9af8
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NonCascadedRefreshDirtyStateTest.java
+@@ -0,0 +1,161 @@
++package org.hibernate.orm.test.refresh;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++import jakarta.persistence.CascadeType;
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.MapsId;
++import jakarta.persistence.OneToOne;
++import jakarta.persistence.PrimaryKeyJoinColumn;
++import org.hibernate.Hibernate;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++/**
++ * Adapted from the HHH-21044 reproducer by Pål Simen Ellingsen.
++ * {@code refresh(connectivity)} must not touch {@link DeviceStatus}: the path from {@link DeviceConnectivity} goes
++ * through {@code DeviceConnectivity.device}, which has no cascade.
++ * <p>
++ * Hibernate 7.2.25.Final: passes. Hibernate 7.4.13.Final: the managed {@link DeviceStatus} is reloaded from the
++ * database, so its pending (unflushed) change is silently discarded and never written.
++ */
++@DomainModel(annotatedClasses = {
++		NonCascadedRefreshDirtyStateTest.Pole.class,
++		NonCascadedRefreshDirtyStateTest.Device.class,
++		NonCascadedRefreshDirtyStateTest.DeviceStatus.class,
++		NonCascadedRefreshDirtyStateTest.DeviceConnectivity.class
++})
++@SessionFactory
++@JiraKey("HHH-21044")
++public class NonCascadedRefreshDirtyStateTest {
++
++	@BeforeEach
++	void createData(SessionFactoryScope scope) {
++		scope.inTransaction(session -> {
++			Pole pole = new Pole(1);
++			session.persist(pole);
++			Device device = new Device(pole);
++			device.status = new DeviceStatus(device);
++			session.persist(device); // cascades to DeviceStatus and DeviceConnectivity
++			pole.device = device;
++		});
++	}
++
++	@AfterEach
++	void dropData(SessionFactoryScope scope) {
++		scope.getSessionFactory().getSchemaManager().truncateMappedObjects();
++	}
++
++	@Test
++	void refreshDoesNotDiscardPendingChangeOfNonCascadedEntity(SessionFactoryScope scope) {
++		scope.inTransaction(session -> {
++			Pole pole = session.find(Pole.class, 1);
++			DeviceStatus status = pole.device.status;
++			DeviceConnectivity connectivity = status.connectivity;
++			Hibernate.initialize(connectivity);
++
++			status.dimPercent = 100; // pending change, not flushed yet
++
++			// E.g. after updating the connectivity row with native SQL
++			session.refresh(connectivity);
++
++			// 7.4.13.Final: expected 100 but was null
++			assertThat(pole.device.status).isSameAs(status);
++			assertThat(status.dimPercent).isEqualTo(100);
++		});
++
++		// The change must also reach the database at commit
++		scope.inTransaction(session -> assertThat(session.find(DeviceStatus.class, 1).dimPercent).isEqualTo(100));
++	}
++
++	@Entity(name = "Pole")
++	static class Pole {
++		@Id
++		Integer id;
++
++		@OneToOne
++		@JoinColumn(name = "device_id")
++		Device device;
++
++		Pole() {
++		}
++
++		Pole(Integer id) {
++			this.id = id;
++		}
++	}
++
++	@Entity(name = "Device")
++	static class Device {
++		@Id
++		Integer id;
++
++		@OneToOne(optional = false)
++		@MapsId
++		@PrimaryKeyJoinColumn
++		Pole pole;
++
++		@OneToOne(mappedBy = "device", cascade = CascadeType.ALL)
++		DeviceStatus status;
++
++		Device() {
++		}
++
++		Device(Pole pole) {
++			this.pole = pole;
++		}
++	}
++
++	@Entity(name = "DeviceStatus")
++	static class DeviceStatus {
++		@Id
++		Integer id;
++
++		@OneToOne
++		@MapsId
++		@PrimaryKeyJoinColumn
++		Device device;
++
++		@OneToOne(cascade = CascadeType.ALL, fetch = FetchType.LAZY, optional = false)
++		@PrimaryKeyJoinColumn
++		DeviceConnectivity connectivity;
++
++		Integer dimPercent;
++
++		DeviceStatus() {
++		}
++
++		DeviceStatus(Device device) {
++			this.device = device;
++			this.connectivity = new DeviceConnectivity(device);
++		}
++	}
++
++	@Entity(name = "DeviceConnectivity")
++	static class DeviceConnectivity {
++		@Id
++		Integer id;
++
++		@OneToOne // no cascade
++		@MapsId
++		@PrimaryKeyJoinColumn
++		Device device;
++
++		String onlineStatus;
++
++		DeviceConnectivity() {
++		}
++
++		DeviceConnectivity(Device device) {
++			this.device = device;
++		}
++	}
++}
