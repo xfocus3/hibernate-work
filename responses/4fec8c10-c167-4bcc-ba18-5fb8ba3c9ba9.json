@@ -1,0 +1,11 @@
+{
+  "id": "4fec8c10-c167-4bcc-ba18-5fb8ba3c9ba9",
+  "requestHash": "f3d2a5504c36d40898773d1b394793e388333c0f72515de8703b20e43c4ddb15",
+  "runId": "42467430409",
+  "runAttempt": "1",
+  "head": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "resultHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "HHH-21078 implementation is not complete. Genuine test-only RED was observed in run 42467001503: four tests, one intended SQL-shape failure, no errors or skips. Both implementation candidates remain RED (runs 42467855426 and 42468394440); the original assertion still fails with unchanged SQL, so neither candidate is accepted. Compilation succeeded, but no successful full verification or SQL Server runtime is claimed. Independent review identified and addressed a speculative nongroupable-payload risk, but source-level approval does not establish runtime correctness. Further diagnosis of the conservative guard is pending; no speculative guard relaxation is accepted. Additional semantic guard tests are prepared but unexecuted. The source result remains unchanged. Sanitized stage/request snapshots and exact failed-run evidence are preserved on the documented checkpoint branches. Do not publish a completion PR or treat this as an implemented fix."
+}
