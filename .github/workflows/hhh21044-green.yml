@@ -1,0 +1,18 @@
+name: HHH-21044 focused GREEN and neighbors
+on:
+  push:
+    branches: [sandcastle/verify/HHH-21044-20261108]
+    paths: [.github/workflows/hhh21044-green.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
+    with:
+      target_sha: 99489d519a023b37cb83c1a89b73ae499113e089
+      patch_ref: fb008ecb356b3e1c223157652fe7b569fc48e80e
+      patch_path: patches/HHH-21044-ancestor-boundary-green.patch
+      java_version: '25'
+      build_tool: gradle
+      database: h2
+      arguments: '["hibernate-core:cleanTest","hibernate-core:test","--tests","org.hibernate.orm.test.refresh.*","--tests","org.hibernate.orm.test.cache.CacheModeRefreshSessionTest","--tests","org.hibernate.orm.test.cascade.Refresh*","--tests","org.hibernate.orm.test.pc.CascadeRefreshTest","formatChecks","-Pdb=h2"]'
