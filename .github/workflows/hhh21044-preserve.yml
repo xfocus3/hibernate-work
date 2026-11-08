@@ -1,0 +1,41 @@
+name: Preserve HHH-21044 handoffs
+on:
+  push:
+    branches: [sandcastle/verify/HHH-21044-20261108]
+    paths: [.github/workflows/hhh21044-preserve.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  preserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42479449923'
+          artifact-ids: '13616942360,13616698569,13616449464'
+          path: checkpoints/HHH-21044/explore
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: '42479966915'
+          artifact-ids: '13617086328,13616433532'
+          path: checkpoints/HHH-21044/implement
+      - name: Validate original public-source handoffs
+        run: |
+          set -euo pipefail
+          node - <<'JS'
+          const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+          const expected=new Map([['7de75bbf-1914-4f7e-8e75-a57777fc5215','42479449923'],['ef569664-4a4b-43b7-820c-b13f886fe398','42479449923'],['99554fc6-19cc-4133-bf07-8081ea2d7582','42479449923'],['cb91b9bc-9770-400e-afde-aafdfc758d89','42479966915'],['68c74c35-812b-4878-827c-da199bcf30db','42479966915']]),seen=new Set();
+          function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else {if(!e.name.endsWith('.json'))throw Error('Unexpected file');const {hash,...r}=JSON.parse(fs.readFileSync(p,'utf8'));if(expected.get(r.id)!==r.runId||r.repository!=='xfocus3/hibernate-work'||r.runAttempt!=='1'||r.snapshot.head!=='99489d519a023b37cb83c1a89b73ae499113e089'||r.snapshot.files.length||crypto.createHash('sha256').update(JSON.stringify(r)).digest('hex')!==hash)throw Error('Identity mismatch');if(/\/(?:home|Users|workspace|tmp)\//.test(JSON.stringify({...r,snapshot:undefined})))throw Error('Public checkpoint privacy review required');seen.add(r.id);}}}
+          walk('checkpoints/HHH-21044');if(seen.size!==expected.size)throw Error('Missing snapshot');
+          JS
+          git config user.name xfocus3
+          git config user.email xfocus29@gmail.com
+          git add checkpoints/HHH-21044
+          git diff --cached --check
+          git commit -m "HHH-21044 Preserve verified original handoffs [skip ci]"
+          git push origin HEAD:sandcastle/verify/HHH-21044-20261108
