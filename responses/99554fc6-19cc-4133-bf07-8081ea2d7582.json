@@ -1,0 +1,11 @@
+{
+  "id": "99554fc6-19cc-4133-bf07-8081ea2d7582",
+  "requestHash": "af40396cf2f16411ac66899c8acadc2f019bc145e09e23fcf1a65669dce4f455",
+  "runId": "42479449923",
+  "runAttempt": "1",
+  "head": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "resultHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"issues\":[{\"number\":55,\"tag\":\"needs-a-human\",\"duplicate_of\":null,\"comment\":\"**needs-a-human:** Current-main behavioral reproduction and overlap review are required before implementation.\\n\\nRead-only exploration pinned upstream `99489d519a023b37cb83c1a89b73ae499113e089`. Jira remains New, unassigned and unresolved. Pål Simen Ellingsen's original attachment already asserts that dirty `dimPercent=100` survives refresh and commit/reload; retain both four-entity association cycles.\\n\\nLikely scope is the internal refresh boundary in `EntityInitializerImpl`, with `LoaderSelectBuilder` controlling cascade reachability. The initializer checks the immediate association cascade flag plus the active REFRESH profile; this is a source hypothesis, not runtime proof that the reported path still fails.\\n\\n**Two-way:** a focused internal correction is reversible and need not change public API or schema. Complexity is moderate because cyclic loading and managed identity interact.\\n\\nOpen PR [#13755](https://github.com/hibernate/hibernate-orm/pull/13755) concerns nested collection refresh for HHH-21009. Its collection preparation/reachability changes are related but do not establish duplication of this scalar-loss report. No duplicates are closed.\\n\\nA separate test-only [JDK 25/H2 verification run](https://github.com/xfocus3/hibernate-work/actions/runs/42479593923) is in progress on unchanged production, using patch `16284adff1e6dcd9d5c23de372f31d44304ae637`. No behavioral outcome is claimed yet. Require genuine RED, or stop as no current-main reproduction. Then assess #13755 overlap before a fix.\"}],\"patterns\":\"Refresh cascade reachability and row-initializer refresh decisions must agree across non-cascaded boundaries and cycles; preserve the opposite nested-cascade behavior covered by HHH-21009.\"}</output>"
+}
