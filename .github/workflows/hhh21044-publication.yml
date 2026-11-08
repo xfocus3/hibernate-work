@@ -1,0 +1,50 @@
+name: HHH-21044 publication source verification
+on:
+  push:
+    branches: [sandcastle/verify/HHH-21044-20261108]
+    paths: [.github/workflows/hhh21044-publication.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: xfocus3/hibernate-orm
+          ref: 208795a3c9bbb66773d0f4f9f77607fb646ec68c
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Verify publication source
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 208795a3c9bbb66773d0f4f9f77607fb646ec68c
+          test "$(git rev-parse HEAD^{tree})" = b9768fe397571256e9f85634742ec9aa00866d8b
+          printf 'base=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$(git write-tree)" > ../verification.txt
+      - name: Run focused checks
+        working-directory: target
+        run: ./gradlew --no-daemon hibernate-core:cleanTest hibernate-core:test --tests 'org.hibernate.orm.test.refresh.*' --tests 'org.hibernate.orm.test.cache.CacheModeRefreshSessionTest' --tests 'org.hibernate.orm.test.cascade.Refresh*' --tests 'org.hibernate.orm.test.pc.CascadeRefreshTest' formatChecks -Pdb=h2
+      - name: Capture tested tree
+        if: always()
+        working-directory: target
+        run: |
+          git diff --binary HEAD > ../verified.patch
+          git add -u
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: publication-verification
+          path: |
+            verification.txt
+            verified.patch
+            target/**/build/test-results/**/TEST-*.xml
+            target/**/target/test-results/**/TEST-*.xml
+          retention-days: 7
