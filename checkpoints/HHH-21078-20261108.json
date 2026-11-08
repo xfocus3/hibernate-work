@@ -50,5 +50,15 @@
     "verifiedPatchSha256": "cfaf5b54fa02c65bdab42359259f9bd1a096f9445c11fb2ae95850b60753fcca",
     "result": "Not accepted. Compilation succeeded; original SQL-shape assertion still fails unchanged. Four tests, one failure, zero errors/skips. Source-level review is not runtime validation.",
     "next": "Determine remaining guard rejection before accepting any production correction. Additional guard tests are prepared but have not run. No SQL Server runtime or successful fix is claimed."
+  },
+  "finalState": {
+    "implementationRun": "42467430409",
+    "status": "blocked",
+    "runConclusion": "failure",
+    "responseCommit": "51938d4e2410e0091ac24d57f991a59a08776614",
+    "requestId": "4fec8c10-c167-4bcc-ba18-5fb8ba3c9ba9",
+    "unchangedSourceHead": "99489d519a023b37cb83c1a89b73ae499113e089",
+    "issueLabel": "agent:blocked",
+    "next": "Further diagnosis required. Reconcile terminal run, source lease and pending work before any original-stage resumption. No implementation completion, official PR, merge or SQL Server runtime claimed."
   }
 }
