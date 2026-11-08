@@ -30,5 +30,15 @@
     "preservationRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42467665991",
     "preservationConclusion": "success",
     "status": "Native implementation active; no final source result or GREEN claimed"
+  },
+  "initialCandidate": {
+    "runId": "42467855426",
+    "patchCommit": "e8bad0f59bf5aafdcf28a38f3a170ca1a679e138",
+    "artifactId": 13612675705,
+    "artifactSha256": "ec0db6c97c2907a6f3ee92f1e940b14bb5bc1eb17edc7e0b06b2669a0050226e",
+    "testedTree": "acecfdb7a42a853de3911888918a32015ff95451",
+    "result": "Not accepted. Compilation succeeded; four regression tests ran with the original grouped-restriction SQL-shape assertion still failing. Three controls passed, no errors or skips.",
+    "review": "Independent review also identified a nongroupable-payload risk in appending unrelated selected columns. Refinement is restricted to mapping-proven FK and target-identifier columns, conservatively skipping any other ungrouped selected column.",
+    "next": "Unwrap entity-valued grouping expressions and recheck the refined candidate through original implementation stage."
   }
 }
