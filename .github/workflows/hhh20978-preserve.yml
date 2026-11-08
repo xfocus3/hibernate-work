@@ -16,14 +16,14 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: '42477842079'
-          artifact-ids: '13616630828,13616068060'
+          artifact-ids: '13616630828,13616068060,13616069444'
           path: checkpoints/HHH-20978/explore
       - name: Validate original public-source handoff
         run: |
           set -euo pipefail
           node - <<'JS'
           const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-          const expected=new Set(['c5c06a2d-c83e-4136-b4d0-d794fe0ba4ea','a3a70808-3786-44ba-9ae2-b4a0b18ce9b4']),seen=new Set();
+          const expected=new Set(['c5c06a2d-c83e-4136-b4d0-d794fe0ba4ea','a3a70808-3786-44ba-9ae2-b4a0b18ce9b4','5ffecac1-5f88-42ea-9895-2ebdd96ac41a']),seen=new Set();
           function walk(dir){for(const e of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,e.name);if(e.isDirectory())walk(p);else {if(!e.name.endsWith('.json'))throw Error('Unexpected file');const raw=fs.readFileSync(p,'utf8'),{hash,...r}=JSON.parse(raw);if(!expected.has(r.id)||r.repository!=='xfocus3/hibernate-work'||r.runId!=='42477842079'||r.runAttempt!=='1'||r.snapshot.head!=='99489d519a023b37cb83c1a89b73ae499113e089'||r.snapshot.files.length||crypto.createHash('sha256').update(JSON.stringify(r)).digest('hex')!==hash)throw Error('Identity mismatch');if(/\/(?:home|Users|workspace|tmp)\//.test(JSON.stringify({...r,snapshot:undefined})))throw Error('Public checkpoint privacy review required');seen.add(r.id);}}}
           walk('checkpoints/HHH-20978/explore');if(seen.size!==expected.size)throw Error('Missing snapshot');
           JS
