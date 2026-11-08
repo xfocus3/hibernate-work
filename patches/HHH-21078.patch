@@ -1,0 +1,198 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/GroupByRestrictedManyToOneTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/GroupByRestrictedManyToOneTest.java
+new file mode 100644
+index 00000000..1a4ccd91
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/GroupByRestrictedManyToOneTest.java
+@@ -0,0 +1,192 @@
++package org.hibernate.orm.test.query.hql;
++
++import java.util.Arrays;
++import java.util.List;
++import java.util.Locale;
++
++import org.hibernate.annotations.SQLRestriction;
++
++import org.hibernate.testing.jdbc.SQLStatementInspector;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.FetchType;
++import jakarta.persistence.Id;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.Table;
++
++import static org.assertj.core.api.Assertions.assertThat;
++
++@JiraKey("HHH-21078")
++@DomainModel(annotatedClasses = {
++		GroupByRestrictedManyToOneTest.Parent.class,
++		GroupByRestrictedManyToOneTest.Child.class,
++		GroupByRestrictedManyToOneTest.UnrestrictedParent.class,
++		GroupByRestrictedManyToOneTest.UnrestrictedChild.class
++})
++@SessionFactory(useCollectingStatementInspector = true)
++public class GroupByRestrictedManyToOneTest {
++	@BeforeEach
++	public void setUp(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Parent parent = new Parent( 1L, false );
++			session.persist( parent );
++			session.persist( new Child( 1L, "visible", parent ) );
++			final UnrestrictedParent unrestrictedParent = new UnrestrictedParent();
++			unrestrictedParent.id = 1L;
++			session.persist( unrestrictedParent );
++			final UnrestrictedChild child = new UnrestrictedChild();
++			child.id = 1L;
++			child.name = "visible";
++			child.parent = unrestrictedParent;
++			session.persist( child );
++		} );
++	}
++
++	@AfterEach
++	public void tearDown(SessionFactoryScope scope) {
++		scope.dropData();
++	}
++
++	@Test
++	public void testGroupByRestrictedAssociation(SessionFactoryScope scope) {
++		final SQLStatementInspector inspector = scope.getCollectingStatementInspector();
++		inspector.clear();
++		scope.inTransaction( session -> {
++			final List<Child> children = session.createQuery(
++					"select c from Child c group by c.id,c.name,c.parent", Child.class
++			).getResultList();
++			assertThat( children ).extracting( child -> child.id ).containsExactly( 1L );
++			inspector.assertExecutedCount( 1 );
++			final String sql = inspector.getSqlQueries().get( 0 );
++			assertThat( sql.toLowerCase( Locale.ROOT ) ).containsPattern( "\\.deleted\\s*=\\s*(false|0)" );
++			// H2 may accept missing columns through functional dependency. Execution alone
++			// therefore does not reproduce the failure on stricter GROUP BY dialects.
++			assertSelectedColumnsAreGrouped( sql );
++		} );
++	}
++
++	@Test
++	public void testGroupByUnrestrictedAssociation(SessionFactoryScope scope) {
++		final SQLStatementInspector inspector = scope.getCollectingStatementInspector();
++		inspector.clear();
++		scope.inTransaction( session -> {
++			final List<UnrestrictedChild> children = session.createQuery(
++					"select c from UnrestrictedChild c group by c.id,c.name,c.parent", UnrestrictedChild.class
++			).getResultList();
++			assertThat( children ).extracting( child -> child.id ).containsExactly( 1L );
++			inspector.assertExecutedCount( 1 );
++			assertSelectedColumnsAreGrouped( inspector.getSqlQueries().get( 0 ) );
++		} );
++	}
++
++	@Test
++	public void testGroupByEntity(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final List<Child> children = session.createQuery(
++					"select c from Child c group by c", Child.class
++			).getResultList();
++			assertThat( children ).extracting( child -> child.id ).containsExactly( 1L );
++		} );
++	}
++
++	@Test
++	public void testGroupByEntityPreservesRestrictedAndNullAssociations(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final Parent hidden = new Parent( 2L, true );
++			session.persist( hidden );
++			session.persist( new Child( 2L, "hidden", hidden ) );
++			session.persist( new Child( 3L, "absent", null ) );
++		} );
++		scope.inTransaction( session -> {
++			final List<Child> children = session.createQuery(
++					"select c from Child c group by c order by c.id", Child.class
++			).getResultList();
++			assertThat( children ).extracting( child -> child.id ).containsExactly( 1L, 2L, 3L );
++			assertThat( children.get( 0 ).parent ).isNotNull();
++			assertThat( session.getIdentifier( children.get( 0 ).parent ) ).isEqualTo( 1L );
++			assertThat( children.get( 1 ).parent ).isNull();
++			assertThat( children.get( 2 ).parent ).isNull();
++		} );
++	}
++
++	private static void assertSelectedColumnsAreGrouped(String sql) {
++		// These fixtures select only simple columns, with no aggregate, formula or subquery.
++		final String normalized = sql.toLowerCase( Locale.ROOT ).replaceAll( "\\s+", " " ).trim();
++		assertThat( normalized ).startsWith( "select " ).contains( " from " ).contains( " group by " );
++		final List<String> selectedColumns = Arrays.stream(
++				normalized.substring( 7, normalized.indexOf( " from " ) ).split( "," )
++		).map( String::trim ).toList();
++		final List<String> groupedColumns = Arrays.stream(
++				normalized.substring( normalized.indexOf( " group by " ) + 10 ).split( "," )
++		).map( String::trim ).map( expression -> expression.matches( "\\d+" )
++				? selectedColumns.get( Integer.parseInt( expression ) - 1 )
++				: expression ).toList();
++		assertThat( groupedColumns )
++				.as( "Every hydration column must be grouped for this scalar grouping: %s", sql )
++				.containsAll( selectedColumns );
++	}
++
++	@Entity(name = "Parent")
++	@Table(name = "group_restricted_parent")
++	@SQLRestriction("deleted = false")
++	public static class Parent {
++		@Id
++		private Long id;
++		private boolean deleted;
++
++		public Parent() {
++		}
++
++		private Parent(Long id, boolean deleted) {
++			this.id = id;
++			this.deleted = deleted;
++		}
++	}
++
++	@Entity(name = "Child")
++	@Table(name = "group_restricted_child")
++	public static class Child {
++		@Id
++		private Long id;
++		private String name;
++		@ManyToOne(fetch = FetchType.LAZY)
++		@JoinColumn(name = "parent_id")
++		private Parent parent;
++
++		public Child() {
++		}
++
++		private Child(Long id, String name, Parent parent) {
++			this.id = id;
++			this.name = name;
++			this.parent = parent;
++		}
++	}
++
++	@Entity(name = "UnrestrictedParent")
++	@Table(name = "group_unrestricted_parent")
++	public static class UnrestrictedParent {
++		@Id
++		private Long id;
++		private boolean deleted;
++	}
++
++	@Entity(name = "UnrestrictedChild")
++	@Table(name = "group_unrestricted_child")
++	public static class UnrestrictedChild {
++		@Id
++		private Long id;
++		private String name;
++		@ManyToOne(fetch = FetchType.LAZY)
++		@JoinColumn(name = "parent_id")
++		private UnrestrictedParent parent;
++	}
++}
