@@ -1,0 +1,79 @@
+name: Verify HHH-20978 current-main reproduction
+on:
+  push:
+    branches: [sandcastle/dot-check/HHH-20978-20261108]
+    paths: [.github/workflows/hhh20978-check.yml]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 99489d519a023b37cb83c1a89b73ae499113e089
+      - uses: actions/checkout@v4
+        with:
+          repository: ArkhannGA/HibernateNoCollectionForReplacementIssueReproducer
+          ref: 21fbed46115cb4ea4bda20351dffdd9d5455105e
+          path: reporter
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Adapt reporter test without production changes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          src=Path('reporter/src/test/java/org/hibernate/bugs')
+          dst=Path('hibernate-core/src/test/java/org/hibernate/bugs')
+          shutil.copytree(src,dst)
+          p=dst/'ORMUnitTestCase.java'
+          s=p.read_text().replace('import static org.junit.jupiter.api.Assertions.assertThrows;','import static org.junit.jupiter.api.Assertions.assertEquals;')
+          start=s.index('            PersistenceException thrown = assertThrows')
+          end=s.index('\n        });',start)
+          s=s[:start]+'''            for (Child child : children) {
+                          session.createQuery("select p from Parent p", Parent.class).getResultList();
+                          GenericDaoSupport.merge(session, child);
+                      }
+                      session.flush();
+          '''+s[end:]
+          needle='''        });
+              }
+          }'''
+          assert needle in s
+          s=s.replace(needle,'''        });
+                  scope.inTransaction(session -> {
+                      assertEquals(1L, session.createQuery("select count(p) from Parent p", Long.class).getSingleResult());
+                      assertEquals(2L, session.createQuery("select count(c) from Child c", Long.class).getSingleResult());
+                      assertEquals(0L, session.createQuery("select count(g) from GrandChild g", Long.class).getSingleResult());
+                  });
+              }
+          }''')
+          p.write_text(s)
+          PY
+      - name: Run only adapted reporter regression
+        run: ./gradlew :hibernate-core:test --tests org.hibernate.bugs.ORMUnitTestCase -Pdb=h2 --no-daemon --max-workers=2
+      - name: Record focused outcome
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          files=list(Path('hibernate-core/target/test-results').rglob('TEST-*ORMUnitTestCase*.xml'))
+          if not files:
+              print('No focused test XML produced; not a reproduction result.')
+          for p in files:
+              r=ET.parse(p).getroot()
+              print({k:r.get(k) for k in ['name','tests','failures','errors','skipped']})
+              for f in r.iter('failure'):
+                  print(f.get('type'),f.get('message'))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hhh20978-focused-test-results
+          path: hibernate-core/target/test-results/test/TEST-*ORMUnitTestCase*.xml
+          if-no-files-found: warn
