@@ -1,0 +1,17 @@
+{
+  "issue": "https://github.com/xfocus3/hibernate-work/issues/53",
+  "baseline": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "exploreRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42466328472",
+  "exploreConclusion": "success",
+  "completionResponse": "42cf14877b8ed8685243bfba529fcfcd6e6ab08d",
+  "extractionResponse": "e1aaf57db549dfbfc188a760a1e9e36edbfd202b",
+  "preservationRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42466865856",
+  "preservationConclusion": "success",
+  "preservationBranch": "sandcastle/dot-checkpoint/HHH-21078-20261108",
+  "testOnlyRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42467001503",
+  "testOnlyRevision": "374690690392b6f8c736bc8d0a18e60105b8e6be",
+  "testStatus": "in_progress; no runtime conclusion claimed",
+  "productionChanges": "none",
+  "design": "Independent review supports selected-owner supplemental FK grouping only when complete owner identifier is already grouped in same query block. Retain restricted target grouping and scalar NULL aggregate semantics. Exact implementation hook remains under review.",
+  "nextStep": "Inspect genuine focused baseline result, then review bounded implementation before original implement stage. No duplicate stage or upstream PR yet."
+}
