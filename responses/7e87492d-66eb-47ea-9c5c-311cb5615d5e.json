@@ -1,0 +1,11 @@
+{
+  "id": "7e87492d-66eb-47ea-9c5c-311cb5615d5e",
+  "requestHash": "29111089cfa2c730674a37de4e0032942d5c4954194706cb14954824a944e054",
+  "runId": "42481468868",
+  "runAttempt": "1",
+  "head": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "resultHead": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Independent review of `094edff6bc17cc290e0be70a28a8c2eba2579ecb` found no blocking issues and warranted no changes. The ancestor cascade check prevents deeper associations from restarting refresh across a non-cascading boundary while preserving result-loader roots and `CacheMode.REFRESH_SESSION`. Relevant parent constructors initialize the inspected state before creating child assemblers. No API, schema or ownership change is introduced. The regression retains the reporter's four entities and both association cycles, verifies managed identity and the pending scalar immediately after refresh, then confirms persistence in a fresh transaction.\\n\\nThe original regression failed behaviorally on unchanged upstream. [Exact-commit verification](https://github.com/xfocus3/hibernate-work/actions/runs/42480678083) and [standard scoped verification](https://github.com/xfocus3/hibernate-work/actions/runs/42481184214) each passed 21 tests with zero failures, errors or skips, plus formatting checks. Both recorded unchanged tree `b9768fe397571256e9f85634742ec9aa00866d8b` and empty formatter patches. [Isolated PR #13755 compatibility](https://github.com/xfocus3/hibernate-work/actions/runs/42480360934) passed 54 tests, including its 36 nested-refresh tests; those separate changes are not included here.\\n\\nThe full upstream suite and other database profiles remain untested. Pre-existing map-index and secondary-loader ancestry questions are outside this focused fix. No unresolved review thread requires a reply.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
