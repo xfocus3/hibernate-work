@@ -56,7 +56,7 @@
     "consumed": true
   },
   "independent_source_review": "No blocking findings; constructor safety and compatibility verified",
-  "next": "Standard scoped verification run 42481184214, then original independent review handoff",
+  "next": "Reviewed work PR 56 is open and ready at source commit 094edff6. Upstream publication, merges and releases have not been performed.",
   "untested": [
     "full upstream suite",
     "non-H2 database profiles"
@@ -64,5 +64,29 @@
   "scope_exclusions": [
     "pre-existing map-index semantics",
     "secondary-loader ancestry beyond its root"
-  ]
+  ],
+  "review": {
+    "run": 42481468868,
+    "status": "success",
+    "responses": [
+      "df659ac197607d0afbb4d91f35692309c3eaaa04",
+      "e0a051b364ba8ff86a6bc25ebf8029d8c1e8fbf8"
+    ],
+    "consumed": true,
+    "url": "https://github.com/xfocus3/hibernate-work/pull/56#pullrequestreview-5817941910",
+    "source_unchanged": true
+  },
+  "scoped_verification": {
+    "run": 42481184214,
+    "status": "success",
+    "tests": 21,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "formatChecks": "passed"
+  },
+  "review_handoff_preservation": {
+    "run": 42481979373,
+    "status": "success"
+  }
 }
