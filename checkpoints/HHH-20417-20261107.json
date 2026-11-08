@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Original cycle completed; official PR published and ready for review; upstream CI pending",
+  "status": "Follow-up: upstream Spanner failures diagnosed; local correction under review; new diagnostic workflow denied pending authorization",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -204,5 +204,19 @@
   "contributionRules": "success",
   "officialDraft": false,
   "maintainerCanModify": false,
-  "upstreamChecks": "Jenkins and build reports in progress; Quarkus skipped; GitHub workflows await maintainer approval"
+  "upstreamChecks": "Jenkins and build reports in progress; Quarkus skipped; GitHub workflows await maintainer approval",
+  "followup": {
+    "head": "b2b3cb99d1a72024a804d8d58de966f4a2c1cb7c",
+    "upstreamRun": 42415822935,
+    "failedJobs": [
+      128548862076,
+      128548862081
+    ],
+    "spannerFinding": "New SINGLE_TABLE temporal timing test requires primary-key updates, as its adjacent existing test does.",
+    "spannerPostgresqlFinding": "Emulator NoLockingSupport yields no forced-follow-on lock targets; unchanged baseline source has same path. Runtime batch-disabled baseline diagnostic not yet run.",
+    "sonarFinding": "Bot reports 3.3 percent new-code duplication above 3 percent threshold. Detailed page returned CloudFront403; no alternate access attempted. Independent source duplication identified in temporal version binding.",
+    "baselinePatchCommit": "25dc829e1e66f83197b0d16b92d9026d2f0c7816",
+    "deniedAction": "Creation of new push-triggered baseline workflow was rejected for persistent execution/runner-cost authorization. Not executed, not retried or rerouted.",
+    "nextStep": "Finish independent local diff review, then resolve authorization before any new execution. Do not publish unverified changes."
+  }
 }
