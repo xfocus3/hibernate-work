@@ -1,0 +1,20 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:cleanTest",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.refresh.*",
+    "--tests",
+    "org.hibernate.orm.test.cache.CacheModeRefreshSessionTest",
+    "--tests",
+    "org.hibernate.orm.test.cascade.Refresh*",
+    "--tests",
+    "org.hibernate.orm.test.pc.CascadeRefreshTest",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21044 requires dirty scalar and post-commit reload preservation across non-cascaded ancestors while retaining existing cascade refresh and REFRESH_SESSION behavior. Run the focused regression and refresh/cascade/cache neighbors with compilation and formatChecks on the exact PR head. HHH-21009 compatibility separately passed all 36 nested-refresh tests in run 42480360934. Full upstream suite and other database profiles are not claimed."
+}
