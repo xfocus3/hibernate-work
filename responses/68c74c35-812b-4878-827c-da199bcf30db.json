@@ -1,0 +1,14 @@
+{
+  "id": "68c74c35-812b-4878-827c-da199bcf30db",
+  "requestHash": "a5fb3ff4c49e2e32e5ded6cb04f8126d791c9876f5cf93374e9c1f57ccf42b3c",
+  "runId": "42479966915",
+  "runAttempt": "1",
+  "head": "99489d519a023b37cb83c1a89b73ae499113e089",
+  "resultHead": "094edff6bc17cc290e0be70a28a8c2eba2579ecb",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/sql/results/graph/entity/internal/EntityInitializerImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/refresh/NonCascadedRefreshDirtyStateTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-21044 in 094edff6bc17cc290e0be70a28a8c2eba2579ecb, parent99489d519a023b37cb83c1a89b73ae499113e089. EntityInitializerImpl now requires ancestor entity associations and plural mappings to cascade REFRESH before refreshing deeper associations; root loaders and the independent CacheMode.REFRESH_SESSION path are preserved. No public/protected API change. The reporter-derived four-entity regression retains both cycles, asserts managed identity, dirty dimPercent100 after refresh, and committed/reloaded100. RED run42479593923 had1 assertion failure on unchanged production. GREEN run42480198702 passed21 tests and formatChecks; exact-commit run42480678083 also completed success with21 tests, zero failures/errors/skips, formatChecks, unchanged tested tree b9768fe397571256e9f85634742ec9aa00866d8b. An isolated combination with PR13755 at31f02fce52b120ae042372fd9855175414012e46 passed54 tests including all36 nested-refresh cases in run42480360934; only import context adapted, none of that PR's source is in this result. Independent source review found no blockers and verified constructor-state safety and compatibility. Full upstream suite and other databases not run; pre-existing map-index/secondary-loader questions are not claimed fixed. Original task branch was not pushed and no PR or labels were changed by this implementation response; the coordinator published only the exact verified source object for transport. <promise>COMPLETE</promise>"
+}
