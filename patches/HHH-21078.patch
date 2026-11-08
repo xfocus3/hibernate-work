@@ -1,3 +1,138 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
+index f4c44b8d..74f63d1d 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/sqm/sql/spi/BaseSqmToSqlAstConverter.java
+@@ -379,6 +379,7 @@
+ import org.hibernate.sql.results.graph.Fetch;
+ import org.hibernate.sql.results.graph.FetchParent;
+ import org.hibernate.sql.results.graph.Fetchable;
++import org.hibernate.sql.results.graph.entity.EntityResult;
+ import org.hibernate.sql.results.graph.entity.EntityResultGraphNode;
+ import org.hibernate.sql.results.graph.instantiation.internal.DynamicInstantiation;
+ import org.hibernate.sql.results.graph.internal.ImmutableFetchList;
+@@ -2054,6 +2055,9 @@ private QuerySpec querySpec(
+ 		}
+ 
+ 		sqlQuerySpec.setGroupByClauseExpressions( visitGroupByClause( sqmQuerySpec.getGroupByClauseExpressions() ) );
++		if ( topLevel ) {
++			completeRestrictedToOneGrouping( sqmQuerySpec, sqlQuerySpec );
++		}
+ 
+ 		final var havingClausePredicate = sqmQuerySpec.getHavingClausePredicate();
+ 		if ( havingClausePredicate != null ) {
+@@ -2077,6 +2081,112 @@ private QuerySpec querySpec(
+ 		return applyTransformers( sqlQuerySpec );
+ 	}
+ 
++	private void completeRestrictedToOneGrouping(SqmQuerySpec<?> sqmQuerySpec, QuerySpec sqlQuerySpec) {
++		if ( sqlQuerySpec.getGroupByClauseExpressions().isEmpty()
++				|| domainResults == null || domainResults.size() != 1
++				|| !(domainResults.get( 0 ) instanceof EntityResult<?> entityResult)
++				|| sqmQuerySpec.getFromClause().getRoots().size() != 1
++				|| sqmQuerySpec.getSelectClause().getSelections().size() != 1 ) {
++			return;
++		}
++		final var root = sqmQuerySpec.getFromClause().getRoots().get( 0 );
++		if ( root.isCorrelated() || root.hasTreats() || !root.getSqmJoins().isEmpty()
++				|| sqmQuerySpec.getSelectClause().getSelections().get( 0 ).getSelectableNode() != root
++				|| !root.getNavigablePath().equals( entityResult.getNavigablePath() ) ) {
++			return;
++		}
++		final var tableGroup = getFromClauseIndex().findTableGroup( root.getNavigablePath() );
++		if ( !tableGroup.getNestedTableGroupJoins().isEmpty()
++				|| !tableGroup.getTableReferenceJoins().isEmpty() ) {
++			return;
++		}
++
++		// Only implicit, owning to-one joins to a primary key are known to preserve
++		// the functional dependency on the selected root's complete identifier here.
++		final Set<String> qualifiers = new HashSet<>();
++		final Set<String> restrictedQualifiers = new HashSet<>();
++		qualifiers.add( tableGroup.getPrimaryTableReference().getIdentificationVariable() );
++		for ( var join : tableGroup.getTableGroupJoins() ) {
++			final var joinedGroup = join.getJoinedGroup();
++			if ( !(joinedGroup.getModelPart() instanceof ToOneAttributeMapping toOne)
++					|| toOne.getSideNature() != ForeignKeyDescriptor.Nature.KEY
++					|| !toOne.isReferenceToPrimaryKey()
++					|| !joinedGroup.getTableGroupJoins().isEmpty()
++					|| !joinedGroup.getNestedTableGroupJoins().isEmpty() ) {
++				return;
++			}
++			if ( joinedGroup.isInitialized() ) {
++				if ( !joinedGroup.getTableReferenceJoins().isEmpty() ) {
++					return;
++				}
++				final String qualifier = joinedGroup.getPrimaryTableReference().getIdentificationVariable();
++				qualifiers.add( qualifier );
++				if ( toOne.hasWhereRestrictions() ) {
++					restrictedQualifiers.add( qualifier );
++				}
++			}
++		}
++		if ( restrictedQualifiers.isEmpty() ) {
++			return;
++		}
++		final Set<ColumnReference> groupedColumns = new HashSet<>();
++		for ( var expression : sqlQuerySpec.getGroupByClauseExpressions() ) {
++			if ( !collectGroupingColumns( expression, groupedColumns ) ) {
++				return;
++			}
++		}
++		final var identifierMapping = entityResult.getReferencedMappingContainer().getIdentifierMapping();
++		for ( int i = 0; i < identifierMapping.getJdbcTypeCount(); i++ ) {
++			final var selectable = identifierMapping.getSelectable( i );
++			if ( selectable.isFormula() || !groupedColumns.contains( new ColumnReference(
++					tableGroup.resolveTableReference( root.getNavigablePath(), selectable.getContainingTableExpression() ),
++					selectable ) ) ) {
++				return;
++			}
++		}
++		boolean hasRestrictedHydration = false;
++		final List<Expression> missingColumns = new ArrayList<>();
++		for ( var selection : sqlQuerySpec.getSelectClause().getSqlSelections() ) {
++			if ( !(selection.getExpression() instanceof ColumnReference column)
++					|| column.isColumnExpressionFormula() || column.getReadExpression() != null
++					|| !qualifiers.contains( column.getQualifier() ) ) {
++				return;
++			}
++			hasRestrictedHydration |= restrictedQualifiers.contains( column.getQualifier() );
++			if ( groupedColumns.add( column ) ) {
++				missingColumns.add( column );
++			}
++		}
++		if ( hasRestrictedHydration && !missingColumns.isEmpty() ) {
++			// Keep both the restricted query join and the hydration join. Their identifiers
++			// need not use the same alias, and hydration also needs the physical owner FK.
++			final List<Expression> groupBy = new ArrayList<>( sqlQuerySpec.getGroupByClauseExpressions() );
++			groupBy.addAll( missingColumns );
++			sqlQuerySpec.setGroupByClauseExpressions( groupBy );
++		}
++	}
++
++	private static boolean collectGroupingColumns(Expression expression, Set<ColumnReference> columns) {
++		if ( expression instanceof SqlSelectionExpression selectionExpression ) {
++			return collectGroupingColumns( selectionExpression.getSelection().getExpression(), columns );
++		}
++		final var tuple = SqlTupleContainer.getSqlTuple( expression );
++		if ( tuple != null ) {
++			for ( var tupleExpression : tuple.getExpressions() ) {
++				if ( !collectGroupingColumns( tupleExpression, columns ) ) {
++					return false;
++				}
++			}
++			return true;
++		}
++		final var column = expression.getColumnReference();
++		if ( column == null || column.isColumnExpressionFormula() || column.getReadExpression() != null ) {
++			return false;
++		}
++		columns.add( column );
++		return true;
++	}
++
+ 	/**
+ 	 * Look for treated {@code SqmFrom} registrations that have uses of the untreated {@code SqmFrom}.
+ 	 * These {@code SqmFrom} nodes are then not treat-joined but rather treated only in expressions.
 diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/GroupByRestrictedManyToOneTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/query/hql/GroupByRestrictedManyToOneTest.java
 new file mode 100644
 index 00000000..1a4ccd91
