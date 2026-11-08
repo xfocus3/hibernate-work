@@ -12,7 +12,7 @@
   "hash": "00d187fb28a58c0c7a524e8c9fc5c3f7863d2207587d49d6f4dd81cc24f2beec",
   "issue": "HHH-20417",
   "workIssue": 50,
-  "status": "Follow-up: upstream Spanner failures diagnosed; local correction under review; new diagnostic workflow denied pending authorization",
+  "status": "Follow-up source correction independently reviewed; runtime validation blocked pending workflow authorization",
   "inputHead": "99489d519a023b37cb83c1a89b73ae499113e089",
   "exploreResult": "success",
   "responseCommit": "9c661401c5b514103880f4e4277b9f1190e4ff8d",
@@ -217,6 +217,11 @@
     "sonarFinding": "Bot reports 3.3 percent new-code duplication above 3 percent threshold. Detailed page returned CloudFront403; no alternate access attempted. Independent source duplication identified in temporal version binding.",
     "baselinePatchCommit": "25dc829e1e66f83197b0d16b92d9026d2f0c7816",
     "deniedAction": "Creation of new push-triggered baseline workflow was rejected for persistent execution/runner-cost authorization. Not executed, not retried or rerouted.",
-    "nextStep": "Finish independent local diff review, then resolve authorization before any new execution. Do not publish unverified changes."
+    "nextStep": "Resolve workflow execution authorization. Do not claim tests or Sonar passing; do not publish unverified correction.",
+    "candidatePatchSha256": "2d98e58dfd60199c4829301aad22f4c2b90022a42052819568c580732e41f1ad",
+    "candidateTree": "cfeaec0918f679cecc241e613bc09ac5bdd8258c",
+    "sourceReview": "Approved pending runtime validation. Two method-specific capability prerequisites are justified; shared temporal binder preserves history-specific override and all assertions.",
+    "candidatePublished": false,
+    "requiredValidation": "Compile, formatting, H2 locking/cache/temporal including CRUD/upsert, both Spanner emulators with precise capability-specific coverage, and Sonar reanalysis."
   }
 }
