@@ -13,10 +13,22 @@
   "testStatus": "completed; behavioral RED: 4 tests, 1 expected SQL-shape assertion failure, 0 errors/skips; 3 controls pass",
   "productionChanges": "none",
   "design": "Independent review supports selected-owner supplemental FK grouping only when complete owner identifier is already grouped in same query block. Retain restricted target grouping and scalar NULL aggregate semantics. Exact implementation hook remains under review.",
-  "nextStep": "Refine selected-owner complete-identifier guard to cover actual singular hydration selections, independently review, then original implementation stage. No production changes yet.",
+  "nextStep": "Validate first bounded candidate with original Actions feedback, then boundary regressions and independent review. Service original completion/extraction requests before expiration; do not duplicate active stage.",
   "testArtifact": 13611619828,
   "testArtifactDigest": "de8ebfd827ee16d0d9a0d6b925159829a95179cd57a8bf6dc41378b74558baaa",
   "testedTree": "a13a3b9950df06280a08481b082aac45404312dc",
   "redFinding": "SELECT uses physical owner FK plus target identifier from hydration join p1; GROUP BY uses target identifier from separate implicit join p2. Both physical FK and p1 identifier are missing. FK-only append is insufficient.",
-  "format": "Not claimed: failing test may prevent later formatChecks execution."
+  "format": "Not claimed: failing test may prevent later formatChecks execution.",
+  "implementation": {
+    "run": "https://github.com/xfocus3/hibernate-work/actions/runs/42467430409",
+    "requestId": "4fec8c10-c167-4bcc-ba18-5fb8ba3c9ba9",
+    "requestHash": "f3d2a5504c36d40898773d1b394793e388333c0f72515de8703b20e43c4ddb15",
+    "stageId": "e83ba12c-9ad3-4540-9e19-b1b8cca32efb",
+    "stageHash": "26dbed46f2974209a9354e5e69be7d191a42236ed3107249edd121cc303ef0cf",
+    "expiresAt": "2026-11-08T10:16:40.364Z",
+    "branch": "agent/issue-53-hhh-21078-align-grouped-restricted-to-one-sql-expr",
+    "preservationRun": "https://github.com/xfocus3/hibernate-work/actions/runs/42467665991",
+    "preservationConclusion": "success",
+    "status": "Native implementation active; no final source result or GREEN claimed"
+  }
 }
