@@ -11,7 +11,7 @@ permissions:
   pull-requests: write
 jobs:
   pipeline:
-    uses: xfocus3/sandcastle/.github/workflows/agent-implement-queue.yml@cf4d6f159e9ff959f451ea6a493c791e9fdcb2f2
+    uses: xfocus3/sandcastle/.github/workflows/agent-implement-queue.yml@7bac9719bf2e66eca6f478e7ef649410207e9905
     secrets:
       upstream_sync_token: ${{ secrets.UPSTREAM_SYNC_TOKEN }}
     with:
