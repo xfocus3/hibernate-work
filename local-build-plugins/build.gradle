@@ -1,0 +1,132 @@
+plugins {
+	id "java-gradle-plugin"
+	id 'groovy-gradle-plugin'
+    alias(libs.plugins.spotless)
+}
+
+repositories {
+	mavenCentral()
+}
+
+group = 'org.hibernate.build'
+version = '1.0.0-SNAPSHOT'
+layout.buildDirectory.set(file("target"))
+
+// Shared with the published provider plugin without a build-bootstrap dependency.
+sourceSets.main.java.srcDir("../shared/classification/src/main/java")
+
+dependencies {
+	implementation gradleApi()
+
+	compileOnly libs.jakarta.annotation
+
+	implementation libs.jakarta.inject
+
+    implementation libs.jakarta.jaxbXjc
+    implementation libs.jakarta.basicjaxbTools
+    implementation libs.jakarta.basicjaxbPlugins
+
+	implementation libs.jandex
+	implementation libs.asm
+    implementation libs.jakarta.jsonApi
+    implementation libs.jakarta.jsonBind
+    implementation libs.jakarta.yasson
+    implementation libs.buildscript.jsoup
+
+	implementation libs.buildscript.forbiddenapis
+
+	implementation libs.maven.embedder
+	implementation libs.maven.compat
+	implementation libs.maven.resolverBasic
+	implementation libs.maven.resolverHttp
+    implementation libs.buildscript.slf4jSimple
+
+	testImplementation libs.test.junitJupiterApi
+	testRuntimeOnly libs.test.junitJupiterEngine
+	testRuntimeOnly libs.test.junitJupiterLauncher
+}
+
+tasks.compileJava {
+	options.encoding = 'UTF-8'
+	sourceCompatibility = 11
+	targetCompatibility = 11
+}
+
+gradlePlugin {
+	plugins {
+		databaseServicePlugin {
+			id = 'org.hibernate.orm.database-service'
+			implementationClass = 'org.hibernate.orm.db.DatabaseServicePlugin'
+		}
+		antlrPlugin {
+			id = 'org.hibernate.orm.antlr'
+			implementationClass = 'org.hibernate.orm.antlr.AntlrPlugin'
+		}
+		reportsPlugin {
+			id = 'org.hibernate.orm.build.reports'
+			implementationClass = 'org.hibernate.orm.post.ReportGenerationPlugin'
+		}
+		envSettings {
+			id = 'org.hibernate.orm.build.env-settings'
+			implementationClass = 'org.hibernate.orm.env.EnvironmentSettingsPlugin'
+		}
+		jdkVersionSettings {
+			id = 'org.hibernate.orm.build.jdks-settings'
+			implementationClass = 'org.hibernate.orm.toolchains.JdkVersionSettingsPlugin'
+		}
+		settingsDocumentationPlugin {
+			id = 'org.hibernate.orm.build.settings-doc'
+			implementationClass = 'org.hibernate.orm.properties.SettingsDocumentationPlugin'
+		}
+		jdkVersionsPlugin {
+			id = 'org.hibernate.orm.build.jdks'
+			implementationClass = 'org.hibernate.orm.toolchains.JdkVersionPlugin'
+		}
+		javaModulePlugin {
+			id = 'org.hibernate.orm.build.java-module'
+			implementationClass = 'org.hibernate.orm.toolchains.JavaModulePlugin'
+		}
+		register( "mavenEmbedder" ) {
+			id = "org.hibernate.build.maven-embedder"
+			implementationClass = "org.hibernate.build.maven.embedder.MavenEmbedderPlugin"
+		}
+		register( "xjc-plugin" ) {
+			id = "local-xjc-plugin"
+			implementationClass = "org.hibernate.build.xjc.XjcPlugin"
+		}
+		register("aspect-module") {
+			id = "local.module"
+			implementationClass = "org.hibernate.build.aspects.ModuleAspect"
+		}
+	}
+}
+
+spotless {
+	//Don't fail during the check: rather than enforcing guidelines, we use this plugin to fix mistakes automatically.
+	enforceCheck = false
+	java {
+		target "src/**/*.java"
+		targetExclude( "**/target/**/*.java" )
+		replaceRegex "removeRedHatHeader", new GroovyShell().evaluate(project.file("../shared/config/spotless/header-patterns.groovy")).block, '${prefix}'
+		removeUnusedImports()
+		leadingSpacesToTabs( 4 )
+		trimTrailingWhitespace()
+		endWithNewline()
+	}
+}
+// Bootstrapping a header-only run must not apply unrelated Java formatting in this included build.
+def invocation = gradle
+while (invocation.parent != null) {
+	invocation = invocation.parent
+}
+def headerOnlyInvocation = !invocation.startParameter.taskNames.empty && invocation.startParameter.taskNames.every {
+	def taskName = it.tokenize(':').last()
+	taskName in ['sourceHeadersApply', 'sourceHeadersCheck'] || taskName.startsWith('spotlessSourceHeaders')
+}
+if (!headerOnlyInvocation) {
+	tasks.compileJava.dependsOn tasks.spotlessJavaApply
+}
+
+tasks.test {
+	useJUnitPlatform()
+}

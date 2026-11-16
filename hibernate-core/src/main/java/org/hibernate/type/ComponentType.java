@@ -1,0 +1,884 @@
+package org.hibernate.type;
+
+import org.hibernate.Internal;
+
+import java.io.Serializable;
+import java.lang.reflect.Method;
+import java.sql.CallableStatement;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.hibernate.HibernateException;
+import org.hibernate.MappingException;
+import org.hibernate.PropertyNotFoundException;
+import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.bytecode.enhance.spi.LazyPropertyInitializer;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.cascade.spi.CascadeStyle;
+import org.hibernate.cascade.spi.CascadeStyles;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.util.collections.ArrayHelper;
+import org.hibernate.mapping.Component;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.EmbeddableValuedModelPart;
+import org.hibernate.metamodel.mapping.internal.MappingModelCreationProcess;
+import org.hibernate.metamodel.spi.EmbeddableInstantiator;
+import org.hibernate.query.sqm.tree.spi.domain.SqmEmbeddableDomainType;
+import org.hibernate.type.descriptor.ValueExtractor;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.spi.CompositeTypeImplementor;
+
+import static jakarta.persistence.metamodel.Type.PersistenceType.EMBEDDABLE;
+import static org.hibernate.internal.util.StringHelper.unqualify;
+import static org.hibernate.metamodel.mapping.EntityDiscriminatorMapping.DISCRIMINATOR_ROLE_NAME;
+
+/**
+ * Handles {@linkplain jakarta.persistence.Embedded embedded} mappings.
+ *
+ * @author Gavin King
+ */
+@Internal
+public class ComponentType extends AbstractType
+		implements CompositeTypeImplementor, ProcedureParameterExtractionAware {
+	private final Class<?> componentClass;
+	private final boolean mutable;
+
+	private final String[] propertyNames;
+	private final Type[] propertyTypes;
+	private final boolean[] propertyNullability;
+	private final int[] originalPropertyOrder;
+	protected final int propertySpan;
+	private final CascadeStyle[] cascade;
+	private final OnDeleteAction[] onDeleteAction;
+	private final FetchStyle[] joinedFetch;
+	private final int discriminatorColumnSpan;
+
+	private final boolean isAggregate;
+	private final boolean isKey;
+	private boolean hasNotNullProperty;
+	private boolean hasNullProperty;
+
+	private EmbeddableValuedModelPart mappingModelPart;
+
+	public ComponentType(Component component, int[] originalPropertyOrder) {
+		this( component, originalPropertyOrder, !component.isRecord() );
+	}
+
+	public ComponentType(Component component, int[] originalPropertyOrder, boolean mutable) {
+		this.componentClass = component.isDynamic() ? Map.class : component.getComponentClass();
+		this.mutable = mutable;
+		this.isAggregate = component.getAggregateColumn() != null;
+		this.isKey = component.isKey();
+		this.propertySpan = component.getPropertySpan();
+		this.originalPropertyOrder = originalPropertyOrder;
+		final var discriminator = component.getDiscriminator();
+		final int length = propertySpan + (component.isPolymorphic() ? 1 : 0);
+		this.propertyNames = new String[length];
+		this.propertyTypes = new Type[length];
+		this.propertyNullability = new boolean[length];
+		this.cascade = new CascadeStyle[length];
+		this.onDeleteAction = new OnDeleteAction[length];
+		this.joinedFetch = new FetchStyle[length];
+
+		final boolean supportsCascadeDelete =
+				component.getBuildingContext().getMetadataCollector()
+						.getDatabase().getDialect()
+						.getForeignKeySupport().supportsOnDeleteAction( org.hibernate.annotations.OnDeleteAction.CASCADE );
+
+		int i = 0;
+		for ( var property : component.getProperties() ) {
+			this.propertyNames[i] = property.getName();
+			this.propertyTypes[i] = property.getValue().getType();
+			this.propertyNullability[i] = property.isOptional();
+			this.cascade[i] = property.getCascadeStyle();
+			this.joinedFetch[i] = property.getValue().getFetchStyle();
+			onDeleteAction[i] = supportsCascadeDelete ? property.getOnDeleteAction() : null;
+			if ( !property.isOptional() ) {
+				hasNotNullProperty = true;
+			}
+			else {
+				hasNullProperty = true;
+			}
+			i++;
+		}
+		if ( discriminator != null ) {
+			this.discriminatorColumnSpan = discriminator.getColumnSpan();
+			this.propertyNames[i] = DISCRIMINATOR_ROLE_NAME;
+			this.propertyTypes[i] = component.getDiscriminatorType();
+			this.propertyNullability[i] = false;
+			this.cascade[i] = CascadeStyles.NONE;
+			this.joinedFetch[i] = FetchStyle.SELECT;
+		}
+		else {
+			this.discriminatorColumnSpan = 0;
+		}
+	}
+
+	private boolean isAggregate() {
+		return isAggregate;
+	}
+
+	public boolean isKey() {
+		return isKey;
+	}
+
+	@Override
+	public int getColumnSpan(MappingContext mapping) throws MappingException {
+		int span = 0;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			span += propertyTypes[i].getColumnSpan( mapping );
+		}
+		span += discriminatorColumnSpan;
+		return span;
+	}
+
+	@Override
+	public int[] getSqlTypeCodes(MappingContext mappingContext) throws MappingException {
+		//Not called at runtime so doesn't matter if it's slow :)
+		final var sqlTypes = new int[getColumnSpan( mappingContext )];
+		int n = 0;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			int[] subtypes = propertyTypes[i].getSqlTypeCodes( mappingContext );
+			for ( int subtype : subtypes ) {
+				sqlTypes[n++] = subtype;
+			}
+		}
+		return sqlTypes;
+	}
+
+
+	@Override
+	public final boolean isComponentType() {
+		return true;
+	}
+
+	@Override
+	public PersistenceType getPersistenceType() {
+		return EMBEDDABLE;
+	}
+
+	public Class<?> getReturnedClass() {
+		return componentClass;
+	}
+
+	@Override
+	public boolean isSame(Object x, Object y) throws HibernateException {
+		if ( x == y ) {
+			return true;
+		}
+		// null value and empty component are considered equivalent
+		final var xvalues = getPropertyValues( x );
+		final var yvalues = getPropertyValues( y );
+		for ( int i = 0; i < propertySpan; i++ ) {
+			if ( !propertyTypes[i].isSame( xvalues[i], yvalues[i] ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public boolean isEqual(final Object x, final Object y) throws HibernateException {
+		if ( x == y ) {
+			return true;
+		}
+		// null value and empty component are considered equivalent
+		for ( int i = 0; i < propertySpan; i++ ) {
+			if ( !propertyTypes[i].isEqual( getPropertyValue( x, i ), getPropertyValue( y, i ) ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public boolean isEqual(final Object x, final Object y, final SessionFactoryImplementor factory)
+			throws HibernateException {
+		if ( x == y ) {
+			return true;
+		}
+		// null value and empty component are considered equivalent
+		for ( int i = 0; i < propertySpan; i++ ) {
+			if ( !propertyTypes[i].isEqual( getPropertyValue( x, i ), getPropertyValue( y, i ), factory ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public int compare(final Object x, final Object y) {
+		if ( x == y ) {
+			return 0;
+		}
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final int propertyCompare =
+					propertyTypes[i].compare( getPropertyValue( x, i ), getPropertyValue( y, i ) );
+			if ( propertyCompare != 0 ) {
+				return propertyCompare;
+			}
+		}
+		return 0;
+	}
+
+	@Override
+	public int compare(Object x, Object y, SessionFactoryImplementor sessionFactory) {
+		if ( x == y ) {
+			return 0;
+		}
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final int propertyCompare =
+					propertyTypes[i].compare( getPropertyValue( x, i ), getPropertyValue( y, i ), sessionFactory );
+			if ( propertyCompare != 0 ) {
+				return propertyCompare;
+			}
+		}
+		return 0;
+	}
+
+	public boolean isMethodOf(Method method) {
+		return false;
+	}
+
+	@Override
+	public int getHashCode(final Object x) {
+		int result = 17;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final Object y = getPropertyValue( x, i );
+			result *= 37;
+			if ( y != null ) {
+				result += propertyTypes[i].getHashCode( y );
+			}
+		}
+		return result;
+	}
+
+	@Override
+	public int getHashCode(final Object x, final SessionFactoryImplementor factory) {
+		int result = 17;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final Object y = getPropertyValue( x, i );
+			result *= 37;
+			if ( y != null ) {
+				result += propertyTypes[i].getHashCode( y, factory );
+			}
+		}
+		return result;
+	}
+
+	@Override
+	public boolean isDirty(final Object x, final Object y, final SharedSessionContractImplementor session)
+			throws HibernateException {
+		if ( x == y ) {
+			return false;
+		}
+		// null value and empty component are considered equivalent
+		for ( int i = 0; i < propertySpan; i++ ) {
+			if ( propertyTypes[i].isDirty( getPropertyValue( x, i ), getPropertyValue( y, i ), session ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public boolean isDirty(final Object x, final Object y, final boolean[] checkable, final SharedSessionContractImplementor session)
+			throws HibernateException {
+		if ( x == y ) {
+			return false;
+		}
+		// null value and empty component are considered equivalent
+		final var context = session.getFactory().getRuntimeMetamodels();
+		int loc = 0;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final int len = propertyTypes[i].getColumnSpan( context );
+			if ( len <= 1 ) {
+				final boolean dirty = ( len == 0 || checkable[loc] ) &&
+						propertyTypes[i].isDirty( getPropertyValue( x, i ), getPropertyValue( y, i ), session );
+				if ( dirty ) {
+					return true;
+				}
+			}
+			else {
+				final var subcheckable = new boolean[len];
+				System.arraycopy( checkable, loc, subcheckable, 0, len );
+				final boolean dirty = propertyTypes[i].isDirty(
+						getPropertyValue( x, i ),
+						getPropertyValue( y, i ),
+						subcheckable,
+						session
+				);
+				if ( dirty ) {
+					return true;
+				}
+			}
+			loc += len;
+		}
+		return false;
+	}
+
+	@Override
+	public boolean isModified(
+			final Object old,
+			final Object current,
+			final boolean[] checkable,
+			final SharedSessionContractImplementor session) throws HibernateException {
+		if ( old == current ) {
+			return false;
+		}
+		// null value and empty components are considered equivalent
+		final var context = session.getFactory().getRuntimeMetamodels();
+		int loc = 0;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final int len = propertyTypes[i].getColumnSpan( context );
+			final var subcheckable = new boolean[len];
+			System.arraycopy( checkable, loc, subcheckable, 0, len );
+			if ( propertyTypes[i].isModified( getPropertyValue( old, i ),
+					getPropertyValue( current, i ), subcheckable, session ) ) {
+				return true;
+			}
+			loc += len;
+		}
+		return false;
+
+	}
+
+	@Override
+	public void nullSafeSet(PreparedStatement st, Object value, int begin, SharedSessionContractImplementor session)
+			throws HibernateException, SQLException {
+		final var context = session.getFactory().getRuntimeMetamodels();
+		final var subvalues = nullSafeGetValues( value );
+		for ( int i = 0; i < propertySpan; i++ ) {
+			propertyTypes[i].nullSafeSet( st, subvalues[i], begin, session );
+			begin += propertyTypes[i].getColumnSpan( context );
+		}
+	}
+
+	@Override
+	public void nullSafeSet(
+			PreparedStatement st,
+			Object value,
+			int begin,
+			boolean[] settable,
+			SharedSessionContractImplementor session)
+			throws HibernateException, SQLException {
+		final var context = session.getFactory().getRuntimeMetamodels();
+		final var subvalues = nullSafeGetValues( value );
+		int loc = 0;
+		for ( int i = 0; i < propertySpan; i++ ) {
+			int len = propertyTypes[i].getColumnSpan( context );
+			//noinspection StatementWithEmptyBody
+			if ( len == 0 ) {
+				//noop
+			}
+			else if ( len == 1 ) {
+				if ( settable[loc] ) {
+					propertyTypes[i].nullSafeSet( st, subvalues[i], begin, session );
+					begin++;
+				}
+			}
+			else {
+				final boolean[] subsettable = new boolean[len];
+				System.arraycopy( settable, loc, subsettable, 0, len );
+				propertyTypes[i].nullSafeSet( st, subvalues[i], begin, subsettable, session );
+				begin += ArrayHelper.countTrue( subsettable );
+			}
+			loc += len;
+		}
+	}
+
+	private Object[] nullSafeGetValues(Object value) {
+		return value == null
+				? new Object[ propertySpan ]
+				: getPropertyValues( value );
+	}
+
+	@Override
+	public Object getPropertyValue(Object component, int i, SharedSessionContractImplementor session)
+			throws HibernateException {
+		return getPropertyValue( component, i );
+	}
+
+	public Object getPropertyValue(Object component, int i) {
+		if ( component == null ) {
+			return null;
+		}
+		else if ( component instanceof Object[] array ) {
+			// A few calls to hashCode pass the property values already in an
+			// Object[] (ex: QueryKey hash codes for cached queries).
+			// It's easiest to just check for the condition here prior to
+			// trying reflection.
+			return array[i];
+		}
+		else {
+			final var embeddableMappingType = embeddableTypeDescriptor();
+			if ( embeddableMappingType.isPolymorphic() ) {
+				final var concreteEmbeddableType =
+						embeddableMappingType.findSubtypeBySubclass( component.getClass().getName() );
+				return concreteEmbeddableType.declaresAttribute( i )
+						? embeddableMappingType.getValue( component, i )
+						: null;
+			}
+			else {
+				return embeddableMappingType.getValue( component, i );
+			}
+		}
+	}
+
+	@Override
+	public Object[] getPropertyValues(Object component, SharedSessionContractImplementor session) {
+		return getPropertyValues( component );
+	}
+
+	@Override
+	public Object[] getPropertyValues(Object component) {
+		if (component == null) {
+			return new Object[propertySpan + discriminatorColumnSpan];
+		}
+		else if ( component instanceof Object[] array ) {
+			// A few calls to hashCode pass the property values already in an
+			// Object[] (ex: QueryKey hash codes for cached queries).
+			// It's easiest to just check for the condition here prior to
+			// trying reflection.
+			return array;
+		}
+		else {
+			return embeddableTypeDescriptor().getValues( component );
+		}
+	}
+
+	@Override
+	public void setPropertyValues(Object component, Object[] values) {
+		embeddableTypeDescriptor().setValues( component, values );
+	}
+
+	@Override
+	public Type[] getSubtypes() {
+		return propertyTypes;
+	}
+
+	@Override
+	public String getName() {
+		return "component" + ArrayHelper.toString( propertyNames );
+	}
+
+	@Override
+	public String toLoggableString(Object value, SessionFactoryImplementor factory)
+			throws HibernateException {
+		if ( value == null ) {
+			return "null";
+		}
+		else {
+			final Map<String, String> result = new HashMap<>();
+			final var values = getPropertyValues( value );
+			for ( int i = 0; i < propertyTypes.length; i++ ) {
+				if ( values[i] == LazyPropertyInitializer.UNFETCHED_PROPERTY ) {
+					result.put( propertyNames[i], "<uninitialized>" );
+				}
+				else {
+					result.put( propertyNames[i], propertyTypes[i].toLoggableString( values[i], factory ) );
+				}
+			}
+			return unqualify( getName() ) + result;
+		}
+	}
+
+	@Override
+	public String[] getPropertyNames() {
+		return propertyNames;
+	}
+
+	@Override
+	public Object deepCopy(Object component, SessionFactoryImplementor factory) {
+		if ( component == null ) {
+			return null;
+		}
+		else {
+			final var values = getPropertyValues( component );
+			for ( int i = 0; i < propertySpan; i++ ) {
+				values[i] = propertyTypes[i].deepCopy( values[i], factory );
+			}
+
+			final Object result = instantiator( component ).instantiate( () -> values );
+
+			//not absolutely necessary, but helps for some
+			//equals()/hashCode() implementations
+			final var parentAccess = mappingModelPart().getParentInjectionAttributePropertyAccess();
+			if ( parentAccess != null ) {
+				parentAccess.getPropertyValueAccessor().set( result, parentAccess.getPropertyValueAccessor().get( component ) );
+			}
+
+			return result;
+		}
+	}
+
+	@Override
+	public Object replace(
+			Object original,
+			Object target,
+			SharedSessionContractImplementor session,
+			Object owner,
+			Map<Object, Object> copyCache) {
+		if ( original == null ) {
+			return null;
+		}
+		else {
+			final Object[] originalValues = getPropertyValues( original );
+			final Object[] resultValues = getPropertyValues( target );
+			final Object[] replacedValues = TypeHelper.replace(
+					originalValues,
+					resultValues,
+					propertyTypes,
+					session,
+					owner,
+					copyCache
+			);
+
+			if ( target == null || !isMutable() || embeddableTypeDescriptor().isPolymorphic() ) {
+				return instantiator( original ).instantiate( () -> replacedValues );
+			}
+			else {
+				setPropertyValues( target, replacedValues );
+				return target;
+			}
+		}
+	}
+
+	@Override
+	public Object replace(
+			Object original,
+			Object target,
+			SharedSessionContractImplementor session,
+			Object owner,
+			Map<Object, Object> copyCache,
+			ForeignKeyDirection foreignKeyDirection) {
+		if ( original == null ) {
+			return null;
+		}
+		else {
+			final Object[] originalValues = getPropertyValues( original );
+			final Object[] resultValues = getPropertyValues( target );
+			final Object[] replacedValues = TypeHelper.replace(
+					originalValues,
+					resultValues,
+					propertyTypes,
+					session,
+					owner,
+					copyCache,
+					foreignKeyDirection
+			);
+
+			if ( target == null || !isMutable() || embeddableTypeDescriptor().isPolymorphic() ) {
+				return instantiator( original ).instantiate( () -> replacedValues );
+			}
+			else {
+				setPropertyValues( target, replacedValues );
+				return target;
+			}
+		}
+	}
+
+	@Override
+	public CascadeStyle getCascadeStyle(int i) {
+		return cascade[i];
+	}
+
+	@Override
+	public OnDeleteAction getOnDeleteAction(int i) {
+		return onDeleteAction[i];
+	}
+
+	@Override
+	public boolean isMutable() {
+		return mutable;
+	}
+
+	@Override
+	public Serializable disassemble(Object value, SharedSessionContractImplementor session, Object owner)
+			throws HibernateException {
+		if ( value == null ) {
+			return null;
+		}
+		else {
+			final var mappingType = embeddableTypeDescriptor();
+			final boolean polymorphic = mappingType.isPolymorphic();
+			final var values = new Object[propertySpan + (polymorphic ? 1 : 0)];
+			final var propertyValues = getPropertyValues( value );
+			int i = 0;
+			for ( ; i < propertySpan; i++ ) {
+				values[i] = propertyTypes[i].disassemble( propertyValues[i], session, owner );
+			}
+			if ( polymorphic ) {
+				final var discriminatorMapping = mappingType.getDiscriminatorMapping();
+				final Object discriminatorValue =
+						discriminatorMapping.getDiscriminatorValue( value.getClass().getName() );
+				values[i] = discriminatorMapping.disassemble( discriminatorValue, session );
+			}
+			return values;
+		}
+	}
+
+	@Override
+	public Serializable disassemble(Object value, SessionFactoryImplementor sessionFactory)
+			throws HibernateException {
+		if ( value == null ) {
+			return null;
+		}
+		else {
+			final var mappingType = embeddableTypeDescriptor();
+			final boolean polymorphic = mappingType.isPolymorphic();
+			final var values = new Object[propertySpan + (polymorphic ? 1 : 0)];
+			final var propertyValues = getPropertyValues( value );
+			int i = 0;
+			for ( ; i < propertyTypes.length; i++ ) {
+				values[i] = propertyTypes[i].disassemble( propertyValues[i], sessionFactory );
+			}
+			if ( polymorphic ) {
+				final var discriminatorMapping = mappingType.getDiscriminatorMapping();
+				final Object discriminatorValue =
+						discriminatorMapping.getDiscriminatorValue( value.getClass().getName() );
+				values[i] = discriminatorMapping.disassemble( discriminatorValue, null );
+			}
+			return values;
+		}
+	}
+
+	@Override
+	public Object assemble(Serializable object, SharedSessionContractImplementor session, Object owner)
+			throws HibernateException {
+		if ( object == null ) {
+			return null;
+		}
+		else {
+			final var mappingType = embeddableTypeDescriptor();
+			final var values = (Object[]) object;
+			final boolean polymorphic = mappingType.isPolymorphic();
+			final var assembled = new Object[values.length - ( polymorphic ? 1 : 0 )];
+			int i = 0;
+			for ( ; i < assembled.length; i++ ) {
+				assembled[i] = propertyTypes[i].assemble( (Serializable) values[i], session, owner );
+			}
+
+			final var representation = mappingType.getRepresentationStrategy();
+			final var instantiator = polymorphic
+					? representation.getInstantiatorForDiscriminator( values[i] )
+					: representation.getInstantiator();
+			final Object instance = instantiator.instantiate( () -> assembled );
+
+			final var parentInjectionAccess = mappingModelPart.getParentInjectionAttributePropertyAccess();
+			if ( parentInjectionAccess != null ) {
+				parentInjectionAccess.getPropertyValueAccessor().set( instance, owner );
+			}
+
+			return instance;
+		}
+	}
+
+	@Override
+	public FetchStyle getFetchStyle(int i) {
+		return joinedFetch[i];
+	}
+
+	@Override
+	public boolean[] getPropertyNullability() {
+		return propertyNullability;
+	}
+
+	@Override
+	public boolean[] toColumnNullness(Object value, MappingContext mapping) {
+		final var result = new boolean[getColumnSpan( mapping )];
+		if ( value != null ) {
+			final var values = getPropertyValues( value ); //TODO!!!!!!!
+			int loc = 0;
+			for ( int i = 0; i < propertyTypes.length; i++ ) {
+				final var propertyNullness = propertyTypes[i].toColumnNullness( values[i], mapping );
+				System.arraycopy( propertyNullness, 0, result, loc, propertyNullness.length );
+				loc += propertyNullness.length;
+			}
+		}
+		return result;
+	}
+
+	@Override
+	public boolean isEmbedded() {
+		return false;
+	}
+
+	@Override
+	public int getPropertyIndex(String name) {
+		final var names = getPropertyNames();
+		for ( int i = 0, max = names.length; i < max; i++ ) {
+			if ( names[i].equals( name ) ) {
+				return i;
+			}
+		}
+		throw new PropertyNotFoundException(
+				"Could not resolve attribute '" + name + "' of '" + getReturnedClassName() + "'"
+					+ " (must be one of '" + String.join("', '", names) + "')"
+		);
+	}
+
+	public int[] getOriginalPropertyOrder() {
+		return originalPropertyOrder;
+	}
+
+	private Boolean canDoExtraction;
+
+	@Override
+	public boolean canDoExtraction() {
+		if ( canDoExtraction == null ) {
+			canDoExtraction = determineIfProcedureParamExtractionCanBePerformed();
+		}
+		return canDoExtraction;
+	}
+
+	@Override
+	public JdbcType getJdbcType() {
+		final var aggregateMapping = embeddableTypeDescriptor().getAggregateMapping();
+		return aggregateMapping == null ? null : aggregateMapping.getJdbcMapping().getJdbcType();
+	}
+
+	private boolean determineIfProcedureParamExtractionCanBePerformed() {
+		for ( var propertyType : propertyTypes ) {
+			if ( !( propertyType instanceof ProcedureParameterExtractionAware<?> parameterExtractionAware )
+					|| !parameterExtractionAware.canDoExtraction() ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public Object extract(CallableStatement statement, int startIndex, SharedSessionContractImplementor session)
+			throws SQLException {
+		Object[] values;
+		if ( isAggregate() ) {
+			values = (Object[]) jdbcValueExtractor().extract( statement, startIndex, session );
+		}
+		else {
+			final boolean polymorphic = embeddableTypeDescriptor().isPolymorphic();
+			values = new Object[propertySpan + ( polymorphic ? 1 : 0 )];
+			int currentIndex = startIndex;
+			boolean notNull = false;
+			for ( int i = 0; i < propertySpan; i++ ) {
+				// we know this cast is safe from canDoExtraction
+				final var propertyType = propertyTypes[i];
+				final var extractionAware = (ProcedureParameterExtractionAware<?>) propertyType;
+				final Object value = extractionAware.extract( statement, currentIndex, session );
+				if ( value == null ) {
+					if ( isKey ) {
+						return null; //different nullability rules for pk/fk
+					}
+				}
+				else {
+					notNull = true;
+				}
+				values[i] = value;
+				currentIndex += propertyType.getColumnSpan( session.getFactory().getRuntimeMetamodels() );
+			}
+
+			if ( polymorphic ) {
+				values[currentIndex] =
+						embeddableTypeDescriptor().getDiscriminatorMapping()
+								.getJdbcMapping()
+								.getJdbcValueExtractor()
+								.extract( statement, currentIndex, session );
+			}
+
+			if ( !notNull ) {
+				values = null;
+			}
+		}
+
+		return resolve( values );
+	}
+
+	@Override
+	public Object extract(CallableStatement statement, String paramName, SharedSessionContractImplementor session)
+			throws SQLException {
+		assert isAggregate();
+		return resolve( (Object[]) jdbcValueExtractor().extract( statement, paramName, session ) );
+	}
+
+	private Object resolve(Object[] value) {
+		final var mappingType = embeddableTypeDescriptor();
+		final var representation = mappingType.getRepresentationStrategy();
+		final var instantiator =
+				mappingType.isPolymorphic()
+						// the discriminator here is the composite class because
+						// it gets converted to the domain type when extracted
+						? representation.getInstantiatorForClass( ((Class<?>) value[value.length - 1]).getName() )
+						: representation.getInstantiator();
+		return instantiator.instantiate( () -> value );
+	}
+
+	private EmbeddableMappingType embeddableTypeDescriptor() {
+		return mappingModelPart.getEmbeddableTypeDescriptor();
+	}
+
+	private ValueExtractor<?> jdbcValueExtractor() {
+		return embeddableTypeDescriptor().getAggregateMapping().getJdbcMapping().getJdbcValueExtractor();
+	}
+
+	protected final EmbeddableInstantiator instantiator(Object compositeInstance) {
+		final var mappingType = embeddableTypeDescriptor();
+		final var representationStrategy = mappingType.getRepresentationStrategy();
+		if ( mappingType.isPolymorphic() ) {
+			final String compositeClassName =
+					compositeInstance != null
+							? compositeInstance.getClass().getName()
+							: componentClass.getName();
+			return representationStrategy.getInstantiatorForClass( compositeClassName );
+		}
+		else {
+			return representationStrategy.getInstantiator();
+		}
+	}
+
+	@Override
+	public boolean hasNotNullProperty() {
+		return hasNotNullProperty;
+	}
+
+	@Override
+	public boolean hasNullProperty() {
+		return hasNullProperty;
+	}
+
+	@Override
+	public Class<?> getJavaType() {
+		return getReturnedClass();
+	}
+
+	@Override
+	public SqmEmbeddableDomainType<?> resolveExpressible(BindingContext bindingContext) {
+		return (SqmEmbeddableDomainType<?>) bindingContext.getJpaMetamodel().embeddable( getReturnedClass() );
+	}
+
+	@Override
+	public void injectMappingModelPart(EmbeddableValuedModelPart part, MappingModelCreationProcess process) {
+		mappingModelPart = part;
+	}
+
+	@Override
+	public EmbeddableValuedModelPart getMappingModelPart() {
+		return mappingModelPart;
+	}
+
+	public EmbeddableValuedModelPart mappingModelPart() {
+		if ( mappingModelPart == null ) {
+			throw new IllegalStateException( "Attempt to access EmbeddableValuedModelPart prior to its injection" );
+		}
+		return mappingModelPart;
+	}
+
+	@Override
+	public Object replacePropertyValues(Object component, Object[] values, SharedSessionContractImplementor session)
+			throws HibernateException {
+		return isMutable()
+				? CompositeTypeImplementor.super.replacePropertyValues( component, values, session )
+				: instantiator( component ).instantiate( () -> values );
+	}
+}

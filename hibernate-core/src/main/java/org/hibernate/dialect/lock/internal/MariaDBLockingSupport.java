@@ -1,0 +1,122 @@
+package org.hibernate.dialect.lock.internal;
+
+
+import org.hibernate.LockMode;
+import org.hibernate.dialect.lock.spi.TransactionConcurrencyResolver;
+
+import jakarta.persistence.Timeout;
+import org.hibernate.dialect.DatabaseVersion;
+import org.hibernate.dialect.lock.spi.ConnectionLockTimeoutStrategy;
+import org.hibernate.dialect.lock.spi.LockTimeoutType;
+import org.hibernate.dialect.lock.spi.LockingClauseRenderer;
+import org.hibernate.dialect.lock.spi.LockingClauseRequest;
+import org.hibernate.dialect.lock.spi.LockingSupport;
+import org.hibernate.dialect.lock.spi.OuterJoinLockingType;
+import org.hibernate.dialect.lock.spi.PessimisticLockKind;
+
+import static org.hibernate.Timeouts.NO_WAIT_MILLI;
+import static org.hibernate.Timeouts.SKIP_LOCKED_MILLI;
+import static org.hibernate.Timeouts.WAIT_FOREVER_MILLI;
+import static org.hibernate.dialect.lock.internal.MySQLLockingSupport.MYSQL_CONN_LOCK_TIMEOUT_STRATEGY;
+import static org.hibernate.dialect.lock.spi.LockTimeoutType.NONE;
+import static org.hibernate.dialect.lock.spi.LockTimeoutType.QUERY;
+
+/**
+ * LockingSupport for MariaDBDialect
+ *
+ * @author Steve Ebersole
+ */
+public class MariaDBLockingSupport implements LockingSupport, LockingSupport.Metadata, LockingClauseRenderer {
+	private final LockTimeoutType skipLockedType;
+	private final LockTimeoutType noWaitType;
+	private final LockTimeoutType waitType;
+
+	public MariaDBLockingSupport(boolean supportsSkipLocked, boolean supportsNoWait, boolean supportsWait) {
+		this.skipLockedType = supportsSkipLocked ? QUERY : NONE;
+		this.noWaitType = supportsNoWait ? QUERY : NONE;
+		// Real lock timeouts need to be applied on the Connection
+		// todo (db-locking) : integrate connection-based lock timeouts.  for now report NONE
+		//this.waitType = supportsWait ? CONNECTION : NONE;
+		this.waitType = NONE;
+	}
+
+	public MariaDBLockingSupport(boolean supportsSkipLocked, boolean supportsWait) {
+		this( supportsSkipLocked, supportsWait, supportsWait );
+	}
+
+	public MariaDBLockingSupport(DatabaseVersion databaseVersion) {
+		this( databaseVersion.isSameOrAfter( 10, 6 ), true, true );
+	}
+
+	@Override
+	public boolean canUsePlainReadForRefresh(LockMode currentLockMode, LockMode requestedLockMode) {
+		// Even force increment is insufficient proof: a timestamp version can
+		// repeat, and a same-value UPDATE need not create an own-write row version.
+		// An ordinary read may therefore still consult the earlier snapshot.
+		return false;
+	}
+
+	@Override
+	public TransactionConcurrencyResolver getTransactionConcurrencyResolver() {
+		return MySQLTransactionConcurrencyResolver.INSTANCE;
+	}
+
+	@Override
+	public Metadata getMetadata() {
+		return this;
+	}
+
+	@Override
+	public boolean readsWaitForUncommittedWrites() {
+		// InnoDB uses multiversion concurrency control: a plain read returns the last committed state of a row
+		// without waiting for the outcome of a concurrent uncommitted write
+		return false;
+	}
+
+	@Override
+	public LockingClauseRenderer getLockingClauseRenderer() {
+		return this;
+	}
+
+	@Override
+	public String render(LockingClauseRequest request) {
+		final StringBuilder fragment = new StringBuilder(
+				request.lockKind() == PessimisticLockKind.SHARE
+						? " lock in share mode"
+						: " for update"
+		);
+		switch ( request.timeout().milliseconds() ) {
+			case NO_WAIT_MILLI -> {
+				if ( noWaitType == QUERY ) {
+					fragment.append( " nowait" );
+				}
+			}
+			case SKIP_LOCKED_MILLI -> {
+				if ( skipLockedType == QUERY ) {
+					fragment.append( " skip locked" );
+				}
+			}
+		}
+		return fragment.toString();
+	}
+
+	@Override
+	public LockTimeoutType getLockTimeoutType(Timeout timeout) {
+		return switch ( timeout.milliseconds() ) {
+			case NO_WAIT_MILLI -> noWaitType;
+			case SKIP_LOCKED_MILLI -> skipLockedType;
+			case WAIT_FOREVER_MILLI -> NONE;
+			default -> waitType;
+		};
+	}
+
+	@Override
+	public OuterJoinLockingType getOuterJoinLockingType() {
+		return OuterJoinLockingType.FULL;
+	}
+
+	@Override
+	public ConnectionLockTimeoutStrategy getConnectionLockTimeoutStrategy() {
+		return MYSQL_CONN_LOCK_TIMEOUT_STRATEGY;
+	}
+}

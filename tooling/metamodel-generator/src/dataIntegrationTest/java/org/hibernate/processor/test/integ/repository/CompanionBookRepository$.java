@@ -1,0 +1,12 @@
+package org.hibernate.processor.test.integ.repository;
+
+import jakarta.data.repository.Query;
+import jakarta.data.repository.Repository;
+
+@Repository
+interface CompanionBookRepository$ extends CompanionBookRepository {
+
+	@Override
+	@Query("select count(*) from Book")
+	long countAll();
+}

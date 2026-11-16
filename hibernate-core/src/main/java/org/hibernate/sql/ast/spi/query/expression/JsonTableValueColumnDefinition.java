@@ -1,0 +1,16 @@
+package org.hibernate.sql.ast.spi.query.expression;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * @since 7.0
+ */
+public record JsonTableValueColumnDefinition(
+		String name,
+		CastTarget type,
+		@Nullable String jsonPath,
+		@Nullable JsonValueErrorBehavior errorBehavior,
+		@Nullable JsonValueEmptyBehavior emptyBehavior
+) implements JsonTableColumnDefinition {
+
+}

@@ -1,0 +1,118 @@
+package org.hibernate.engine.config.internal;
+
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+import org.hibernate.boot.registry.classloading.spi.ClassLoadingException;
+import org.hibernate.engine.config.spi.ConfigurationService;
+import org.hibernate.service.spi.ServiceRegistryAwareService;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+
+import jakarta.annotation.Nullable;
+
+import static java.util.Collections.unmodifiableMap;
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+
+/**
+ * The standard {@link ConfigurationService} implementation.
+ *
+ * @author Steve Ebersole
+ */
+public class ConfigurationServiceImpl implements ConfigurationService, ServiceRegistryAwareService {
+
+	private final @Nonnull Map<String, Object> settings;
+	private ServiceRegistryImplementor serviceRegistry;
+
+	/**
+	 * Constructs a ConfigurationServiceImpl
+	 *
+	 * @param settings The map of settings
+	 */
+	public ConfigurationServiceImpl(@Nonnull Map<String, Object> settings) {
+		this.settings = unmodifiableMap( settings );
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, Object> getSettings() {
+		return settings;
+	}
+
+	@Override
+	public void injectServices(@Nonnull ServiceRegistryImplementor serviceRegistry) {
+		this.serviceRegistry = serviceRegistry;
+	}
+
+	@Override
+	public <T> @Nullable T getSetting(@Nonnull String name, @Nonnull Converter<T> converter) {
+		final Object value = settings.get( name );
+		return value == null ? null : converter.convert( value );
+	}
+
+	@Override
+	public <T> @Nonnull T getSetting(
+			@Nonnull String name,
+			@Nonnull Converter<T> converter,
+			@Nonnull T defaultValue) {
+		final Object value = settings.get( name );
+		return value == null ? defaultValue : converter.convert( value );
+	}
+
+	@Override
+	public <T> @Nonnull T getSetting(
+			@Nonnull String name,
+			@Nonnull Class<T> expected,
+			@Nonnull T defaultValue) {
+		final Object value = settings.get( name );
+		final T target = cast( expected, value );
+		return target !=null ? target : defaultValue;
+	}
+
+	public <T> @Nullable T cast(Class<T> expected, @Nullable Object candidate){
+		if ( candidate == null ) {
+			return null;
+		}
+		else if ( expected.isInstance( candidate ) ) {
+			return expected.cast( candidate );
+		}
+		else {
+			final var target = getTargetClass( expected, candidate );
+			return target == null ? null : instantiate( expected, target );
+
+		}
+	}
+
+	private static <T> @Nullable T instantiate(Class<T> expected, Class<? extends T> target) {
+		try {
+			return target.getDeclaredConstructor().newInstance();
+		}
+		catch (Exception e) {
+			//TODO: should this really be a debug-level
+			//      log instead of a proper error?
+			CORE_LOGGER.debugf( "Unable to instantiate %s class %s",
+					expected.getName(), target.getName() );
+			return null;
+		}
+	}
+
+	private <T> @Nullable Class<? extends T> getTargetClass(Class<T> expected, Object candidate) {
+		if ( candidate instanceof Class<?> candidateClass ) {
+			return candidateClass.asSubclass( expected );
+		}
+		else {
+			try {
+				return serviceRegistry.requireService( ClassLoaderService.class )
+						.classForName( candidate.toString() );
+			}
+			catch (ClassLoadingException e) {
+				//TODO: should this really be a debug-level
+				//      log instead of a proper error?
+				CORE_LOGGER.debugf( "Unable to locate %s implementation class %s",
+						expected.getName(), candidate.toString() );
+				return null;
+			}
+		}
+	}
+}

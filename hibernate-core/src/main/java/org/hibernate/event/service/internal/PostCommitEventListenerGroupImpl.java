@@ -1,0 +1,64 @@
+package org.hibernate.event.service.internal;
+
+import org.hibernate.event.spi.EventType;
+import org.hibernate.event.spi.PostCommitDeleteEventListener;
+import org.hibernate.event.spi.PostCommitInsertEventListener;
+import org.hibernate.event.spi.PostCommitUpdateEventListener;
+
+import static org.hibernate.event.internal.EventListenerLogging.EVENT_LISTENER_LOGGER;
+import jakarta.annotation.Nonnull;
+
+/**
+ * Historically, the listeners for the post-commit events simply reused the
+ * contracts from the non-post-commit variants.  That has changed as part of
+ * the work for HHH-1582.  The purpose of this specialized EventListenerGroup
+ * implementation is to recognize cases where post-commit event listeners
+ * are still using the legacy contracts and to issue "deprecation warnings".
+ *
+ * @author Steve Ebersole
+ */
+class PostCommitEventListenerGroupImpl<T> extends EventListenerGroupImpl<T> {
+
+	private final Class<?> extendedListenerContract;
+
+	public PostCommitEventListenerGroupImpl(
+			@Nonnull EventType<T> eventType,
+			boolean isJpaBootstrap) {
+		super( eventType, isJpaBootstrap );
+
+		if ( eventType == EventType.POST_COMMIT_DELETE ) {
+			extendedListenerContract = PostCommitDeleteEventListener.class;
+		}
+		else if ( eventType == EventType.POST_COMMIT_INSERT ) {
+			extendedListenerContract = PostCommitInsertEventListener.class;
+		}
+		else if ( eventType == EventType.POST_COMMIT_UPDATE ) {
+			extendedListenerContract = PostCommitUpdateEventListener.class;
+		}
+		else {
+			throw new IllegalStateException( "Unexpected usage of PostCommitEventListenerGroupImpl" );
+		}
+	}
+
+	@Override
+	public void appendListener(@Nonnull T listener) {
+		checkAgainstExtendedContract( listener );
+		super.appendListener( listener );
+	}
+
+	private void checkAgainstExtendedContract(@Nonnull T listener) {
+		if ( !extendedListenerContract.isInstance( listener ) ) {
+			EVENT_LISTENER_LOGGER.listenerDoesNotImplementExtendedContract(
+					listener.getClass().getName(),
+					getEventType().eventName(),
+					extendedListenerContract.getName()
+			);
+		}
+	}
+
+	@Override
+	public void prependListener(@Nonnull T listener) {
+		checkAgainstExtendedContract( listener );
+		super.prependListener( listener );
+	}
+}

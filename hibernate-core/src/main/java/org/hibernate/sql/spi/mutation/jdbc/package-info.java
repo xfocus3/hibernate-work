@@ -1,0 +1,9 @@
+/**
+ * Extensions to {@link org.hibernate.sql.exec.spi.JdbcOperation} for model mutations.
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "8.0")
+package org.hibernate.sql.spi.mutation.jdbc;
+
+import org.hibernate.Incubating;

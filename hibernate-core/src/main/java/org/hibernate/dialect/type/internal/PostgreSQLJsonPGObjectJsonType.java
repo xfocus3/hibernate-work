@@ -1,0 +1,25 @@
+package org.hibernate.dialect.type.internal;
+
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.type.descriptor.jdbc.AggregateJdbcType;
+
+/**
+ * @author Christian Beikov
+ */
+public class PostgreSQLJsonPGObjectJsonType extends AbstractPostgreSQLJsonPGObjectType {
+	public PostgreSQLJsonPGObjectJsonType() {
+		this( null, false );
+	}
+	private PostgreSQLJsonPGObjectJsonType(EmbeddableMappingType embeddableMappingType, boolean jsonb) {
+		super( embeddableMappingType, jsonb );
+	}
+
+	@Override
+	public AggregateJdbcType resolveAggregateJdbcType(
+			EmbeddableMappingType mappingType,
+			String sqlType,
+			RuntimeModelCreationContext creationContext) {
+		return new PostgreSQLJsonPGObjectJsonType( mappingType, false );
+	}
+}

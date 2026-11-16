@@ -1,0 +1,13 @@
+package org.hibernate.query.sqm.sql.spi;
+
+import org.hibernate.query.sqm.spi.JdbcParameterBySqmParameterAccess;
+import org.hibernate.sql.ast.spi.creation.FromClauseAccess;
+import org.hibernate.sql.ast.spi.Statement;
+
+/**
+ * @author Steve Ebersole
+ */
+public interface SqmTranslator<T extends Statement>
+		extends SqmToSqlAstConverter, FromClauseAccess, JdbcParameterBySqmParameterAccess {
+	SqmTranslation<T> translate();
+}

@@ -1,0 +1,1462 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.MappingException;
+import org.hibernate.cache.MutableCacheKeyBuilder;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.engine.profile.internal.FetchProfileAffectee;
+import org.hibernate.cascade.spi.CascadeStyle;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.Generator;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.mapping.Collection;
+import org.hibernate.mapping.List;
+import org.hibernate.mapping.Map;
+import org.hibernate.mapping.Property;
+import org.hibernate.metamodel.RepresentationMode;
+import org.hibernate.metamodel.mapping.AuditMapping;
+import org.hibernate.metamodel.mapping.AttributeMetadata;
+import org.hibernate.metamodel.mapping.AuxiliaryMapping;
+import org.hibernate.metamodel.mapping.CollectionIdentifierDescriptor;
+import org.hibernate.metamodel.mapping.CollectionMappingType;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.ModelPartContainer;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SoftDeleteMapping;
+import org.hibernate.metamodel.mapping.TableDetails;
+import org.hibernate.metamodel.mapping.TemporalMapping;
+import org.hibernate.metamodel.mapping.ValuedModelPart;
+import org.hibernate.metamodel.mapping.ordering.spi.OrderByFragment;
+import org.hibernate.metamodel.mapping.ordering.OrderByFragmentTranslator;
+import org.hibernate.metamodel.mapping.ordering.TranslationContext;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.metamodel.spi.ManagedTypeRepresentationStrategy;
+import org.hibernate.models.spi.ClassDetails;
+import org.hibernate.models.spi.FieldDetails;
+import org.hibernate.models.spi.MemberDetails;
+import org.hibernate.models.spi.MethodDetails;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.action.queue.spi.decompose.collection.CollectionMutationTarget;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.from.SqlAstJoinType;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseGenerator;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBase;
+import org.hibernate.sql.ast.spi.creation.SqlAliasStemHelper;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.ast.spi.query.from.CollectionTableGroup;
+import org.hibernate.sql.ast.spi.query.from.AuxiliaryTableReference;
+import org.hibernate.sql.ast.spi.query.from.NamedTableReference;
+import org.hibernate.sql.ast.spi.query.from.OneToManyTableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroupJoin;
+import org.hibernate.sql.ast.spi.query.from.TableGroupJoinProducer;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.ast.spi.query.predicate.PredicateCollector;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.sql.results.graph.Fetch;
+import org.hibernate.sql.results.graph.FetchOptions;
+import org.hibernate.sql.results.graph.FetchParent;
+import org.hibernate.sql.results.graph.collection.internal.CollectionDomainResult;
+import org.hibernate.sql.results.graph.collection.internal.DelayedCollectionFetch;
+import org.hibernate.sql.results.graph.collection.internal.EagerCollectionFetch;
+import org.hibernate.sql.results.graph.collection.internal.SelectEagerCollectionFetch;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static java.util.Locale.ROOT;
+import static org.hibernate.internal.util.StringHelper.subStringNullIfEmpty;
+import static org.hibernate.sql.ast.internal.TableGroupJoinHelper.determineJoinForPredicateApply;
+
+
+/**
+ * @author Steve Ebersole
+ */
+public class PluralAttributeMappingImpl
+		extends AbstractAttributeMapping
+		implements PluralAttributeMapping, FetchProfileAffectee, FetchOptions {
+
+	/**
+	 * Allows callback after creation of the attribute mapping.
+	 *
+	 * Support for the {@linkplain CollectionPersister collection},
+	 * {@linkplain CollectionPart element} and {@linkplain CollectionPart index}
+	 * descriptors
+	 */
+	public interface Aware {
+		/**
+		 * Injects the created attribute mapping
+		 */
+		void injectAttributeMapping(PluralAttributeMapping attributeMapping);
+	}
+
+	private final CollectionMappingType<?> collectionMappingType;
+	private final String referencedPropertyName;
+	@Nullable private final String mapKeyPropertyName;
+
+	private final CollectionPart elementDescriptor;
+	@Nullable private final CollectionPart indexDescriptor;
+	@Nullable private final CollectionIdentifierDescriptor identifierDescriptor;
+	private final FetchTiming fetchTiming;
+	private final FetchStyle fetchStyle;
+	@Nullable
+	private final AuxiliaryMapping auxiliaryMapping;
+
+	private final String bidirectionalAttributeName;
+
+	private final CollectionPersister collectionDescriptor;
+	@Nullable private final String separateCollectionTable;
+
+	private final String sqlAliasStem;
+
+	private final IndexMetadata indexMetadata;
+
+	@SuppressWarnings("NullAway.Init") // Assigned during mapping model initialization.
+	private ForeignKeyDescriptor fkDescriptor;
+
+	@Nullable private OrderByFragment orderByFragment;
+	@Nullable private OrderByFragment manyToManyOrderByFragment;
+
+	public PluralAttributeMappingImpl(
+			String attributeName,
+			Collection bootDescriptor,
+			PropertyAccess propertyAccess,
+			AttributeMetadata attributeMetadata,
+			CollectionMappingType<?> collectionMappingType,
+			int stateArrayPosition,
+			int fetchableIndex,
+			CollectionPart elementDescriptor,
+			@Nullable CollectionPart indexDescriptor,
+			@Nullable CollectionIdentifierDescriptor identifierDescriptor,
+			FetchTiming fetchTiming,
+			FetchStyle fetchStyle,
+			CascadeStyle cascadeStyle,
+			ManagedMappingType declaringType,
+			CollectionPersister collectionDescriptor,
+			MappingModelCreationProcess creationProcess) {
+		super( attributeName, fetchableIndex, declaringType, attributeMetadata, stateArrayPosition, propertyAccess );
+		this.collectionMappingType = collectionMappingType;
+		this.elementDescriptor = elementDescriptor;
+		this.indexDescriptor = indexDescriptor;
+		this.identifierDescriptor = identifierDescriptor;
+		this.fetchTiming = fetchTiming;
+		this.fetchStyle = fetchStyle;
+		this.collectionDescriptor = collectionDescriptor;
+		this.referencedPropertyName = bootDescriptor.getReferencedPropertyName();
+
+		mapKeyPropertyName = bootDescriptor instanceof Map map ? map.getMapKeyPropertyName() : null;
+
+		bidirectionalAttributeName = subStringNullIfEmpty( bootDescriptor.getMappedByProperty(), '.');
+
+		sqlAliasStem = SqlAliasStemHelper.INSTANCE.generateStemFromAttributeName( attributeName );
+
+		separateCollectionTable = bootDescriptor.isOneToMany() ? null : collectionDescriptor.getTableName();
+
+		final int baseIndex = bootDescriptor instanceof List list ? list.getBaseIndex() : -1;
+		indexMetadata = new IndexMetadata() {
+			@Nullable
+			@Override
+			public CollectionPart getIndexDescriptor() {
+				return indexDescriptor;
+			}
+
+			@Override
+			public int getListIndexBase() {
+				return baseIndex;
+			}
+
+			@Nullable
+			@Override
+			public String getIndexPropertyName() {
+				return mapKeyPropertyName;
+			}
+		};
+
+		auxiliaryMapping =
+				bootDescriptor.getStateManagement()
+						.createAuxiliaryMapping( this, bootDescriptor, creationProcess );
+
+		injectAttributeMapping( elementDescriptor, indexDescriptor, collectionDescriptor, this );
+
+		if ( elementDescriptor instanceof EntityCollectionPart elementMapping ) {
+			validateTargetEntity( elementMapping, declaringType, attributeName, propertyAccess, creationProcess );
+		}
+	}
+
+	/**
+	 * @implNote This is check based on best effort.  If we are not able to resolve
+	 * something needed for the check we simply short-circuit in the "affirmative".
+	 * In testing, this mainly manifested in cases with embeddable inheritance
+	 * given how the EmbeddableMappingType is built and an inability to locate
+	 * subtype members.
+	 */
+	private static void validateTargetEntity(
+			EntityCollectionPart elementPart,
+			ManagedMappingType declaringType,
+			String attributeName,
+			PropertyAccess propertyAccess,
+			MappingModelCreationProcess creationProcess) {
+		final var representationStrategy = typeRepresentationStrategy( declaringType );
+		if ( representationStrategy != null
+				// nothing to check against with dynamic models
+				&& representationStrategy.getMode() == RepresentationMode.POJO ) {
+			final var attributeMemberDetails =
+					getMemberDetails( attributeName, propertyAccess,
+							declaringClassDetails( declaringType, creationProcess ) );
+			if ( attributeMemberDetails != null ) {
+				checkElementType( elementPart, declaringType, attributeName, attributeMemberDetails );
+			}
+			// else usually indicates the case of embeddable
+			// inheritance mentioned in the @implNote
+		}
+	}
+
+	private static ClassDetails declaringClassDetails(
+			ManagedMappingType declaringType,
+			MappingModelCreationProcess creationProcess) {
+		return creationProcess.getCreationContext().getBootstrapContext()
+				.getModelsContext().getClassDetailsRegistry()
+				.resolveClassDetails( declaringType.getJavaType().getTypeName() );
+	}
+
+	private static void checkElementType(
+			EntityCollectionPart elementPart,
+			ManagedMappingType declaringType,
+			String attributeName,
+			MemberDetails attributeMemberDetails) {
+		final var elementType =
+				attributeMemberDetails.getElementType()
+						.determineRawClass().toJavaClass();
+		if ( !Object.class.equals( elementType ) ) {
+			final var targetType = elementPart.getJavaType().getJavaTypeClass();
+			if ( !elementType.isAssignableFrom( targetType ) ) {
+				throw new MappingException(
+						String.format(
+								ROOT,
+								"Plural attribute [%s.%s] was mapped with targetEntity=`%s`,"
+										+ " but the attribute is declared as `%s`",
+								castNonNull( declaringType.getNavigableRole() ).getFullPath(),
+								attributeName,
+								targetType.getName(),
+								elementType.getName()
+						)
+				);
+			}
+		}
+	}
+
+	private static @Nullable MemberDetails getMemberDetails(
+			String attributeName, PropertyAccess propertyAccess, ClassDetails declaringClassDetails) {
+		final var member = propertyAccess.getGetter().getMember();
+		if ( member instanceof Field ) {
+			return locateField( declaringClassDetails, attributeName );
+		}
+		else if ( member instanceof Method method ) {
+			return locateGetter( declaringClassDetails, method );
+		}
+		else {
+			// we need access to the field or getter...
+			return null;
+		}
+	}
+
+	private static @Nullable ManagedTypeRepresentationStrategy typeRepresentationStrategy(ManagedMappingType declaringType) {
+		if ( declaringType instanceof EntityMappingType declaringEntityType ) {
+			return declaringEntityType.getRepresentationStrategy();
+		}
+		else if ( declaringType instanceof EmbeddableMappingType declaringEmbeddableType ) {
+			return declaringEmbeddableType.getRepresentationStrategy();
+		}
+		else {
+			// should never happen, but be lenient
+			return null;
+		}
+	}
+
+	/**
+	 * Locate the corresponding field details.
+	 *
+	 * @return The field details, or {@code null} if we cannot locate it.
+	 *
+	 * @implNote See `implNote` on {@linkplain #validateTargetEntity} for details
+	 * about why we return {@code null} instead of throwing an exception.
+	 */
+	@Nullable
+	private static FieldDetails locateField(ClassDetails declaringClassDetails, String attributeName) {
+		assert declaringClassDetails != null;
+		var classDetails = declaringClassDetails;
+		while ( classDetails != null && classDetails != ClassDetails.OBJECT_CLASS_DETAILS ) {
+			final var fieldDetails = classDetails.findFieldByName( attributeName );
+			if ( fieldDetails != null ) {
+				return fieldDetails;
+			}
+			classDetails = classDetails.getSuperClass();
+		}
+		return null;
+	}
+
+	/**
+	 * Locate the corresponding getter method details.
+	 *
+	 * @return The getter method details, or {@code null} if we cannot locate it.
+	 *
+	 * @implNote See `implNote` on {@linkplain #validateTargetEntity} for details
+	 * about why we return {@code null} instead of throwing an exception.
+	 */
+	@Nullable
+	private static MethodDetails locateGetter(ClassDetails declaringClassDetails, Method method) {
+		assert declaringClassDetails != null;
+		var classDetails = declaringClassDetails;
+		while ( classDetails != null && classDetails != ClassDetails.OBJECT_CLASS_DETAILS ) {
+			for ( int i = 0; i < classDetails.getMethods().size(); i++ ) {
+				final var methodDetails = classDetails.getMethods().get(i);
+				if ( methodDetails.getName().equals( method.getName() )
+						&& methodDetails.getMethodKind() == MethodDetails.MethodKind.GETTER ) {
+					return methodDetails;
+				}
+			}
+			classDetails = classDetails.getSuperClass();
+		}
+		return null;
+	}
+
+
+	/**
+	 * For Hibernate Reactive
+	 */
+	protected PluralAttributeMappingImpl(PluralAttributeMappingImpl original) {
+		super( original );
+		this.collectionMappingType = original.collectionMappingType;
+		this.elementDescriptor = original.elementDescriptor;
+		this.indexDescriptor = original.indexDescriptor;
+		this.identifierDescriptor = original.identifierDescriptor;
+		this.fetchTiming = original.fetchTiming;
+		this.fetchStyle = original.fetchStyle;
+		this.collectionDescriptor = original.collectionDescriptor;
+		this.referencedPropertyName = original.referencedPropertyName;
+		this.mapKeyPropertyName = original.mapKeyPropertyName;
+		this.bidirectionalAttributeName = original.bidirectionalAttributeName;
+		this.sqlAliasStem = original.sqlAliasStem;
+		this.separateCollectionTable = original.separateCollectionTable;
+		this.indexMetadata = original.indexMetadata;
+		this.fkDescriptor = original.fkDescriptor;
+		this.orderByFragment = original.orderByFragment;
+		this.manyToManyOrderByFragment = original.manyToManyOrderByFragment;
+		this.auxiliaryMapping = original.auxiliaryMapping;
+		injectAttributeMapping( elementDescriptor, indexDescriptor, collectionDescriptor, this );
+	}
+
+	private static void injectAttributeMapping(
+			CollectionPart elementDescriptor,
+			@Nullable CollectionPart indexDescriptor,
+			CollectionPersister collectionDescriptor,
+			PluralAttributeMapping mapping) {
+		if ( collectionDescriptor instanceof Aware aware ) {
+			aware.injectAttributeMapping( mapping );
+		}
+
+		if ( elementDescriptor instanceof Aware aware ) {
+			aware.injectAttributeMapping( mapping );
+		}
+
+		if ( indexDescriptor instanceof Aware aware ) {
+			aware.injectAttributeMapping( mapping );
+		}
+	}
+
+	@Override
+	public boolean isBidirectionalAttributeName(@Nonnull NavigablePath fetchablePath, @Nonnull ToOneAttributeMapping modelPart) {
+		return bidirectionalAttributeName == null
+				// If the FK-target of the to-one mapping is the same as the FK-target of this one-to-many mapping,
+				// and the FK-key refer to the same column then we say this is bidirectional,
+				// given that this is only invoked for model parts of the collection elements
+				? modelPart.getSideNature() == ForeignKeyDescriptor.Nature.KEY
+						&& collectionDescriptor.isOneToMany()
+						&& fkDescriptor.getTargetPart() == modelPart.getForeignKeyDescriptor().getTargetPart()
+						&& areEqual( fkDescriptor.getKeyPart(), modelPart.getForeignKeyDescriptor().getKeyPart() )
+				: fetchablePath.getLocalName().equals( bidirectionalAttributeName );
+	}
+
+	private boolean areEqual(ValuedModelPart part1, ValuedModelPart part2) {
+		final int typeCount = part1.getJdbcTypeCount();
+		if ( part2.getJdbcTypeCount() != typeCount ) {
+			return false;
+		}
+		for ( int i = 0; i < typeCount; i++ ) {
+			final var selectable1 = part1.getSelectable( i );
+			final var selectable2 = part2.getSelectable( i );
+			if ( selectable1.getJdbcMapping() != selectable2.getJdbcMapping()
+				|| !selectable1.getContainingTableExpression().equals( selectable2.getContainingTableExpression() )
+				|| !selectable1.getSelectionExpression().equals( selectable2.getSelectionExpression() ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public void finishInitialization(
+			@SuppressWarnings("unused")
+			Property bootProperty,
+			Collection bootDescriptor,
+			@SuppressWarnings("unused")
+			MappingModelCreationProcess creationProcess) {
+		final boolean hasOrder = bootDescriptor.getOrderBy() != null;
+		final boolean hasManyToManyOrder = bootDescriptor.getManyToManyOrdering() != null;
+
+		if ( hasOrder || hasManyToManyOrder ) {
+			final TranslationContext context = collectionDescriptor::getFactory;
+
+			if ( hasOrder ) {
+				orderByFragment = OrderByFragmentTranslator.translate(
+						bootDescriptor.getOrderBy(),
+						this,
+						context
+				);
+			}
+
+			if ( hasManyToManyOrder ) {
+				manyToManyOrderByFragment = OrderByFragmentTranslator.translate(
+						bootDescriptor.getManyToManyOrdering(),
+						this,
+						context
+				);
+			}
+		}
+	}
+
+	@Nonnull
+	@Override
+	public NavigableRole getNavigableRole() {
+		return getCollectionDescriptor().getNavigableRole();
+	}
+
+	@Nonnull
+	@Override
+	public CollectionMappingType<?> getMappedType() {
+		return collectionMappingType;
+	}
+
+	@Nonnull
+	@Override
+	public ForeignKeyDescriptor getKeyDescriptor() {
+		return fkDescriptor;
+	}
+
+	@Nonnull
+	@Override
+	public CollectionPersister getCollectionDescriptor() {
+		return collectionDescriptor;
+	}
+
+	@Nonnull
+	@Override
+	public CollectionPart getElementDescriptor() {
+		return elementDescriptor;
+	}
+
+	@Nullable
+	@Override
+	public CollectionPart getIndexDescriptor() {
+		return indexDescriptor;
+	}
+
+	@Nullable
+	@Override
+	public IndexMetadata getIndexMetadata() {
+		return indexMetadata;
+	}
+
+	@Nullable
+	@Override
+	public CollectionIdentifierDescriptor getIdentifierDescriptor() {
+		return identifierDescriptor;
+	}
+
+	@Nullable
+	@Override
+	public SoftDeleteMapping getSoftDeleteMapping() {
+		return auxiliaryMapping instanceof SoftDeleteMapping softDeleteMapping
+				? softDeleteMapping : null;
+	}
+
+	@Nonnull
+	@Override
+	public TableDetails getSoftDeleteTableDetails() {
+		return ( (CollectionMutationTarget) getCollectionDescriptor() ).getCollectionTableMapping();
+	}
+
+	@Nullable
+	@Override
+	public TemporalMapping getTemporalMapping() {
+		return auxiliaryMapping instanceof TemporalMapping temporalMapping
+				? temporalMapping : null;
+	}
+
+	@Nullable
+	@Override
+	public AuditMapping getAuditMapping() {
+		return auxiliaryMapping instanceof AuditMapping auditMapping
+				? auditMapping : null;
+	}
+
+	@Nullable
+	private AuxiliaryMapping getAuxiliaryMapping() {
+		return auxiliaryMapping;
+	}
+
+
+	@Nullable
+	@Override
+	public OrderByFragment getOrderByFragment() {
+		return orderByFragment;
+	}
+
+	@Nullable
+	@Override
+	public OrderByFragment getManyToManyOrderByFragment() {
+		return manyToManyOrderByFragment;
+	}
+
+	@Nullable
+	@Override
+	public String getSeparateCollectionTable() {
+		return separateCollectionTable;
+	}
+
+	@Override
+	public boolean containsTableReference(String tableExpression) {
+		return tableExpression.equals( separateCollectionTable );
+	}
+
+	@Nullable
+	@Override
+	public Generator getGenerator() {
+		// can never be a generated value
+		return null;
+	}
+
+	@Override
+	public String getFetchableName() {
+		return castNonNull( getAttributeName() );
+	}
+
+	@Override
+	public FetchOptions getMappedFetchOptions() {
+		return this;
+	}
+
+	@Override
+	public FetchStyle getStyle() {
+		return fetchStyle;
+	}
+
+	@Override
+	public FetchTiming getTiming() {
+		return fetchTiming;
+	}
+
+	@Override
+	public boolean hasPartitionedSelectionMapping() {
+		return false;
+	}
+
+	@Override
+	public void applyAuxiliaryRestrictions(
+			@Nonnull TableGroup tableGroup,
+			@Nonnull PredicateConsumer predicateConsumer,
+			@Nonnull LoadQueryInfluencers influencers,
+			@Nonnull SqlAliasBaseGenerator sqlAliasBaseGenerator) {
+		final var descriptor = getCollectionDescriptor();
+		if ( descriptor.isOneToMany() || descriptor.isManyToMany() ) {
+			final var elementDescriptor = (EntityCollectionPart) getElementDescriptor();
+			final var associatedEntityDescriptor = elementDescriptor.getAssociatedEntityMappingType();
+			final var associatedAuxiliaryMapping = associatedEntityDescriptor.getAuxiliaryMapping();
+			if ( associatedAuxiliaryMapping != null ) {
+				associatedAuxiliaryMapping.applyPredicate(
+						associatedEntityDescriptor,
+						predicateConsumer::applyPredicate,
+						tableGroup,
+						sqlAliasBaseGenerator,
+						influencers
+				);
+			}
+		}
+
+		final var auxiliaryMapping = getAuxiliaryMapping();
+		if ( auxiliaryMapping != null ) {
+			auxiliaryMapping.applyPredicate(
+					this,
+					predicateConsumer::applyPredicate,
+					tableGroup,
+					sqlAliasBaseGenerator,
+					influencers
+			);
+		}
+	}
+
+	@Nonnull
+	@Override
+	public <T> DomainResult<T> createDomainResult(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nullable String resultVariable,
+			@Nonnull DomainResultCreationState creationState) {
+		final var collectionTableGroup =
+				creationState.getSqlAstCreationState().getFromClauseAccess()
+						.getTableGroup( navigablePath );
+
+		assert collectionTableGroup != null;
+
+		// This is only used for collection initialization where we know the owner is available, so we mark it as visited
+		// which will cause bidirectional to-one associations to be treated as such and avoid a join
+		creationState.registerVisitedAssociationKey( fkDescriptor.getAssociationKey() );
+
+		//noinspection unchecked
+		return new CollectionDomainResult( navigablePath, this, resultVariable, tableGroup, creationState );
+	}
+
+	@Override
+	public Fetch generateFetch(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			FetchTiming fetchTiming,
+			boolean selected,
+			String resultVariable,
+			DomainResultCreationState creationState) {
+		final var sqlAstCreationState = creationState.getSqlAstCreationState();
+
+		final boolean added = creationState.registerVisitedAssociationKey( fkDescriptor.getAssociationKey() );
+
+		try {
+			if ( fetchTiming == FetchTiming.IMMEDIATE ) {
+				if ( selected ) {
+					final var collectionTableGroup = resolveCollectionTableGroup(
+							fetchParent,
+							fetchablePath,
+							creationState,
+							sqlAstCreationState
+					);
+					return buildEagerCollectionFetch(
+							fetchablePath,
+							this,
+							collectionTableGroup,
+							referencedPropertyName != null,
+							fetchParent,
+							creationState
+					);
+				}
+				else {
+					return createSelectEagerCollectionFetch(
+							fetchParent,
+							fetchablePath,
+							creationState,
+							sqlAstCreationState
+					);
+				}
+			}
+
+			if ( getCollectionDescriptor().getCollectionType().hasHolder() ) {
+				return createSelectEagerCollectionFetch(
+						fetchParent,
+						fetchablePath,
+						creationState,
+						sqlAstCreationState
+				);
+			}
+
+			return createDelayedCollectionFetch( fetchParent, fetchablePath, creationState, sqlAstCreationState );
+		}
+		finally {
+			// This is only necessary because the association key is too general i.e. also matching FKs that other associations would match
+			// and on top of this, we are not handling circular fetches for plural attributes yet
+			if ( added ) {
+				creationState.removeVisitedAssociationKey( fkDescriptor.getAssociationKey() );
+			}
+		}
+	}
+
+	/**
+	 * For Hibernate Reactive
+	 */
+	protected Fetch buildDelayedCollectionFetch(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedAttribute,
+			FetchParent fetchParent,
+			DomainResult<?> collectionKeyResult,
+			boolean unfetched) {
+		return buildDelayedCollectionFetch(
+				fetchedPath,
+				fetchedAttribute,
+				fetchParent,
+				collectionKeyResult,
+				unfetched,
+				org.hibernate.engine.spi.FetchOptions.NONE
+		);
+	}
+
+	protected Fetch buildDelayedCollectionFetch(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedAttribute,
+			FetchParent fetchParent,
+			@Nullable DomainResult<?> collectionKeyResult,
+			boolean unfetched,
+			org.hibernate.engine.spi.FetchOptions fetchOptions) {
+		return new DelayedCollectionFetch(
+				fetchedPath,
+				fetchedAttribute,
+				fetchParent,
+				collectionKeyResult,
+				unfetched,
+				fetchOptions
+		);
+	}
+
+	/**
+	 * For Hibernate Reactive
+	 */
+	protected Fetch buildSelectEagerCollectionFetch(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedAttribute,
+			DomainResult<?> collectionKeyDomainResult,
+			FetchParent fetchParent) {
+		return buildSelectEagerCollectionFetch(
+				fetchedPath,
+				fetchedAttribute,
+				collectionKeyDomainResult,
+				fetchParent,
+				org.hibernate.engine.spi.FetchOptions.NONE
+		);
+	}
+
+	protected Fetch buildSelectEagerCollectionFetch(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedAttribute,
+			@Nullable DomainResult<?> collectionKeyDomainResult,
+			FetchParent fetchParent,
+			org.hibernate.engine.spi.FetchOptions fetchOptions) {
+		return new SelectEagerCollectionFetch(
+				fetchedPath,
+				fetchedAttribute,
+				collectionKeyDomainResult,
+				fetchParent,
+				fetchOptions
+		);
+	}
+
+	/**
+	 * For Hibernate Reactive
+	 */
+	protected Fetch buildEagerCollectionFetch(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedAttribute,
+			TableGroup collectionTableGroup,
+			boolean needsCollectionKeyResult,
+			FetchParent fetchParent,
+			DomainResultCreationState creationState) {
+		return new EagerCollectionFetch(
+				fetchedPath,
+				fetchedAttribute,
+				collectionTableGroup,
+				needsCollectionKeyResult,
+				fetchParent,
+				creationState
+		);
+	}
+
+	@Nullable
+	@Override
+	public Fetch resolveCircularFetch(
+			NavigablePath fetchablePath,
+			FetchParent fetchParent,
+			FetchTiming fetchTiming,
+			DomainResultCreationState creationState) {
+		if ( fetchTiming == FetchTiming.IMMEDIATE
+				// if it's already visited
+				&& creationState.isAssociationKeyVisited( fkDescriptor.getAssociationKey() ) ) {
+			return createSelectEagerCollectionFetch(
+					fetchParent,
+					fetchablePath,
+					creationState,
+					creationState.getSqlAstCreationState()
+			);
+		}
+		else {
+			return null;
+		}
+	}
+
+	private Fetch createSelectEagerCollectionFetch(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			DomainResultCreationState creationState,
+			SqlAstCreationState sqlAstCreationState) {
+		return buildSelectEagerCollectionFetch( fetchablePath, this,
+				collectionKeyDomainResult( fetchParent, fetchablePath, creationState, sqlAstCreationState ),
+				fetchParent,
+				creationState.getFetchOptions( fetchablePath ) );
+	}
+
+	private @Nullable DomainResult<?> collectionKeyDomainResult(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			DomainResultCreationState creationState,
+			SqlAstCreationState sqlAstCreationState) {
+		if ( referencedPropertyName == null ) {
+			return null;
+		}
+		else {
+			return getKeyDescriptor()
+					.createTargetDomainResult(
+							fetchablePath,
+							sqlAstCreationState.getFromClauseAccess()
+									.getTableGroup( fetchParent.getNavigablePath() ),
+							fetchParent,
+							creationState
+					);
+		}
+	}
+
+	private TableGroup resolveCollectionTableGroup(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			DomainResultCreationState creationState,
+			SqlAstCreationState sqlAstCreationState) {
+		final var fromClauseAccess = sqlAstCreationState.getFromClauseAccess();
+		return fromClauseAccess.resolveTableGroup(
+				fetchablePath,
+				p -> {
+					final var lhsTableGroup = fromClauseAccess.getTableGroup( fetchParent.getNavigablePath() );
+					final var tableGroupJoin = createTableGroupJoin(
+							fetchablePath,
+							lhsTableGroup,
+							null,
+							null,
+							SqlAstJoinType.LEFT,
+							true,
+							false,
+							creationState.getSqlAstCreationState()
+					);
+					lhsTableGroup.addTableGroupJoin( tableGroupJoin );
+					return tableGroupJoin.getJoinedGroup();
+				}
+		);
+	}
+
+	private Fetch createDelayedCollectionFetch(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			DomainResultCreationState creationState,
+			SqlAstCreationState sqlAstCreationState) {
+		final DomainResult<?> collectionKeyDomainResult;
+		// Lazy property. A null foreign key domain result will lead to
+		// returning a domain result assembler that returns LazyPropertyInitializer.UNFETCHED_PROPERTY
+		final var containingEntityMapping = findContainingEntityMapping();
+		final boolean unfetched;
+		if ( fetchParent.getReferencedMappingContainer() == containingEntityMapping
+				&& containingEntityMapping.getEntityPersister().getPropertyLaziness()[getStateArrayPosition()] ) {
+			collectionKeyDomainResult = null;
+			unfetched = true;
+		}
+		else {
+			if ( referencedPropertyName != null ) {
+				collectionKeyDomainResult = getKeyDescriptor().createTargetDomainResult(
+						fetchablePath,
+						sqlAstCreationState.getFromClauseAccess().getTableGroup( fetchParent.getNavigablePath() ),
+						fetchParent,
+						creationState
+				);
+			}
+			else {
+				collectionKeyDomainResult = null;
+			}
+			unfetched = false;
+		}
+		return buildDelayedCollectionFetch(
+				fetchablePath,
+				this,
+				fetchParent,
+				collectionKeyDomainResult,
+				unfetched,
+				creationState.getFetchOptions( fetchablePath )
+		);
+	}
+
+	@Override
+	public String getSqlAliasStem() {
+		return sqlAliasStem;
+	}
+
+	@Override
+	public SqlAstJoinType getDefaultSqlAstJoinType(TableGroup parentTableGroup) {
+		return SqlAstJoinType.LEFT;
+	}
+
+	@Override
+	public boolean isSimpleJoinPredicate(Predicate predicate) {
+		return fkDescriptor.isSimpleJoinPredicate( predicate );
+	}
+
+	@Override
+	public TableGroupJoin createTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType requestedJoinType,
+			boolean fetched,
+			boolean addsPredicate,
+			SqlAstCreationState creationState) {
+		final var collectionPredicateCollector = new PredicateCollector();
+		final var tableGroup = createRootTableGroupJoin(
+				navigablePath,
+				lhs,
+				explicitSourceAlias,
+				explicitSqlAliasBase,
+				requestedJoinType,
+				fetched,
+				addsPredicate,
+				collectionPredicateCollector::applyPredicate,
+				creationState
+		);
+		final var predicateCollector =
+				tableGroup.getNestedTableGroupJoins().isEmpty()
+						// No nested table group joins means that the predicate has to be pushed to the last join
+						? new PredicateCollector()
+						: collectionPredicateCollector;
+
+		getCollectionDescriptor().applyBaseRestrictions(
+				predicateCollector::applyPredicate,
+				tableGroup,
+				true,
+				creationState.getLoadQueryInfluencers().getEnabledFilters(),
+				false,
+				null,
+				creationState
+		);
+
+		getCollectionDescriptor().applyBaseManyToManyRestrictions(
+				predicateCollector::applyPredicate,
+				tableGroup,
+				true,
+				creationState.getLoadQueryInfluencers().getEnabledFilters(),
+				null,
+				creationState
+		);
+
+		applyAuxiliaryRestrictions(
+				tableGroup,
+				predicateCollector::applyPredicate,
+				creationState.getLoadQueryInfluencers(),
+				creationState.getSqlAliasBaseGenerator()
+		);
+
+		if ( fetched ) {
+			if ( orderByFragment != null ) {
+				creationState.applyOrdering( tableGroup, orderByFragment );
+			}
+
+			if ( manyToManyOrderByFragment != null ) {
+				creationState.applyOrdering( tableGroup, manyToManyOrderByFragment );
+			}
+		}
+
+		final var tableGroupJoin = new TableGroupJoin(
+				navigablePath,
+				determineSqlJoinType( lhs, requestedJoinType, fetched ),
+				tableGroup,
+				collectionPredicateCollector.getPredicate()
+		);
+		if ( predicateCollector != collectionPredicateCollector ) {
+			determineJoinForPredicateApply( tableGroupJoin )
+					.applyPredicate( predicateCollector.getPredicate() );
+		}
+		return tableGroupJoin;
+	}
+
+	private boolean hasSoftDelete() {
+		// NOTE: this needs to be done lazily because the associated entity mapping (if one)
+		// does not know its SoftDeleteMapping yet when this is created
+		return auxiliaryMapping instanceof SoftDeleteMapping
+			|| getElementDescriptor() instanceof EntityCollectionPart collectionPart
+					&& collectionPart.getAssociatedEntityMappingType().getSoftDeleteMapping() != null;
+	}
+
+	public SqlAstJoinType determineSqlJoinType(TableGroup lhs, @Nullable SqlAstJoinType requestedJoinType, boolean fetched) {
+		if ( hasSoftDelete() ) {
+			return SqlAstJoinType.LEFT;
+		}
+		else if ( requestedJoinType == null ) {
+			return fetched
+					? getDefaultSqlAstJoinType( lhs )
+					: SqlAstJoinType.INNER;
+		}
+		else {
+			return requestedJoinType;
+		}
+	}
+
+	@Override
+	public TableGroup createRootTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType requestedJoinType,
+			boolean fetched,
+			@Nullable Consumer<Predicate> predicateConsumer,
+			SqlAstCreationState creationState) {
+		return createRootTableGroupJoin(
+				navigablePath,
+				lhs,
+				explicitSourceAlias,
+				explicitSqlAliasBase,
+				requestedJoinType,
+				fetched,
+				false,
+				predicateConsumer,
+				creationState
+		);
+	}
+
+	private TableGroup createRootTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType requestedJoinType,
+			boolean fetched,
+			boolean addsPredicate,
+			@Nullable Consumer<Predicate> predicateConsumer,
+			SqlAstCreationState creationState) {
+
+		final var tableGroup =
+				rootTableGroup(
+						navigablePath,
+						lhs,
+						explicitSourceAlias,
+						fetched,
+						addsPredicate,
+						creationState,
+						determineSqlJoinType( lhs, requestedJoinType, fetched ),
+						creationState.getSqlAliasBaseGenerator()
+								.createSqlAliasBase( getSqlAliasStem() )
+				);
+
+		if ( predicateConsumer != null ) {
+			predicateConsumer.accept( getKeyDescriptor()
+					.generateJoinPredicate( lhs, tableGroup, creationState ) );
+		}
+
+		return tableGroup;
+	}
+
+	private boolean useCollectionTableGroup(SqlAstCreationState creationState) {
+		// For temporal OTM @JoinColumn reads, use CollectionTableGroup with the middle
+		// audit table as primary (like M2M). The FK column isn't in the entity audit table,
+		// so the key must resolve from the middle audit table instead.
+		return !getCollectionDescriptor().isOneToMany()
+				|| auxiliaryMapping instanceof AuditMapping auditMapping
+				&& auditMapping.useAuxiliaryTable( creationState.getLoadQueryInfluencers() );
+	}
+
+	private TableGroup rootTableGroup(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			boolean fetched,
+			boolean addsPredicate,
+			SqlAstCreationState creationState,
+			SqlAstJoinType joinType,
+			SqlAliasBase sqlAliasBase) {
+		return useCollectionTableGroup( creationState )
+				? createCollectionTableGroup(
+						lhs.canUseInnerJoins()
+						&& joinType == SqlAstJoinType.INNER,
+						joinType,
+						navigablePath,
+						fetched,
+						addsPredicate,
+						explicitSourceAlias,
+						sqlAliasBase,
+						creationState
+				)
+				: createOneToManyTableGroup(
+						lhs.canUseInnerJoins()
+						&& joinType == SqlAstJoinType.INNER,
+						joinType,
+						navigablePath,
+						fetched,
+						addsPredicate,
+						explicitSourceAlias,
+						sqlAliasBase,
+						creationState
+				);
+	}
+
+
+	@Override
+	public void setForeignKeyDescriptor(ForeignKeyDescriptor fkDescriptor) {
+		this.fkDescriptor = fkDescriptor;
+	}
+
+	private TableGroup createOneToManyTableGroup(
+			boolean canUseInnerJoins,
+			SqlAstJoinType joinType,
+			NavigablePath navigablePath,
+			boolean fetched,
+			boolean addsPredicate,
+			@Nullable String sourceAlias,
+			SqlAliasBase explicitSqlAliasBase,
+			SqlAstCreationState creationState) {
+		final var oneToManyCollectionPart = (OneToManyCollectionPart) elementDescriptor;
+		final var sqlAliasBase = SqlAliasBase.from(
+				explicitSqlAliasBase,
+				sourceAlias,
+				this,
+				creationState.getSqlAliasBaseGenerator()
+		);
+		final var tableGroup = new OneToManyTableGroup(
+				this,
+				oneToManyCollectionPart.createAssociatedTableGroup(
+						canUseInnerJoins,
+						navigablePath.append( CollectionPart.Nature.ELEMENT.getName() ),
+						fetched,
+						sourceAlias,
+						sqlAliasBase,
+						creationState
+				),
+				creationState.getCreationContext()
+						// TODO: FIX ME
+						.getSessionFactory()
+		);
+		if ( indexDescriptor instanceof TableGroupJoinProducer tableGroupJoinProducer ) {
+			final var tableGroupJoin = tableGroupJoinProducer.createTableGroupJoin(
+					navigablePath.append( CollectionPart.Nature.INDEX.getName() ),
+					tableGroup,
+					null,
+					sqlAliasBase,
+					joinType,
+					fetched,
+					false,
+					creationState
+			);
+			tableGroup.registerIndexTableGroup( tableGroupJoin,
+					isNestedJoin( joinType, addsPredicate, creationState ) );
+		}
+
+		return tableGroup;
+	}
+
+	private boolean isNestedJoin(SqlAstJoinType joinType, boolean addsPredicate, SqlAstCreationState creationState) {
+		// For inner joins we never need join nesting
+		return joinType != SqlAstJoinType.INNER
+			// For outer joins we need nesting if there might be an on-condition that refers to the element table
+			&& ( addsPredicate
+					|| collectionDescriptor.hasWhereRestrictions()
+					|| isAffectedByEnabledFilters( creationState.getLoadQueryInfluencers(),
+							creationState.applyOnlyLoadByKeyFilters() ) );
+	}
+
+	private TableGroup createCollectionTableGroup(
+			boolean canUseInnerJoins,
+			SqlAstJoinType joinType,
+			NavigablePath navigablePath,
+			boolean fetched,
+			boolean addsPredicate,
+			@Nullable String sourceAlias,
+			SqlAliasBase explicitSqlAliasBase,
+			SqlAstCreationState creationState) {
+		final var sqlAliasBase = SqlAliasBase.from(
+				explicitSqlAliasBase,
+				sourceAlias,
+				this,
+				creationState.getSqlAliasBaseGenerator()
+		);
+		final String tableName = collectionDescriptor.getTableName();
+		final String alias = sqlAliasBase.generateNewAlias();
+		final var collectionTableReference =
+				collectionTableReference( creationState, tableName, alias );
+		collectionTableReference.applyAuxiliaryTable( auxiliaryMapping,
+				creationState.getLoadQueryInfluencers() );
+
+		final var tableGroup = new CollectionTableGroup(
+				canUseInnerJoins,
+				navigablePath,
+				this,
+				fetched,
+				sourceAlias,
+				collectionTableReference,
+				true,
+				sqlAliasBase,
+				s -> false,
+				null,
+				creationState.getCreationContext()
+						// TODO: FIX ME
+						.getSessionFactory()
+		);
+
+		final boolean nestedJoin = isNestedJoin( joinType, addsPredicate, creationState );
+
+		if ( elementDescriptor instanceof TableGroupJoinProducer tableGroupJoinProducer ) {
+			final var tableGroupJoin = tableGroupJoinProducer.createTableGroupJoin(
+					navigablePath.append( CollectionPart.Nature.ELEMENT.getName() ),
+					tableGroup,
+					null,
+					sqlAliasBase,
+					nestedJoin ? SqlAstJoinType.INNER : joinType,
+					fetched,
+					false,
+					creationState
+			);
+			tableGroup.registerElementTableGroup( tableGroupJoin, nestedJoin );
+		}
+
+		if ( indexDescriptor instanceof TableGroupJoinProducer tableGroupJoinProducer ) {
+			final var tableGroupJoin = tableGroupJoinProducer.createTableGroupJoin(
+					navigablePath.append( CollectionPart.Nature.INDEX.getName() ),
+					tableGroup,
+					null,
+					sqlAliasBase,
+					nestedJoin ? SqlAstJoinType.INNER : joinType,
+					fetched,
+					false,
+					creationState
+			);
+			tableGroup.registerIndexTableGroup( tableGroupJoin, nestedJoin );
+		}
+
+		return tableGroup;
+	}
+
+	private NamedTableReference collectionTableReference(SqlAstCreationState creationState, String tableName, String alias) {
+		return auxiliaryMapping != null && auxiliaryMapping.useAuxiliaryTable( creationState.getLoadQueryInfluencers() )
+				? new AuxiliaryTableReference( auxiliaryMapping.resolveTableName( tableName ), tableName, alias, true )
+				: new NamedTableReference( tableName, alias, true );
+	}
+
+	@Override
+	public TableGroup createRootTableGroup(
+			boolean canUseInnerJoins,
+			NavigablePath navigablePath,
+			String explicitSourceAlias,
+			SqlAliasBase explicitSqlAliasBase,
+			Supplier<Consumer<Predicate>> additionalPredicateCollectorAccess,
+			SqlAstCreationState creationState) {
+		if ( !useCollectionTableGroup( creationState ) ) {
+			return createOneToManyTableGroup(
+					canUseInnerJoins,
+					SqlAstJoinType.INNER,
+					navigablePath,
+					false,
+					false,
+					explicitSourceAlias,
+					explicitSqlAliasBase,
+					creationState
+			);
+		}
+		else {
+			return createCollectionTableGroup(
+					canUseInnerJoins,
+					SqlAstJoinType.INNER,
+					navigablePath,
+					false,
+					false,
+					explicitSourceAlias,
+					explicitSqlAliasBase,
+					creationState
+			);
+		}
+	}
+
+	@Override
+	public int getBatchSize() {
+		return getCollectionDescriptor().getBatchSize();
+	}
+
+	@Override
+	public boolean isAffectedByEnabledFilters(@Nonnull LoadQueryInfluencers influencers, boolean onlyApplyForLoadByKeyFilters) {
+		return getCollectionDescriptor().isAffectedByEnabledFilters( influencers, onlyApplyForLoadByKeyFilters );
+	}
+
+	@Override
+	public boolean isAffectedByInfluencers(@Nonnull LoadQueryInfluencers influencers, boolean onlyApplyForLoadByKeyFilters) {
+		if ( PluralAttributeMapping.super.isAffectedByInfluencers( influencers, onlyApplyForLoadByKeyFilters )
+				|| auxiliaryMapping != null && auxiliaryMapping.isAffectedByInfluencers( influencers )) {
+			return true;
+		}
+		else {
+			final var descriptor = getCollectionDescriptor();
+			if ( descriptor.isOneToMany() || descriptor.isManyToMany() ) {
+				final var elementDescriptor = (EntityCollectionPart) getElementDescriptor();
+				return elementDescriptor.getAssociatedEntityMappingType()
+						.isAffectedByInfluencers( influencers, onlyApplyForLoadByKeyFilters );
+			}
+			return false;
+		}
+	}
+
+	@Override
+	public boolean isAffectedByEntityGraph(@Nonnull LoadQueryInfluencers influencers) {
+		return getCollectionDescriptor().isAffectedByEntityGraph( influencers );
+	}
+
+	@Override
+	public void registerAffectingFetchProfile(String fetchProfileName) {
+		if ( collectionDescriptor instanceof FetchProfileAffectee affectee ) {
+			affectee.registerAffectingFetchProfile( fetchProfileName);
+		}
+	}
+
+	@Override
+	public boolean isAffectedByEnabledFetchProfiles(@Nonnull LoadQueryInfluencers influencers) {
+		return getCollectionDescriptor().isAffectedByEnabledFetchProfiles( influencers );
+	}
+
+	@Nonnull
+	@Override
+	public String getRootPathName() {
+		return getCollectionDescriptor().getRole();
+	}
+
+	@Nullable
+	@Override
+	public ModelPart findSubPart(@Nonnull String name, @Nullable EntityMappingType treatTargetType) {
+		if ( elementDescriptor instanceof ModelPartContainer modelPartContainer ) {
+			final var subPart = modelPartContainer.findSubPart( name, null );
+			if ( subPart != null ) {
+				return subPart;
+			}
+		}
+		final var nature = CollectionPart.Nature.fromName( name );
+		if ( nature != null ) {
+			return switch ( nature ) {
+				case ELEMENT -> elementDescriptor;
+				case INDEX -> indexDescriptor;
+				case ID -> identifierDescriptor;
+			};
+		}
+
+		return null;
+	}
+
+	@Override
+	public void forEachSubPart(@Nonnull IndexedConsumer<ModelPart> consumer, @Nullable EntityMappingType treatTarget) {
+		consumer.accept( 0, elementDescriptor );
+
+		int position = 1;
+		if ( indexDescriptor != null ) {
+			consumer.accept( position++, indexDescriptor );
+		}
+
+		if ( identifierDescriptor != null ) {
+			consumer.accept( position+1, identifierDescriptor );
+		}
+	}
+
+	@Override
+	public void applySqlSelections(
+			@Nonnull NavigablePath navigablePath, @Nonnull TableGroup tableGroup, @Nonnull DomainResultCreationState creationState) {
+		elementDescriptor.applySqlSelections( navigablePath, tableGroup, creationState );
+	}
+
+	@Override
+	public void applySqlSelections(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull DomainResultCreationState creationState,
+			@Nonnull BiConsumer<SqlSelection, JdbcMapping> selectionConsumer) {
+		elementDescriptor.applySqlSelections( navigablePath, tableGroup, creationState, selectionConsumer );
+	}
+
+	@Override
+	public <X, Y> int breakDownJdbcValues(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public void visitSubParts(@Nonnull Consumer<ModelPart> consumer, @Nullable EntityMappingType treatTargetType) {
+		consumer.accept( elementDescriptor );
+		if ( indexDescriptor != null ) {
+			consumer.accept( indexDescriptor );
+		}
+	}
+
+	@Nonnull
+	@Override
+	public String getContainingTableExpression() {
+		return getKeyDescriptor().getKeyTable();
+	}
+
+	@Override
+	public int getJdbcTypeCount() {
+		return 0;
+	}
+
+	@Nonnull
+	@Override
+	public JdbcMapping getJdbcMapping(int index) {
+		throw new IndexOutOfBoundsException( index );
+	}
+
+	@Nonnull
+	@Override
+	public SelectableMapping getSelectable(int columnIndex) {
+		throw new IndexOutOfBoundsException( columnIndex );
+	}
+
+	@Override
+	public int forEachJdbcType(int offset, @Nonnull IndexedConsumer<JdbcMapping> action) {
+		return 0;
+	}
+
+	@Nullable
+	@Override
+	public Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		return elementDescriptor.disassemble( value, session );
+	}
+
+	@Override
+	public void addToCacheKey(@Nonnull MutableCacheKeyBuilder cacheKey, @Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		elementDescriptor.addToCacheKey( cacheKey, value, session );
+	}
+
+	@Override
+	public <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return elementDescriptor.forEachDisassembledJdbcValue( value, offset, x, y, valuesConsumer, session );
+	}
+
+	@Override
+	public String toString() {
+		return "PluralAttribute(" + getCollectionDescriptor().getRole() + ")";
+	}
+}

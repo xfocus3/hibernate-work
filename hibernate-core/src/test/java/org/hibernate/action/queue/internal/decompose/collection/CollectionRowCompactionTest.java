@@ -1,0 +1,127 @@
+package org.hibernate.action.queue.internal.decompose.collection;
+
+import org.hibernate.action.queue.internal.PreparedCollectionMutation;
+import org.hibernate.action.queue.spi.CollectionEndpoint;
+import org.hibernate.action.queue.spi.CollectionTransition;
+import org.hibernate.action.queue.spi.decompose.DecompositionContext;
+import org.hibernate.action.queue.spi.decompose.collection.CollectionMutationPlanContributor;
+import org.hibernate.action.queue.spi.meta.CollectionTableDescriptor;
+import org.hibernate.collection.spi.CollectionMutationInterpretation;
+import org.hibernate.collection.spi.PhysicalCollectionMutation;
+import org.hibernate.collection.spi.SemanticCollectionChange;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.internal.BasicValuedCollectionPart;
+import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
+import org.hibernate.persister.collection.BasicCollectionPersister;
+import org.hibernate.persister.collection.CollectionPersister;
+
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/// Tests the graph-safety boundary for compact collection-row execution.
+///
+/// @author Steve Ebersole
+class CollectionRowCompactionTest {
+	@Test
+	void compactsCreateRowsOnlyForAnOwnerInsertedInTheCurrentFlush() {
+		final var fixture = new Fixture();
+		final var owner = new Object();
+		final var mutation = preparedMutation( owner );
+		final var context = mock( DecompositionContext.class );
+
+		assertThat( fixture.policy.canCompactCreate( mutation, context ) ).isFalse();
+
+		when( context.isBeingInsertedInCurrentFlush( owner ) ).thenReturn( true );
+		assertThat( fixture.policy.canCompactCreate( mutation, context ) ).isTrue();
+	}
+
+	@Test
+	void retainsExpandedRowsForUniqueSlotsCyclesAndContributors() {
+		assertThat( new Fixture( true, false, CollectionMutationPlanContributor.STANDARD )
+				.policy.canCompactReplacement() ).isFalse();
+		assertThat( new Fixture( false, true, CollectionMutationPlanContributor.STANDARD )
+				.policy.canCompactReplacement() ).isFalse();
+		assertThat( new Fixture( false, false, mock( CollectionMutationPlanContributor.class ) )
+				.policy.canCompactReplacement() ).isFalse();
+	}
+
+	@Test
+	void retainsExpandedRowsForEntityValuedCollections() {
+		final var fixture = new Fixture(
+				false,
+				false,
+				CollectionMutationPlanContributor.STANDARD,
+				mock( EntityCollectionPart.class )
+		);
+
+		assertThat( fixture.policy.canCompactReplacement() ).isFalse();
+	}
+
+	private static PreparedCollectionMutation preparedMutation(Object owner) {
+		return new PreparedCollectionMutation(
+				PreparedCollectionMutation.Kind.CREATE,
+				null,
+				new CollectionEndpoint( mock( CollectionPersister.class ), null ),
+				false,
+				owner,
+				null,
+				new CollectionMutationInterpretation(
+						CollectionTransition.CREATE,
+						SemanticCollectionChange.none(),
+						PhysicalCollectionMutation.noWork(),
+						0
+				)
+		);
+	}
+
+	private static class Fixture {
+		private final BasicCollectionPersister persister = mock( BasicCollectionPersister.class );
+		private final PluralAttributeMapping attributeMapping = mock( PluralAttributeMapping.class );
+		private final CollectionRowCompaction policy;
+
+		private Fixture() {
+			this( false, false, CollectionMutationPlanContributor.STANDARD );
+		}
+
+		private Fixture(
+				boolean nonPrimaryUniqueConstraint,
+				boolean selfReferential,
+				CollectionMutationPlanContributor contributor) {
+			this(
+					nonPrimaryUniqueConstraint,
+					selfReferential,
+					contributor,
+					mock( BasicValuedCollectionPart.class )
+			);
+		}
+
+		private Fixture(
+				boolean nonPrimaryUniqueConstraint,
+				boolean selfReferential,
+				CollectionMutationPlanContributor contributor,
+				CollectionPart elementDescriptor) {
+			final var table = new CollectionTableDescriptor(
+					"collection_table",
+					null,
+					false,
+					false,
+					selfReferential,
+					false,
+					false,
+					null,
+					null,
+					null,
+					null,
+					null
+			);
+			when( persister.getCollectionTableDescriptor() ).thenReturn( table );
+			when( persister.getAttributeMapping() ).thenReturn( attributeMapping );
+			when( attributeMapping.getElementDescriptor() ).thenReturn( elementDescriptor );
+			policy = new CollectionRowCompaction( persister, contributor, nonPrimaryUniqueConstraint );
+		}
+	}
+}

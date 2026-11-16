@@ -1,0 +1,30 @@
+package org.hibernate.agroal.internal;
+
+import org.hibernate.boot.registry.selector.SimpleStrategyRegistrationImpl;
+import org.hibernate.boot.registry.selector.StrategyRegistration;
+import org.hibernate.boot.registry.selector.StrategyRegistrationProvider;
+import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
+
+import static java.util.Collections.singleton;
+
+/**
+ * Provides the {@link AgroalConnectionProvider} to the
+ * {@link org.hibernate.boot.registry.selector.spi.StrategySelector} service.
+ *
+ * @author Luis Barreiro
+ */
+public final class StrategyRegistrationProviderImpl implements StrategyRegistrationProvider {
+
+	@Override
+	public Iterable<StrategyRegistration<?>> getStrategyRegistrations() {
+		return singleton( new SimpleStrategyRegistrationImpl<>(
+				ConnectionProvider.class,
+				AgroalConnectionProvider.class,
+				AgroalConnectionProvider.class.getSimpleName(),
+				"agroal",
+				"Agroal",
+				// for consistency's sake
+				"org.hibernate.connection.AgroalConnectionProvider"
+		) );
+	}
+}

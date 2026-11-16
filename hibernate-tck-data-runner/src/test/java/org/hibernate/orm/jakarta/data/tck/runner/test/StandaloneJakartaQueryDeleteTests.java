@@ -1,0 +1,14 @@
+package org.hibernate.orm.jakarta.data.tck.runner.test;
+
+import ee.jakarta.tck.data.standalone.entity.JakartaQueryDeleteTests;
+import ee.jakarta.tck.data.standalone.entity.Vegetable;
+import ee.jakarta.tck.data.standalone.entity._VegetableRepository;
+
+import org.hibernate.orm.jakarta.data.tck.runner.DataTck;
+
+@DataTck(
+		domainClasses = {Vegetable.class},
+		repositoryClasses = {_VegetableRepository.class}
+)
+public class StandaloneJakartaQueryDeleteTests extends JakartaQueryDeleteTests {
+}

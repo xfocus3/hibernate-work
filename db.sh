@@ -1,0 +1,1291 @@
+#! /bin/bash
+
+# Resolve compose files relative to this script, even when invoked from a subproject.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
+
+###############################################################################
+# Detect container cli (Docker/Podman)
+# Docker has priority for historical reasons.
+###############################################################################
+if command -v docker > /dev/null; then
+  CONTAINER_CLI=$(command -v docker)
+  if [[ "$(docker version | grep Podman)" == "" ]]; then
+    IS_DOCKER_RUNTIME=true
+    IS_PODMAN=false
+  else
+    IS_DOCKER_RUNTIME=false
+    IS_PODMAN=true
+  fi
+elif command -v podman > /dev/null; then
+  CONTAINER_CLI=$(command -v podman)
+  IS_DOCKER_RUNTIME=false
+  IS_PODMAN=true
+else
+  echo "ERROR: Neither docker nor podman found on PATH"
+  exit 1
+fi
+
+# Set runtime-specific defaults
+if [[ "$IS_DOCKER_RUNTIME" == "true" ]]; then
+  HEALTHCHECK_PATH="{{.State.Health.Status}}"
+  PRIVILEGED_CLI=""
+elif [[ "$IS_PODMAN" == "true" ]]; then
+  HEALTHCHECK_PATH="{{.State.Healthcheck.Status}}"
+  if command -v sudo > /dev/null; then
+    PRIVILEGED_CLI="sudo"
+  else
+    PRIVILEGED_CLI=""
+  fi
+fi
+
+# Detect --wait support for compose up (podman-compose doesn't support it)
+if $CONTAINER_CLI compose up --help 2>&1 | grep -q -- '--wait'; then
+    COMPOSE_WAIT="--wait"
+else
+    COMPOSE_WAIT=""
+fi
+
+DB_COUNT=1
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  IS_OSX=true
+  DB_COUNT=$(sysctl -n hw.physicalcpu)
+  # PostGIS images only support amd64, so we force emulation on macOS
+  export POSTGRESQL_PLATFORM="linux/amd64"
+else
+  IS_OSX=false
+  DB_COUNT=$(nproc)
+fi
+
+if [[ $DB_COUNT -ge 16 ]]; then
+  DB_COUNT=$(($DB_COUNT/2))
+#elif [[ $DB_COUNT -le 4 ]]; then
+  # Only start halving the
+#else
+#  DB_COUNT=$(($DB_COUNT/2))
+fi
+
+###############################################################################
+# Helper functions to start/stop a database using compose files
+###############################################################################
+COMPOSE_PROJECT="hibernate_orm"
+
+compose_up() {
+    local compose_file="docker-compose/$1"
+    local max_retries="${2:-120}"
+    local extra_files=""
+
+    if [[ "$IS_OSX" == "true" ]]; then
+        local osx_override="$(dirname "$compose_file")/osx-override.yml"
+        if [[ -f "$osx_override" ]]; then
+            extra_files="-f $osx_override"
+        fi
+    fi
+
+    echo "Starting database using $compose_file"
+
+    $CONTAINER_CLI compose -p "$COMPOSE_PROJECT" -f "$compose_file" $extra_files up -d $COMPOSE_WAIT $REMOVE_ORPHANS || {
+        echo "Error: Docker compose failed to start."
+        exit 1
+    }
+
+    # Docker would already wait for a healthy container but with podman there may be issues
+    #  in that case we just run an extra check to be caution:
+    compose_wait "$max_retries" -p "$COMPOSE_PROJECT" -f "$compose_file"
+}
+
+compose_down() {
+  if [[ -n "$REMOVE_ORPHANS" ]]; then
+    for project in $($CONTAINER_CLI compose ls -q 2>/dev/null | grep "^${COMPOSE_PROJECT}"); do
+        $CONTAINER_CLI compose -p "$project" down -v 2>/dev/null || true
+    done
+    if [[ -n "$1" ]]; then
+        $CONTAINER_CLI rm -f "$1" 2>/dev/null || true
+    fi
+  else
+    echo 'INFO: Not stopping any previously started containers. To stop them run db.sh without passing -k to it.'
+  fi
+}
+
+compose_wait() {
+    local max_retries=${1:-120}
+    shift
+    echo "Waiting for service(s) to become healthy (retries: $max_retries, interval: 5s)..."
+    local containers
+    containers=$($CONTAINER_CLI compose "$@" ps -q)
+    for container in $containers; do
+        local retries=0
+        local health=""
+        while [[ $retries -lt $max_retries ]]; do
+            health=$($CONTAINER_CLI inspect --format "$HEALTHCHECK_PATH" "$container" 2>/dev/null || true)
+            if [[ "$health" == "healthy" ]]; then
+                break
+            fi
+            if [[ -z "$health" ]]; then
+                break
+            fi
+            sleep 5
+            retries=$((retries + 1))
+        done
+        if [[ -n "$health" && "$health" != "healthy" ]]; then
+            echo "Error: Container $container did not become healthy after $((max_retries * 5))s"
+            exit 1
+        else
+          echo "Info: Container $container became healthy and should be ready to use"
+        fi
+    done
+}
+
+###############################################################################
+
+mysql() {
+    mysql_26_10
+}
+
+mysql_8_4() {
+    compose_down "mysql"
+    compose_up "versioned/mysql-8.4/docker-compose.yaml"
+    mysql_post_setup
+}
+
+mysql_9_7() {
+    compose_down "mysql"
+    compose_up "versioned/mysql-9.7/docker-compose.yaml"
+    mysql_post_setup
+}
+
+mysql_26_10() {
+    compose_down "mysql"
+    compose_up "latest/mysql/docker-compose.yaml"
+    mysql_post_setup
+}
+
+# MySQL post-setup: wait for ready state, install components, create test databases
+mysql_post_setup() {
+    # Install components
+    # file://component_classic_hashing - This is for legacy hashing algorithms on MySQL 9.7: SHA1 and MD5.
+    $CONTAINER_CLI exec mysql bash -c "mysql -u root -phibernate_orm_test -e \"INSTALL COMPONENT 'file://component_classic_hashing'\"" 2>/dev/null || true # Ignore errors on older MySQL versions that don't have this package
+
+    databases=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      databases+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!databases[@]}";do
+      create_cmd+="create database ${databases[i]}; grant all privileges on ${databases[i]}.* to 'hibernate_orm_test'@'%';"
+    done
+    $CONTAINER_CLI exec mysql bash -c "mysql -u root -phibernate_orm_test -e \"${create_cmd}\"" 2>/dev/null
+    echo "MySQL databases were successfully setup"
+}
+
+###############################################################################
+
+mariadb() {
+  mariadb_13_0
+}
+
+mariadb_10_6() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-10-6/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_10_11() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-10-11/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_11_4() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-11-4/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_11_8() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-11-8/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_12_0() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-12-0/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_12_1() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-12-1/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_12_2() {
+    compose_down "mariadb"
+    compose_up "latest/mariadb/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_12_3() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-12-3/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_13_0() {
+    compose_down "mariadb"
+    compose_up "latest/mariadb/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_verylatest() {
+    compose_down "mariadb"
+    compose_up "versioned/mariadb-verylatest/docker-compose.yaml"
+    mariadb_post_setup
+}
+
+mariadb_post_setup() {
+    databases=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      databases+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!databases[@]}";do
+      create_cmd+="create database ${databases[i]}; grant all privileges on ${databases[i]}.* to 'hibernate_orm_test'@'%';"
+    done
+    $CONTAINER_CLI exec mariadb bash -c "mariadb -u root -phibernate_orm_test -e \"${create_cmd}\"" 2>/dev/null
+    echo "MariaDB databases were successfully setup"
+}
+
+###############################################################################
+
+postgresql() {
+    compose_down "postgres"
+    compose_up "latest/postgresql/docker-compose.yaml"
+    postgresql_setup
+}
+
+# The plain postgresql target uses the pgvector image, so the vector extension
+# is already available and doesn't need to be installed via apt.
+postgresql_setup() {
+    databases=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      databases+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!databases[@]}";do
+      create_cmd+="psql -U hibernate_orm_test -d postgres -c \"create database ${databases[i]};\";"
+    done
+    $CONTAINER_CLI exec postgres bash -c "until pg_isready -U hibernate_orm_test; do sleep 1; done"
+    $CONTAINER_CLI exec postgres bash -c "${create_cmd}"
+    $CONTAINER_CLI exec postgres bash -c 'psql -U hibernate_orm_test -d hibernate_orm_test -c "create extension vector;"'
+    for i in "${!databases[@]}";do
+      $CONTAINER_CLI exec postgres bash -c "psql -U hibernate_orm_test -d ${databases[i]} -c \"create extension vector;\""
+    done
+}
+
+###############################################################################
+
+postgis() {
+  postgis_18
+}
+
+postgis_15() {
+    compose_down "postgis"
+    compose_up "versioned/postgis-15/docker-compose.yaml"
+    postgis_setup 15
+}
+
+postgis_16() {
+    compose_down "postgis"
+    compose_up "versioned/postgis-16/docker-compose.yaml"
+    postgis_setup 16
+}
+
+postgis_17() {
+    compose_down "postgis"
+    compose_up "versioned/postgis-17/docker-compose.yaml"
+    postgis_setup 17
+}
+
+postgis_18() {
+    compose_down "postgis"
+    compose_up "latest/postgis/docker-compose.yaml"
+    postgis_setup 18
+}
+
+postgis_setup() {
+    local pg_version="$1"
+    $CONTAINER_CLI exec postgis bash -c "/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y && apt install -y postgresql-${pg_version}-pgvector" 2>/dev/null || true
+
+    databases=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      databases+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!databases[@]}";do
+      create_cmd+="psql -U hibernate_orm_test -d postgres -c \"create database ${databases[i]};\";"
+    done
+    $CONTAINER_CLI exec postgis bash -c "until pg_isready -U hibernate_orm_test; do sleep 1; done"
+    $CONTAINER_CLI exec postgis bash -c "${create_cmd}"
+    $CONTAINER_CLI exec postgis bash -c 'psql -U hibernate_orm_test -d hibernate_orm_test -c "create extension vector;"'
+    for i in "${!databases[@]}";do
+      $CONTAINER_CLI exec postgis bash -c "psql -U hibernate_orm_test -d ${databases[i]} -c \"create extension vector; create extension postgis;\""
+    done
+}
+
+###############################################################################
+
+gaussdb() {
+    compose_down "opengauss"
+    compose_up "latest/gaussdb/docker-compose.yaml"
+}
+
+###############################################################################
+
+edb() {
+    edb_17
+}
+
+edb_14() {
+    compose_down "edb"
+    compose_up "versioned/edb-14/docker-compose.yaml"
+    edb_setup 14
+}
+
+edb_15() {
+    compose_down "edb"
+    compose_up "versioned/edb-15/docker-compose.yaml"
+    edb_setup 15
+}
+
+edb_16() {
+    compose_down "edb"
+    compose_up "versioned/edb-16/docker-compose.yaml"
+    edb_setup 16
+}
+
+edb_17() {
+    compose_down "edb"
+    compose_up "latest/edb/docker-compose.yaml"
+    edb_setup 17
+}
+
+edb_setup() {
+  databases=()
+  for n in $(seq 1 $DB_COUNT)
+  do
+    databases+=("hibernate_orm_test_${n}")
+  done
+  create_cmd=
+  for i in "${!databases[@]}";do
+    create_cmd+="psql -U hibernate_orm_test -d postgres -c \"create database ${databases[i]};\";"
+  done
+  $CONTAINER_CLI exec edb bash -c "until pg_isready -U hibernate_orm_test; do sleep 1; done"
+  # Database seems to restart after it was ready once, so give it some time
+  sleep 1
+  $CONTAINER_CLI exec edb bash -c "until pg_isready -U hibernate_orm_test; do sleep 1; done"
+  $CONTAINER_CLI exec edb bash -c "${create_cmd}"
+  $CONTAINER_CLI exec edb bash -c 'psql -U hibernate_orm_test -d hibernate_orm_test -c "create extension vector;"'
+  for i in "${!databases[@]}";do
+    $CONTAINER_CLI exec edb bash -c "psql -U hibernate_orm_test -d ${databases[i]} -c \"create extension postgis;\""
+  done
+}
+
+###############################################################################
+
+cubrid() {
+    cubrid_11_4
+}
+
+cubrid_11_4() {
+    compose_down "cubrid"
+    compose_up "latest/cubrid/docker-compose.yaml"
+}
+
+cubrid_10_2() {
+    compose_down "cubrid"
+    compose_up "versioned/cubrid-10.2/docker-compose.yaml"
+}
+
+###############################################################################
+
+db2() {
+  db2_12_1
+}
+
+db2_11_5() {
+    compose_down "db2"
+    db2_osx_setup
+    compose_up "versioned/db2-11.5/docker-compose.yaml"
+    db2_post_setup
+}
+
+db2_12_1() {
+    compose_down "db2"
+    db2_osx_setup
+    compose_up "latest/db2/docker-compose.yaml"
+    db2_post_setup
+    db2_setup
+}
+
+# OSX/Mac M1 workaround for DB2 containers
+# See: https://community.ibm.com/community/user/discussion/db2-luw-115xx-mac-m1-ready#bm017584d2-8d76-42a6-8f76-018dac8e78f2
+# See: https://stackoverflow.com/questions/70175677/ibmcom-db2-docker-image-fails-on-m1
+db2_osx_setup() {
+    if [[ "$IS_OSX" != "true" ]]; then
+        return
+    fi
+    export db2_install_script=$HOME/db2install.sh
+    rm -f ${db2_install_script} || true
+    cat <<'EOF' >${db2_install_script}
+#!/bin/bash
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - db2inst1 -c '/su - db2inst1 -c '. .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - db2inst1 -c \"/su - db2inst1 -c \". .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${DB2INSTANCE?} -c '/su - \${DB2INSTANCE?} -c '. .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${DB2INSTANCE?} -c \"/su - \${DB2INSTANCE?} -c \". .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${instance?} -c '/su - \${instance?} -c '. .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${instance?} -c \"/su - \${instance?} -c \". .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${instance_name?} -c '/su - \${instance_name?} -c '. .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - \${instance_name?} -c \"/su - \${instance_name?} -c \". .profile \&\& /g" {} +
+find /var/db2_setup -type f -not -path '*/\.*' -exec sed -i "s/su - db2inst1 -c \\\\\"/su - db2inst1 -c \\\". .profile \&\& /g" {} +
+. /var/db2_setup/lib/setup_db2_instance.sh
+EOF
+    chmod 777 ${db2_install_script}
+    if [[ "$IS_PODMAN" == "false" ]]; then
+        export DOCKER_DEFAULT_PLATFORM=linux/amd64
+    fi
+}
+
+db2_post_setup() {
+    $CONTAINER_CLI exec -t db2 su - orm_test bash -c ". /database/config/orm_test/sqllib/db2profile; /database/config/orm_test/sqllib/bin/db2 'connect to orm_test'; /database/config/orm_test/sqllib/bin/db2 'CREATE USER TEMPORARY TABLESPACE usr_tbsp MANAGED BY AUTOMATIC STORAGE'"
+    db2_create_rls_tenant_user hibernate_rls_tenant_one
+    db2_create_rls_tenant_user hibernate_rls_tenant_two
+}
+
+db2_create_rls_tenant_user() {
+    local tenant_user=$1
+    $PRIVILEGED_CLI $CONTAINER_CLI exec -t db2 bash -c "id '$tenant_user' >/dev/null 2>&1 || useradd -m '$tenant_user'; echo '$tenant_user:$tenant_user' | chpasswd"
+}
+
+db2_setup() {
+    pids=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      $CONTAINER_CLI exec -t db2 su - orm_test bash -c ". /database/config/orm_test/sqllib/db2profile; /database/config/orm_test/sqllib/bin/db2 'connect to orm_test'; /database/config/orm_test/sqllib/bin/db2 'create tenant ORM_${n}';" &
+      pids[${i}]=$!
+    done
+    for pid in ${pids[*]}; do
+        wait $pid
+    done
+}
+
+db2_spatial() {
+    compose_down "db2spatial"
+    db2_osx_setup
+    compose_up "latest/db2_spatial/docker-compose.yaml"
+    db2_spatial_post_setup
+}
+
+db2_spatial_post_setup() {
+    echo "Enabling spatial extender"
+    $PRIVILEGED_CLI $CONTAINER_CLI exec -t db2spatial su - orm_test bash -c "/database/config/orm_test/sqllib/db2profile && /database/config/orm_test/sqllib/bin/db2se enable_db orm_test"
+    echo "Installing required transform group"
+    $PRIVILEGED_CLI $CONTAINER_CLI exec -t db2spatial su - orm_test bash -c "/database/config/orm_test/sqllib/db2profile && /database/config/orm_test/sqllib/bin/db2 'connect to orm_test' && /database/config/orm_test/sqllib/bin/db2 -tvf /conf/ewkt.sql"
+}
+
+###############################################################################
+
+mssql() {
+  mssql_2025
+}
+
+mssql_2017() {
+    compose_down "mssql"
+    compose_up "versioned/mssql-2017/docker-compose.yaml"
+    mssql_post_setup
+}
+
+mssql_2022() {
+    compose_down "mssql"
+    compose_up "versioned/mssql-2022/docker-compose.yaml"
+    mssql_post_setup
+}
+
+mssql_2025() {
+    compose_down "mssql"
+    compose_up "latest/mssql/docker-compose.yaml"
+    mssql_post_setup
+}
+
+mssql_post_setup() {
+  echo "Creating MSSQL databases..."
+  for n in $(seq 1 $DB_COUNT)
+  do
+    # Determine which sqlcmd to use based on container
+    local sqlcmd_path="/opt/mssql-tools18/bin/sqlcmd"
+    if ! $CONTAINER_CLI exec mssql test -f "$sqlcmd_path" 2>/dev/null; then
+      sqlcmd_path="/opt/mssql-tools/bin/sqlcmd"
+    fi
+
+    $CONTAINER_CLI exec mssql bash -c "echo \"create database hibernate_orm_test_${n} collate SQL_Latin1_General_CP1_CS_AS; alter database hibernate_orm_test_${n} set READ_COMMITTED_SNAPSHOT ON\" | $sqlcmd_path -C -S localhost -U sa -P Hibernate_orm_test -i /dev/stdin"
+  done
+  echo "MSSQL databases successfully setup"
+}
+
+###############################################################################
+
+sybase() {
+    compose_down "sybase"
+    if [[ "$IS_PODMAN" == "true" && "$IS_OSX" == "true" && "$(uname -m)" == "arm64" ]]; then
+        # The x86_64 Sybase ASE image fails under Podman/QEMU on Apple Silicon
+        # unless ASE falls back from async disk I/O to standard unix I/O.
+        export SYBASE_ALLOW_ASYNC_IO=0
+    fi
+    compose_up "latest/sybase/docker-compose.yaml"
+    sybase_setup
+}
+
+# Sybase ASE requires explicit disk allocation for every database, so we create a dedicated
+# device holding one database per parallel test worker (96m of data + 50m of log each).
+sybase_setup() {
+    DB_COUNT=2
+    local db_user="hibernate_orm_test"
+    local db_password="hibernate_orm_test"
+    # 250m per database: 96m of data, 50m of log and a bit of headroom
+    local device_size=$((DB_COUNT * 250))
+
+    {
+        echo "use master"
+        echo "go"
+        echo "disk resize name='master', size='256m'"
+        echo "go"
+        echo "disk init name='testdev', physname='/opt/sybase/data/test.dat', size='${device_size}m'"
+        echo "go"
+        for n in $(seq 1 $DB_COUNT); do
+            echo "create database hibernate_orm_test_${n} on testdev = '96m'"
+            echo "go"
+            echo "sp_dboption hibernate_orm_test_${n}, \"single user\", true"
+            echo "go"
+            echo "alter database hibernate_orm_test_${n} log on testdev = '50m'"
+            echo "go"
+            echo "use hibernate_orm_test_${n}"
+            echo "go"
+            echo "checkpoint"
+            echo "go"
+            echo "use master"
+            echo "go"
+            echo "sp_dboption hibernate_orm_test_${n}, \"single user\", false"
+            echo "go"
+        done
+        echo "create login ${db_user} with password ${db_password}"
+        echo "go"
+        echo "exec sp_configure 'enable xml', 1"
+        echo "go"
+        echo "exec sp_configure 'heap memory per user', 0, '64K'"
+        echo "go"
+        echo "exec sp_configure 'wait on uncommitted insert', 1"
+        echo "go"
+        echo "exec sp_configure 'select for update', 1"
+        echo "go"
+        echo "sp_dboption tempdb, 'ddl in tran', true"
+        echo "go"
+    } | $CONTAINER_CLI exec -i sybase bash -c "source /opt/sybase/SYBASE.sh; /opt/sybase/OCS-16_0/bin/isql -Usa -P myPassword -S MYSYBASE"
+
+    for n in $(seq 1 $DB_COUNT); do
+        local db_name="hibernate_orm_test_${n}"
+        $CONTAINER_CLI exec -i sybase bash -c "source /opt/sybase/SYBASE.sh; /opt/sybase/OCS-16_0/bin/isql -Usa -P myPassword -S MYSYBASE" <<EOSQL
+use master
+go
+exec sp_dboption ${db_name}, 'abort tran on log full', true
+go
+exec sp_dboption ${db_name}, 'allow nulls by default', true
+go
+exec sp_dboption ${db_name}, 'ddl in tran', true
+go
+exec sp_dboption ${db_name}, 'trunc log on chkpt', true
+go
+exec sp_dboption ${db_name}, 'full logging for select into', true
+go
+exec sp_dboption ${db_name}, 'full logging for alter table', true
+go
+sp_dboption ${db_name}, "select into", true
+go
+use ${db_name}
+go
+sp_adduser '${db_user}', '${db_user}', null
+go
+grant create default to ${db_user}
+go
+grant create table to ${db_user}
+go
+grant create view to ${db_user}
+go
+grant create rule to ${db_user}
+go
+grant create function to ${db_user}
+go
+grant create procedure to ${db_user}
+go
+commit
+go
+EOSQL
+    done
+
+    # isql exits with 0 even when statements fail, so we explicitly verify each database
+    for n in $(seq 1 $DB_COUNT); do
+        local db_name="hibernate_orm_test_${n}"
+        local check_output
+        if ! check_output=$($CONTAINER_CLI exec sybase bash -c "source /opt/sybase/SYBASE.sh; printf 'use ${db_name}\ngo\nselect db_name()\ngo\n' | /opt/sybase/OCS-16_0/bin/isql -U${db_user} -P${db_password} -S MYSYBASE" 2>&1) || [[ "$check_output" != *"$db_name"* ]]; then
+            echo "Error: database $db_name is not ready:"
+            echo "$check_output"
+            exit 1
+        fi
+    done
+    echo "Sybase successfully started"
+}
+
+###############################################################################
+
+oracle_setup() {
+    sleep 2;
+    users=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      users+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!users[@]}";do
+      create_cmd+="
+create user ${users[i]} identified by hibernate_orm_test quota unlimited on users;
+grant create session to ${users[i]};
+grant all privileges to ${users[i]};"
+    done
+    
+    # We increase file sizes to avoid online resizes as that requires lots of CPU which is restricted in XE
+    $PRIVILEGED_CLI $CONTAINER_CLI exec oracle bash -c "source /home/oracle/.bashrc; bash -c \"
+cat <<EOF | \$ORACLE_HOME/bin/sqlplus / as sysdba
+set timing on
+-- Remove DISABLE_OOB parameter from Listener configuration and restart it
+!echo Enabling OOB for Listener...
+!echo NAMES.DIRECTORY_PATH=\(EZCONNECT,TNSNAMES\) > /opt/oracle/oradata/dbconfig/XE/sqlnet.ora
+!lsnrctl reload
+
+-- Increasing redo logs
+alter database add logfile group 4 '\$ORACLE_BASE/oradata/XE/redo04.log' size 500M reuse;
+alter database add logfile group 5 '\$ORACLE_BASE/oradata/XE/redo05.log' size 500M reuse;
+alter database add logfile group 6 '\$ORACLE_BASE/oradata/XE/redo06.log' size 500M reuse;
+alter system switch logfile;
+alter system switch logfile;
+alter system switch logfile;
+alter system checkpoint;
+alter database drop logfile group 1;
+alter database drop logfile group 2;
+alter database drop logfile group 3;
+!rm \$ORACLE_BASE/oradata/XE/redo01.log
+!rm \$ORACLE_BASE/oradata/XE/redo02.log
+!rm \$ORACLE_BASE/oradata/XE/redo03.log
+
+-- Increasing SYSAUX data file
+alter database datafile '\$ORACLE_BASE/oradata/XE/sysaux01.dbf' resize 600M;
+
+-- Modifying database init parameters
+alter system set open_cursors=1000 sid='*' scope=both;
+alter system set session_cached_cursors=500 sid='*' scope=spfile;
+alter system set db_securefile=ALWAYS sid='*' scope=spfile;
+alter system set dispatchers='(PROTOCOL=TCP)(SERVICE=XEXDB)(DISPATCHERS=0)' sid='*' scope=spfile;
+alter system set recyclebin=OFF sid='*' SCOPE=SPFILE;
+
+-- Comment the 2 next lines to be able to use Diagnostics Pack features
+alter system set sga_target=0m sid='*' scope=both;
+-- alter system set statistics_level=BASIC sid='*' scope=spfile;
+
+-- Restart the database
+SHUTDOWN IMMEDIATE;
+STARTUP MOUNT;
+ALTER DATABASE OPEN;
+
+-- Switch to the XEPDB1 pluggable database
+alter session set container=xepdb1;
+
+-- Modify XEPDB1 datafiles and tablespaces
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/system01.dbf' resize 320M;
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/sysaux01.dbf' resize 360M;
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/undotbs01.dbf' resize 400M;
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/undotbs01.dbf' autoextend on next 16M;
+alter database tempfile '\$ORACLE_BASE/oradata/XE/XEPDB1/temp01.dbf' resize 400M;
+alter database tempfile '\$ORACLE_BASE/oradata/XE/XEPDB1/temp01.dbf' autoextend on next 16M;
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/users01.dbf' resize 100M;
+alter database datafile '\$ORACLE_BASE/oradata/XE/XEPDB1/users01.dbf' autoextend on next 16M;
+alter tablespace USERS nologging;
+alter tablespace SYSTEM nologging;
+alter tablespace SYSAUX nologging;
+
+create user hibernate_orm_test identified by hibernate_orm_test quota unlimited on users;
+grant create session to hibernate_orm_test;
+grant all privileges to hibernate_orm_test;
+${create_cmd}
+EOF\""
+}
+
+oracle_free_setup() {
+    sleep 2;
+    users=()
+    for n in $(seq 1 $DB_COUNT)
+    do
+      users+=("hibernate_orm_test_${n}")
+    done
+    create_cmd=
+    for i in "${!users[@]}";do
+      create_cmd+="
+create user ${users[i]} identified by hibernate_orm_test quota unlimited on users;
+grant create session to ${users[i]};
+grant create domain to ${users[i]};
+grant all privileges on schema ${users[i]} to ${users[i]};"
+    done
+
+    # We increase file sizes to avoid online resizes as that requires lots of CPU which is restricted in XE
+    $CONTAINER_CLI exec oracle bash -c "source /home/oracle/.bashrc; bash -c \"
+cat <<EOF | \$ORACLE_HOME/bin/sqlplus / as sysdba
+set timing on
+-- Remove DISABLE_OOB parameter from Listener configuration and restart it
+!echo Enabling OOB for Listener...
+!echo NAMES.DIRECTORY_PATH=\(EZCONNECT,TNSNAMES\) > /opt/oracle/oradata/dbconfig/FREE/sqlnet.ora
+!lsnrctl reload
+-- Increasing redo logs
+alter database add logfile group 4 '\$ORACLE_BASE/oradata/FREE/redo04.log' size 500M reuse;
+alter database add logfile group 5 '\$ORACLE_BASE/oradata/FREE/redo05.log' size 500M reuse;
+alter database add logfile group 6 '\$ORACLE_BASE/oradata/FREE/redo06.log' size 500M reuse;
+alter system switch logfile;
+alter system switch logfile;
+alter system switch logfile;
+alter system checkpoint;
+alter database drop logfile group 1;
+alter database drop logfile group 2;
+alter database drop logfile group 3;
+!rm \$ORACLE_BASE/oradata/FREE/redo01.log
+!rm \$ORACLE_BASE/oradata/FREE/redo02.log
+!rm \$ORACLE_BASE/oradata/FREE/redo03.log
+
+-- Increasing SYSAUX data file
+alter database datafile '\$ORACLE_BASE/oradata/FREE/sysaux01.dbf' resize 600M;
+
+-- Modifying database init parameters
+alter system set open_cursors=1000 sid='*' scope=both;
+alter system set session_cached_cursors=500 sid='*' scope=spfile;
+alter system set db_securefile=ALWAYS sid='*' scope=spfile;
+alter system set dispatchers='(PROTOCOL=TCP)(SERVICE=FREEXDB)(DISPATCHERS=0)' sid='*' scope=spfile;
+alter system set recyclebin=OFF sid='*' SCOPE=SPFILE;
+
+-- Comment the 2 next lines to be able to use Diagnostics Pack features
+alter system set sga_target=0m sid='*' scope=both;
+-- alter system set statistics_level=BASIC sid='*' scope=spfile;
+
+-- Restart the database
+SHUTDOWN IMMEDIATE;
+STARTUP MOUNT;
+ALTER DATABASE OPEN;
+
+-- Switch to the FREEPDB1 pluggable database
+alter session set container=freepdb1;
+
+-- Modify FREEPDB1 datafiles and tablespaces
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/system01.dbf' resize 320M;
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/sysaux01.dbf' resize 360M;
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/undotbs01.dbf' resize 400M;
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/undotbs01.dbf' autoextend on next 16M;
+alter database tempfile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/temp01.dbf' resize 400M;
+alter database tempfile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/temp01.dbf' autoextend on next 16M;
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/users01.dbf' resize 100M;
+alter database datafile '\$ORACLE_BASE/oradata/FREE/FREEPDB1/users01.dbf' autoextend on next 16M;
+alter tablespace USERS nologging;
+alter tablespace SYSTEM nologging;
+alter tablespace SYSAUX nologging;
+
+create user hibernate_orm_test identified by hibernate_orm_test quota unlimited on users;
+grant create session to hibernate_orm_test;
+grant create domain to hibernate_orm_test;
+grant all privileges on schema hibernate_orm_test to hibernate_orm_test;
+${create_cmd}
+EOF\""
+}
+
+disable_userland_proxy() {
+  if [[ "$IS_DOCKER_RUNTIME" == "true" ]]; then
+    if [[ "$HEALTHCHECK_PATH" == "{{.State.Health.Status}}" ]]; then
+      if [[ ! -f /etc/docker/daemon.json ]]; then
+        echo "Didn't find /etc/docker/daemon.json but need to disable userland-proxy..."
+        echo "Stopping docker..."
+        sudo service docker stop
+        echo "Creating /etc/docker/daemon.json..."
+        sudo bash -c "echo '{\"userland-proxy\": false}' > /etc/docker/daemon.json"
+        echo "Starting docker..."
+        sudo service docker start
+        echo "Docker successfully started with userland proxies disabled"
+      elif ! grep -q userland-proxy /etc/docker/daemon.json; then
+        echo "Userland proxy is still enabled in /etc/docker/daemon.json, but need to disable it..."
+        export docker_daemon_json=$(</etc/docker/daemon.json)
+        echo "Stopping docker..."
+        sudo service docker stop
+        echo "Updating /etc/docker/daemon.json..."
+        sudo bash -c "export docker_daemon_json='$docker_daemon_json'; echo \"\${docker_daemon_json/\}/,}\\\"userland-proxy\\\": false}\" > /etc/docker/daemon.json"
+        echo "Starting docker..."
+        sudo service docker start
+        echo "Service status:"
+        sudo journalctl -xeu docker.service
+        echo "Docker successfully started with userland proxies disabled"
+      fi
+    fi
+  fi
+}
+
+oracle_atps() {
+  echo "Managing Oracle Autonomous Database..."
+  export INFO=$(curl -s -k -L -X GET "https://api.atlas-controller.oraclecloud.com/ords/atlas/admin/database?type=autonomous2&hostname=`hostname`" -H 'accept: application/json')
+  export HOST=$(echo $INFO | jq -r '.database' | jq -r '.host')
+  export SERVICE=$(echo $INFO | jq -r '.database' | jq -r '.service')
+  export PASSWORD=$(echo $INFO | jq -r '.database' | jq -r '.password')
+
+  curl -k -s -X POST "https://${HOST}.oraclevcn.com:8443/ords/admin/_/sql" -H 'content-type: application/sql' -H 'accept: application/json' -basic -u admin:${PASSWORD} --data-ascii "create user hibernate_orm_test_$RUNID identified by \"Oracle_19_Password\" DEFAULT TABLESPACE DATA TEMPORARY TABLESPACE TEMP;alter user hibernate_orm_test_$RUNID quota unlimited on data;grant CREATE SESSION, RESOURCE, CREATE VIEW, CREATE SYNONYM to hibernate_orm_test_$RUNID;"
+}
+
+oracle_atps_tls() {
+  echo "Managing Oracle Autonomous Database..."
+  export INFO=$(curl -s -k -L -X GET "https://api.atlas-controller.oraclecloud.com/ords/atlas/admin/database?type=autonomous&hostname=`hostname`" -H 'accept: application/json')
+  export HOST=$(echo $INFO | jq -r '.database' | jq -r '.host')
+  export SERVICE=$(echo $INFO | jq -r '.database' | jq -r '.service')
+  export PASSWORD=$(echo $INFO | jq -r '.database' | jq -r '.password')
+
+  curl -s -X POST "https://${HOST}.oraclecloudapps.com/ords/admin/_/sql" -H 'content-type: application/sql' -H 'accept: application/json' -basic -u admin:${PASSWORD} --data-ascii "create user hibernate_orm_test_$RUNID identified by \"Oracle_19_Password\" DEFAULT TABLESPACE DATA TEMPORARY TABLESPACE TEMP;alter user hibernate_orm_test_$RUNID quota unlimited on data;grant CREATE SESSION, RESOURCE, CREATE VIEW, CREATE SYNONYM, CREATE DOMAIN to hibernate_orm_test_$RUNID;"
+}
+
+oracle_db19c() {
+  echo "Managing Oracle Database 19c..."
+  export INFO=$(curl -s -k -L -X GET "https://api.atlas-controller.oraclecloud.com/ords/atlas/admin/database?type=db19c&hostname=`hostname`" -H 'accept: application/json')
+  export HOST=$(echo $INFO | jq -r '.database' | jq -r '.host')
+  export SERVICE=$(echo $INFO | jq -r '.database' | jq -r '.service')
+  export PASSWORD=$(echo $INFO | jq -r '.database' | jq -r '.password')
+
+/home/opc/sqlcl/bin/sql -s system/$PASSWORD@$HOST:1521/$SERVICE <<EOF
+    create user hibernate_orm_test_$RUNID identified by "Oracle_19_Password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP;
+    alter user hibernate_orm_test_$RUNID quota unlimited on users;
+    grant CREATE SESSION, RESOURCE, CREATE VIEW, CREATE SYNONYM to hibernate_orm_test_$RUNID;
+EOF
+
+}
+
+oracle_db21c() {
+  echo "Managing Oracle Database 21c..."
+  export INFO=$(curl -s -k -L -X GET "https://api.atlas-controller.oraclecloud.com/ords/atlas/admin/database?type=db21c&hostname=`hostname`" -H 'accept: application/json')
+  export HOST=$(echo $INFO | jq -r '.database' | jq -r '.host')
+  export SERVICE=$(echo $INFO | jq -r '.database' | jq -r '.service')
+  export PASSWORD=$(echo $INFO | jq -r '.database' | jq -r '.password')
+
+/home/opc/sqlcl/bin/sql -s system/$PASSWORD@$HOST:1521/$SERVICE <<EOF
+    create user hibernate_orm_test_$RUNID identified by "Oracle_21_Password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP;
+    alter user hibernate_orm_test_$RUNID quota unlimited on users;
+    grant CREATE SESSION, RESOURCE, CREATE VIEW, CREATE SYNONYM to hibernate_orm_test_$RUNID;
+EOF
+}
+
+oracle_db23c() {
+  echo "Managing Oracle Database 23c..."
+  export INFO=$(curl -s -k -L -X GET "https://api.atlas-controller.oraclecloud.com/ords/atlas/admin/database?type=db23c&hostname=`hostname`" -H 'accept: application/json')
+  export HOST=$(echo $INFO | jq -r '.database' | jq -r '.host')
+  export SERVICE=$(echo $INFO | jq -r '.database' | jq -r '.service')
+  export PASSWORD=$(echo $INFO | jq -r '.database' | jq -r '.password')
+
+/home/opc/sqlcl/bin/sql -s system/$PASSWORD@$HOST:1521/$SERVICE <<EOF
+    create user hibernate_orm_test_$RUNID identified by "Oracle_23_Password" DEFAULT TABLESPACE USERS TEMPORARY TABLESPACE TEMP;
+    alter user hibernate_orm_test_$RUNID quota unlimited on users;
+    grant DB_DEVELOPER_ROLE to hibernate_orm_test_$RUNID;
+EOF
+}
+
+oracle() {
+  oracle_23
+}
+
+oracle_18() {
+    disable_userland_proxy
+    compose_down "oracle"
+    compose_up "versioned/oracle-18/docker-compose.yaml"
+    oracle_setup
+}
+
+oracle_21() {
+    disable_userland_proxy
+    compose_down "oracle"
+    compose_up "versioned/oracle-21/docker-compose.yaml"
+    oracle_setup
+}
+
+oracle_23() {
+    disable_userland_proxy
+    compose_down "oracle"
+    compose_up "latest/oracle/docker-compose.yaml"
+    oracle_free_setup
+}
+
+###############################################################################
+
+hana() {
+    compose_down "hana"
+    compose_up "latest/hana/docker-compose.yaml"
+    hana_setup
+    echo "HANA successfully started"
+}
+
+hana_setup() {
+  databases=()
+  for n in $(seq 1 $DB_COUNT)
+  do
+    databases+=("hibernate_orm_test_${n}")
+  done
+  create_cmd=
+  for i in "${!databases[@]}";do
+    create_cmd+="
+create user ${databases[i]} password H1bernate_test NO FORCE_FIRST_PASSWORD_CHANGE;
+grant create schema to ${databases[i]};"
+  done
+  # The first command seems to be ignored?! So let's just run something useless
+  $CONTAINER_CLI exec hana bash -c "cat <<EOF | /usr/sap/HXE/HDB90/exe/hdbsql -n localhost:39017 -u SYSTEM -p H1bernate_test -stdin
+select 1;
+$create_cmd
+\q
+EOF
+"
+}
+
+###############################################################################
+
+cockroachdb() {
+  cockroachdb_26_1
+}
+
+cockroachdb_26_1() {
+  compose_down "cockroach"
+  compose_up "latest/cockroachdb/docker-compose.yaml"
+  cockroachdb_post_setup
+}
+
+cockroachdb_25_4() {
+  compose_down "cockroach"
+  compose_up "versioned/cockroachdb-25.4/docker-compose.yaml"
+  cockroachdb_post_setup
+}
+
+cockroachdb_24_3() {
+  compose_down "cockroach"
+  compose_up "versioned/cockroachdb-24.3/docker-compose.yaml"
+  cockroachdb_post_setup
+}
+
+cockroachdb_24_1() {
+  compose_down "cockroach"
+  compose_up "versioned/cockroachdb-24.1/docker-compose.yaml"
+  cockroachdb_post_setup
+}
+
+cockroachdb_23_2() {
+  compose_down "cockroach"
+  compose_up "versioned/cockroachdb-23.2/docker-compose.yaml"
+  cockroachdb_post_setup_23_2
+}
+
+cockroachdb_post_setup() {
+  echo "Enabling experimental box2d operators and optimized settings for tests"
+  $CONTAINER_CLI exec cockroach bash -c "cat <<EOF | ./cockroach sql --insecure
+SET CLUSTER SETTING sql.spatial.experimental_box2d_comparison_operators.enabled = on;
+SET CLUSTER SETTING kv.range_merge.queue_interval = '50ms';
+SET CLUSTER SETTING jobs.registry.interval.gc = '30s';
+SET CLUSTER SETTING jobs.registry.interval.cancel = '180s';
+SET CLUSTER SETTING jobs.retention_time = '5s';
+SET CLUSTER SETTING sql.stats.automatic_collection.enabled = false;
+ALTER RANGE default CONFIGURE ZONE USING \"gc.ttlseconds\" = 300;
+ALTER DATABASE system CONFIGURE ZONE USING \"gc.ttlseconds\" = 300;
+quit
+EOF
+"
+  cockroachdb_setup
+  echo "CockroachDB successfully started"
+}
+
+cockroachdb_post_setup_23_2() {
+  echo "Enabling experimental box2d operators and optimized settings for tests (v23.2 specific)"
+  $CONTAINER_CLI exec cockroach bash -c "cat <<EOF | ./cockroach sql --insecure
+SET CLUSTER SETTING sql.spatial.experimental_box2d_comparison_operators.enabled = on;
+SET CLUSTER SETTING kv.raft_log.disable_synchronization_unsafe = true;
+SET CLUSTER SETTING kv.range_merge.queue_interval = '50ms';
+SET CLUSTER SETTING jobs.registry.interval.gc = '30s';
+SET CLUSTER SETTING jobs.registry.interval.cancel = '180s';
+SET CLUSTER SETTING jobs.retention_time = '5s';
+SET CLUSTER SETTING sql.stats.automatic_collection.enabled = false;
+SET CLUSTER SETTING kv.range_split.by_load_merge_delay = '5s';
+SET CLUSTER SETTING sql.defaults.serial_normalization = 'sql_sequence_cached';
+ALTER RANGE default CONFIGURE ZONE USING \"gc.ttlseconds\" = 300;
+ALTER DATABASE system CONFIGURE ZONE USING \"gc.ttlseconds\" = 300;
+quit
+EOF
+"
+  cockroachdb_setup
+  echo "CockroachDB successfully started"
+}
+
+cockroachdb_setup() {
+  databases=()
+  for n in $(seq 1 $DB_COUNT)
+  do
+    databases+=("hibernate_orm_test_${n}")
+  done
+  create_cmd=
+  for i in "${!databases[@]}";do
+    create_cmd+="create database ${databases[i]};"
+  done
+  $CONTAINER_CLI exec cockroach bash -c "cat <<EOF | ./cockroach sql --insecure
+$create_cmd
+
+quit
+EOF
+"
+}
+
+###############################################################################
+
+tidb() {
+  tidb_8_5
+}
+
+tidb_8_5() {
+    tidb_prepare_setup
+    compose_down "tidb"
+    compose_up "latest/tidb/docker-compose.yaml"
+}
+
+tidb_5_4() {
+    tidb_prepare_setup_5_4
+    compose_down "tidb"
+    compose_up "versioned/tidb-5.4/docker-compose.yaml"
+}
+
+tidb_prepare_setup() {
+    # Create databases and configure settings
+    databases=()
+    for n in $(seq 1 $DB_COUNT); do
+      databases+=("hibernate_orm_test_${n}")
+    done
+
+    create_cmd="SET GLOBAL tidb_enable_check_constraint=ON;"
+    create_cmd+="SET GLOBAL tidb_enable_shared_lock_promotion=ON;"
+    create_cmd+="CREATE DATABASE IF NOT EXISTS hibernate_orm_test;"
+    create_cmd+="CREATE USER IF NOT EXISTS 'hibernate_orm_test'@'%' IDENTIFIED BY 'hibernate_orm_test';"
+    create_cmd+="GRANT ALL ON hibernate_orm_test.* TO 'hibernate_orm_test'@'%';"
+    for i in "${!databases[@]}";do
+      create_cmd+="CREATE DATABASE IF NOT EXISTS ${databases[i]}; GRANT ALL ON ${databases[i]}.* TO 'hibernate_orm_test'@'%';"
+    done
+    export TIDB_DB_SETUP=$create_cmd
+}
+
+tidb_prepare_setup_5_4() {
+    export TIDB_DB_SETUP="create database hibernate_orm_test; create user 'hibernate_orm_test' identified by 'hibernate_orm_test'; grant all on hibernate_orm_test.* to 'hibernate_orm_test';"
+}
+
+###############################################################################
+
+informix() {
+  informix_15
+}
+
+informix_15() {
+    compose_down "informix"
+    compose_up "latest/informix/docker-compose.yaml"
+    informix_post_setup
+}
+
+informix_14_10() {
+    compose_down "informix"
+    compose_up "versioned/informix-14.10/docker-compose.yaml"
+    informix_post_setup
+}
+
+informix_12_10() {
+    compose_down "informix"
+    compose_up "versioned/informix-12.10/docker-compose.yaml"
+    informix_post_setup
+}
+
+informix_post_setup() {
+    $PRIVILEGED_CLI $CONTAINER_CLI exec informix bash -l -c "export DB_LOCALE=en_US.utf8;export CLIENT_LOCALE=en_US.utf8;echo \"execute function task('create dbspace from storagepool', 'datadbs', '100 MB', '4');execute function task('create sbspace from storagepool', 'sbspace', '20 M', '0');create database dev in datadbs with log;\" > post_init.sql;dbaccess sysadmin post_init.sql"
+}
+
+###############################################################################
+
+spanner() {
+  spanner_emulator GOOGLE_STANDARD_SQL
+}
+
+spanner_pg() {
+  spanner_emulator POSTGRESQL
+}
+
+spanner_emulator() {
+  local dialect=${1:-GOOGLE_STANDARD_SQL}
+  local db_count=${DB_COUNT}
+
+  compose_down "spanner"
+
+  # Start ONLY ONE emulator container
+  local container_name="spanner"
+  local port=9010
+  local rest_port=9020
+
+  echo "Starting Spanner emulator..."
+  SPANNER_CONTAINER_NAME=${container_name} SPANNER_GRPC_PORT=${port} SPANNER_REST_PORT=${rest_port} \
+    $CONTAINER_CLI compose -p "${COMPOSE_PROJECT}_spanner" -f "docker-compose/latest/spanner/docker-compose.yaml" up -d $COMPOSE_WAIT
+  if [[ -z "$COMPOSE_WAIT" ]]; then
+      SPANNER_CONTAINER_NAME=${container_name} SPANNER_GRPC_PORT=${port} SPANNER_REST_PORT=${rest_port} \
+        compose_wait 120 -p "${COMPOSE_PROJECT}_spanner" -f "docker-compose/latest/spanner/docker-compose.yaml"
+  fi
+
+  # Configure instance (only one instance needed)
+  local host="localhost:${rest_port}"
+  echo "Configuring Spanner emulator instance on port ${rest_port}..."
+
+  curl -s -X POST "http://${host}/v1/projects/orm-test-project/instances" \
+    -H "Content-Type: application/json" \
+    -d '{
+          "instanceId": "orm-test-instance",
+          "instance": {
+            "config": "emulator-config",
+            "displayName": "Test Instance",
+            "nodeCount": 1
+          }
+        }' >/dev/null || true
+
+  # Create multiple databases
+  for n in $(seq 1 ${db_count}); do
+    local db_name="orm-test-db_${n}"
+    echo "Creating Spanner emulator database ${db_name}..."
+    local create_statement
+
+    if [[ "$dialect" == "POSTGRESQL" ]]; then
+       create_statement="CREATE DATABASE \"${db_name}\""
+    else
+       create_statement="CREATE DATABASE \`${db_name}\`"
+    fi
+
+    curl -s -X POST "http://${host}/v1/projects/orm-test-project/instances/orm-test-instance/databases" \
+      -H "Content-Type: application/json" \
+      -d "{
+            \"createStatement\": \"${create_statement//\"/\\\"}\",
+            \"databaseDialect\": \"${dialect}\"
+          }" >/dev/null
+
+    local update_statements=""
+    if [[ "$dialect" == "POSTGRESQL" ]]; then
+      update_statements='"ALTER DATABASE \"'"${db_name}"'\" SET \"spanner.default_time_zone\" = '"'UTC'"'", "ALTER DATABASE \"'"${db_name}"'\" SET \"spanner.version_retention_period\" = '"'10s'"'"'
+    else
+      update_statements='"ALTER DATABASE `'"${db_name}"'` SET OPTIONS ( default_time_zone = '"'UTC'"', version_retention_period = '"'10s'"' )"'
+    fi
+
+    curl -s -X PATCH "http://${host}/v1/projects/orm-test-project/instances/orm-test-instance/databases/${db_name}/ddl" \
+      -H "Content-Type: application/json" \
+      -d '{
+            "statements": [
+              '"${update_statements}"'
+            ]
+          }' >/dev/null || true
+  done
+}
+
+###############################################################################
+# Script args handling:
+###############################################################################
+REMOVE_ORPHANS="--remove-orphans"
+while [[ "${1:-}" == -* ]]; do
+    case "$1" in
+        -k|--keep-orphans)
+            REMOVE_ORPHANS=""
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+if [ -z ${1} ]; then
+    echo "No db name provided"
+    echo "Provide one of:"
+    echo -e "\tcockroachdb"
+    echo -e "\tcockroachdb_26_1"
+    echo -e "\tcockroachdb_25_4"
+    echo -e "\tcockroachdb_24_3"
+    echo -e "\tcockroachdb_24_1"
+    echo -e "\tcockroachdb_23_2"
+    echo -e "\tcubrid"
+    echo -e "\tcubrid_11_4"
+    echo -e "\tcubrid_10_2"
+    echo -e "\tdb2"
+    echo -e "\tdb2_12_1"
+    echo -e "\tdb2_11_5"
+    echo -e "\tdb2_spatial"
+    echo -e "\tedb"
+    echo -e "\tedb_17"
+    echo -e "\tedb_16"
+    echo -e "\tedb_15"
+    echo -e "\tedb_14"
+    echo -e "\thana"
+    echo -e "\tmariadb"
+    echo -e "\tmariadb_verylatest"
+    echo -e "\tmariadb_13_0"
+    echo -e "\tmariadb_12_3"
+    echo -e "\tmariadb_12_2"
+    echo -e "\tmariadb_12_1"
+    echo -e "\tmariadb_12_0"
+    echo -e "\tmariadb_11_8"
+    echo -e "\tmariadb_11_4"
+    echo -e "\tmariadb_10_11"
+    echo -e "\tmariadb_10_6"
+    echo -e "\tmssql"
+    echo -e "\tmssql_2025"
+    echo -e "\tmssql_2022"
+    echo -e "\tmssql_2017"
+    echo -e "\tmysql"
+    echo -e "\tmysql_26_10"
+    echo -e "\tmysql_9_7"
+    echo -e "\tmysql_8_4"
+    echo -e "\toracle"
+    echo -e "\toracle_23"
+    echo -e "\toracle_21"
+    echo -e "\toracle_18"
+    echo -e "\toracle_atps"
+    echo -e "\toracle_atps_tls"
+    echo -e "\toracle_db19c"
+    echo -e "\toracle_db21c"
+    echo -e "\toracle_db23c"
+    echo -e "\tgaussdb"
+    echo -e "\tpostgresql"
+    echo -e "\tpostgis"
+    echo -e "\tpostgis_18"
+    echo -e "\tpostgis_17"
+    echo -e "\tpostgis_16"
+    echo -e "\tpostgis_15"
+    echo -e "\tsybase"
+    echo -e "\ttidb"
+    echo -e "\ttidb_8_5"
+    echo -e "\ttidb_5_4"
+    echo -e "\tinformix"
+    echo -e "\tinformix_15"
+    echo -e "\tinformix_14_10"
+    echo -e "\tinformix_12_10"
+    echo -e "\tspanner"
+    echo -e "\tspanner_pg"
+    echo -e "\tspanner_emulator"
+else
+    ${1}
+fi

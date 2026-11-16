@@ -1,0 +1,11 @@
+@GenericGenerator(type = SequenceStyleGenerator.class,
+		parameters = {
+				@Parameter(name = "prefer_sequence_per_entity", value = "true"),
+				@Parameter(name = "sequence_per_entity_suffix", value = DedicatedSequenceEntity1.SEQUENCE_SUFFIX)
+		}
+)
+package org.hibernate.orm.test.annotations.id.generationmappings.sub;
+
+import org.hibernate.annotations.GenericGenerator;
+import org.hibernate.annotations.Parameter;
+import org.hibernate.id.enhanced.SequenceStyleGenerator;

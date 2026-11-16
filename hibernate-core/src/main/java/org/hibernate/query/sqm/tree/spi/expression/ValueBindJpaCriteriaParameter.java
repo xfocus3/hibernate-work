@@ -1,0 +1,111 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.type.BindableType;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+
+import java.util.Objects;
+
+
+/**
+ * A {@link JpaCriteriaParameter} created from a value when
+ * {@link org.hibernate.query.criteria.ValueHandlingMode} is {@code BIND}.
+ *
+ * @see org.hibernate.query.criteria.ValueHandlingMode
+ */
+public class ValueBindJpaCriteriaParameter<T> extends JpaCriteriaParameter<T> {
+	private final @Nullable T value;
+
+	public ValueBindJpaCriteriaParameter(@Nullable BindableType<? super T> type, @Nullable T value, @Nonnull NodeBuilder nodeBuilder) {
+		super( null, null, false, nodeBuilder );
+		assert value == null || type == null
+			|| ( type instanceof SqmBindableType<? super T> bindable
+					// TODO: why does SqmExpressible.getJavaType() return an apparently-wrong type?
+					? bindable.getExpressibleJavaType().isInstance( value )
+					: type.getJavaType().isInstance( value ) );
+		final SqmBindableType<? super T> sqmBindableType = nodeBuilder.resolveExpressible( type );
+		setExpressibleType(
+				sqmBindableType,
+				sqmBindableType == null && value != null
+						? nodeBuilder().getTypeConfiguration().getJavaTypeRegistry().resolveDescriptor( value.getClass() )
+						: null
+		);
+		this.value = value;
+	}
+
+	private ValueBindJpaCriteriaParameter(@Nonnull ValueBindJpaCriteriaParameter<T> original) {
+		super( original );
+		setExpressibleType(
+				original.getNodeType(),
+				original.getJavaTypeDescriptor()
+		);
+		this.value = original.value;
+	}
+
+	@Nonnull
+	@Override
+	public ValueBindJpaCriteriaParameter<T> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		return existing != null
+				? existing
+				: context.registerCopy( this,
+						new ValueBindJpaCriteriaParameter<>( this ) );
+	}
+
+	public @Nullable T getValue() {
+		return value;
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		SqmLiteral.appendHqlString( hql, getJavaTypeDescriptor(), value );
+	}
+
+	// For caching purposes, any two ValueBindJpaCriteriaParameter objects are compatible as ensured by the parent impl,
+	// but for equals/hashCode, use equals/hashCode of the underlying value, if available, from the nodes JavaType
+
+	@Override
+	public final boolean equals(@Nullable Object object) {
+		if ( this == object ) {
+			return true;
+		}
+		else if ( object instanceof ValueBindJpaCriteriaParameter<?> that ) {
+			if ( this.value == null || that.value == null ) {
+				return this.value == that.value
+					&& Objects.equals( this.getNodeType(), that.getNodeType() );
+			}
+			else {
+				final var thisJavaType = getJavaTypeDescriptor();
+				final var thatJavaType = that.getJavaTypeDescriptor();
+				if ( thisJavaType == null || thatJavaType == null ) {
+					return thisJavaType == thatJavaType
+						&& this.value.equals( that.value );
+				}
+				else {
+					return thisJavaType.equals( thatJavaType )
+						&& thisJavaType.areEqual( value, thisJavaType.cast( that.value ) );
+				}
+			}
+		}
+		else {
+			return false;
+		}
+	}
+
+	@Override
+	public int hashCode() {
+		if ( value == null ) {
+			return 0;
+		}
+		else {
+			final var javaType = getJavaTypeDescriptor();
+			return javaType == null
+					? value.hashCode()
+					: javaType.extractHashCode( value );
+		}
+	}
+}

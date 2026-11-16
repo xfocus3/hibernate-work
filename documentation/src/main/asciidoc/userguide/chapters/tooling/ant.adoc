@@ -1,0 +1,154 @@
+[[tooling-ant]]
+=== Ant
+
+:tooling-ant-examples: {root-project-dir}/tooling/hibernate-ant/src/test/resources/guide
+
+Use `org.hibernate.orm:hibernate-ant:{fullVersion}` and its transitive dependencies for Ant
+tooling. The JDBC driver is also required for operations that connect to a database.
+Keep enhancement tooling and runtime versions aligned.
+
+[[tooling-ant-enhancement]]
+==== Enhancement and compilation
+
+[[ant-enhance-task]]
+The enhancement task is `org.hibernate.tool.enhance.EnhancementTask`. This complete build
+compiles with the processor and then enhances the selected classes:
+
+[[enhance-task-example]]
+.Compile, generate the metamodel, and enhance
+[source,xml]
+----
+include::{tooling-ant-examples}/build.xml[]
+----
+
+Put `hibernate-ant` and its dependency jars in `lib`, including the model's compile-time APIs.
+Put `hibernate-processor` and its dependency jars in `processor-lib`. In particular, the
+compile classpath needs Jakarta Persistence and, with default processor options,
+`jakarta.annotation.Generated`. A dependency resolver such as Ivy may populate those paths;
+a single processor jar is not a complete processor path.
+
+Run `ant enhance`. `compile` generates and compiles the metamodel; `enhance` then modifies
+compiled classes, excluding `Excluded.class` in this example. Place the generated classes
+on the application runtime classpath together with the matching Hibernate runtime.
+
+[[ant-enhance-configuration]]
+===== Enhancement selection and options
+
+[cols="2,2,4",options="header"]
+|===
+|Attribute/element |Default |Purpose
+|[[ant-enhance-base-attribute,base]]`base`
+|Required
+|Classes root used to construct the enhancement classloader.
+|[[ant-enhance-dir-attribute,dir]]`dir`
+|Unset
+|Directory to walk recursively; supply a path beneath `base`, for example the same absolute classes directory.
+|[[ant-enhance-fileset-element,fileset]]Nested `fileset`
+|Unset
+|Explicit class-file selection, as in the example. Do not combine with `dir`: the task rejects that configuration.
+|[[ant-enhance-enableLazyInitialization-attribute,enableLazyInitialization]]`enableLazyInitialization`
+|`true`
+|Lazy-loading support; disabling it is deprecated for removal.
+|[[ant-enhance-enableDirtyTracking-attribute,enableDirtyTracking]]`enableDirtyTracking`
+|`true`
+|Inline dirty tracking; disabling it is deprecated for removal.
+|[[ant-enhance-enableAssociationManagement-attribute,enableAssociationManagement]]`enableAssociationManagement`
+|`false`
+|Enhancement-based bidirectional association management; deprecated for removal. Use <<auto-bidir-mgmt,flush-time bidirectional association management>> instead.
+|[[ant-enhance-enableClientEnhancement,enableClientEnhancement]]`enableClientEnhancement`
+|`false`
+|Rewrite client field accesses. See <<BytecodeEnhancement-client>> for target requirements.
+|[[ant-enhance-enableExtendedEnhancement-attribute,enableExtendedEnhancement]]`enableExtendedEnhancement`
+|Unset
+|Deprecated alias. An explicit `enableClientEnhancement` value wins, including `false`.
+|[[ant-enhance-failOnError-attribute,failOnError]]`failOnError`
+|`true`
+|Fail the build on enhancement errors.
+|===
+
+Selecting no input classes performs no enhancement. If all enhancement capabilities are
+explicitly disabled, the task skips enhancement. Keep ordinary compiler and enhancement
+failures visible instead of suppressing them in the main build recipe.
+
+[[tooling-ant-modelgen]]
+==== Annotation processing
+
+[[javac-task-example]]
+The `javac` task above has a separate processor path and writes generated Java to
+`target/generated-sources`. The compiler compiles that output in the same invocation.
+Both directories are explicit so IDE source roots and packaged class outputs can be configured
+consistently. `-proc:only` would generate sources without subsequently compiling the application;
+use it only when that is the intended build stage. See <<tooling-modelgen>> for generated types.
+
+[[tooling-ant-reveng]]
+==== Reverse engineering
+
+[[tooling-ant-reveng-task]]
+===== Task definition
+
+The main reverse-engineering task is `org.hibernate.tool.ant.HibernateToolTask`.
+Its classpath needs `hibernate-ant`, the tool's dependencies, the JDBC driver, and any custom
+strategy dependencies. The following build uses a `lib` directory containing those jars.
+
+[[tooling-ant-reveng-example]]
+.Generate entity sources from an existing database
+[source,xml]
+----
+include::{tooling-ant-examples}/reveng.xml[]
+----
+
+Supply <<tooling-reveng-connection,JDBC connection properties>>, then run `ant -f reveng.xml compile` for this example.
+The `compile` target runs generation first and compiles its output with the model APIs on the
+classpath. It disables annotation processing because this example only demonstrates reverse
+engineering; configure a processor separately when a generated metamodel is also required.
+
+[[tooling-ant-reveng-hibernatetool]]
+===== Task inputs and output
+
+`destdir` supplies the output directory; it can be overridden on individual exporters.
+`templatepath` selects custom FreeMarker templates. A nested `classpath` configures tool
+resolution, and `property` elements supply additional exporter properties.
+
+[[tooling-ant-reveng-configurations]]
+A configuration element supplies metadata. Use `jdbcconfiguration` for database discovery,
+with `propertyfile`, optional `configurationfile`, `packagename`, `reversestrategy`, and
+`revengfile`. Its detection flags are `detectmanytomany`, `detectonetoone`, and
+`detectoptimisticlock`, all defaulting to `true`; see <<tooling-reveng-detection>> for semantics.
+Other supported metadata sources include `configuration` for Hibernate configuration/mappings
+and `jpaconfiguration` for a persistence unit. Choose the source appropriate to the operation.
+
+[[tooling-ant-reveng-exporters]]
+===== Exporters
+
+[cols="2,4",options="header"]
+|===
+|Element |Output/work
+|`hbm2java` |Java entities.
+|`hbm2dao` |DAO sources.
+|`hbm2hbmxml` |Legacy HBM mapping files; prefer annotated entities for new output.
+|`hbm2cfgxml` |Hibernate configuration XML.
+|`hbm2ddl` |Schema DDL and optionally database execution; see below.
+|`hbm2doc` |HTML database documentation.
+|`hbmtemplate` |Custom template output.
+|`query` |HQL query execution against the configured metadata.
+|===
+
+Multiple exporters can share one metadata configuration. Check their output and database
+execution options before combining them; file generation and database execution are distinct.
+
+[[tooling-ant-schema]]
+==== Schema management
+
+The nested `hbm2ddl` exporter can export DDL from the chosen metadata source. It defaults to
+exporting to the database, unlike Maven's script-only default. To write a script without
+executing it, configure `export="false"` and a filename, for example:
+
+[source,xml]
+----
+<hbm2ddl export="false" console="false" outputfilename="schema.sql"/>
+----
+
+For application mappings, the library also exposes `org.hibernate.tool.hbm2ddl.SchemaExportTask`,
+`SchemaUpdateTask`, and `SchemaValidatorTask`. Supply the appropriate configuration/mappings,
+classpath, and connection settings. See <<schema-generation>> for supported schema operations
+and their execution/script semantics.

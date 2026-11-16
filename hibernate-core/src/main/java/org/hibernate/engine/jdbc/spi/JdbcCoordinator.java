@@ -1,0 +1,211 @@
+package org.hibernate.engine.jdbc.spi;
+
+import java.io.IOException;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.function.Supplier;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.jdbc.batch.spi.Batch;
+import org.hibernate.engine.jdbc.batch.spi.BatchKey;
+import org.hibernate.engine.jdbc.batch.spi.GroupedBatch;
+import org.hibernate.engine.jdbc.batch.spi.SingleStatementBatch;
+import org.hibernate.engine.jdbc.mutation.group.PreparedStatementGroup;
+import org.hibernate.jdbc.WorkExecutorVisitable;
+import org.hibernate.resource.jdbc.spi.LogicalConnectionImplementor;
+import org.hibernate.resource.transaction.backend.jdbc.spi.JdbcResourceTransactionAccess;
+import org.hibernate.resource.transaction.spi.TransactionCoordinatorOwner;
+import org.hibernate.sql.spi.mutation.jdbc.PreparableMutationOperation;
+
+/**
+ * Coordinates JDBC-related activities.
+ *
+ * @author Steve Ebersole
+ * @author Brett Meyer
+ */
+public interface JdbcCoordinator extends Serializable, TransactionCoordinatorOwner, JdbcResourceTransactionAccess {
+
+	/**
+	 * Retrieves the logical connection associated with this JDBC coordinator.
+	 *
+	 * @return The logical connection
+	 */
+	@Nonnull
+	LogicalConnectionImplementor getLogicalConnection();
+
+	/**
+	 * The builder of prepared and callable JDBC statements for
+	 * mutation operations (insert, update and delete) originating
+	 * from persistent context events, as opposed to Query handling
+	 */
+	@Nonnull
+	MutationStatementPreparer getMutationStatementPreparer();
+
+	/**
+	 * Get the {@linkplain Batch batch} for the supplied key, creating one
+	 * if needed using the supplied {@linkplain PreparedStatementGroup statementGroupSupplier}.
+	 *
+	 * @implNote Any previous Batch is executed and released prior to returning
+	 */
+	@Nonnull
+	GroupedBatch getGroupedBatch(
+			@Nonnull BatchKey key,
+			@Nullable Integer batchSize,
+			@Nonnull Supplier<PreparedStatementGroup> statementGroupSupplier);
+
+	/**
+	 * Get a mutation batch for a single preparable mutation operation.
+	 *
+	 * @implNote Any previous Batch is executed and released prior to returning
+	 */
+	@Nonnull
+	GroupedBatch getGroupedBatch(
+			@Nonnull BatchKey key,
+			@Nullable Integer batchSize,
+			@Nonnull PreparableMutationOperation mutationOperation);
+
+	/**
+	 * Get a batch for a single JDBC statement shape.
+	 *
+	 * @implNote Any previous Batch is executed and released prior to returning
+	 */
+	@Nonnull
+	SingleStatementBatch getSingleStatementBatch(
+			@Nonnull BatchKey key,
+			@Nullable Integer batchSize,
+			@Nonnull PreparableMutationOperation mutationOperation);
+
+	/**
+	 * Execute the currently managed batch (if any)
+	 */
+	void executeBatch();
+
+	/**
+	 * Conditionally execute the currently managed batch (if any), if the
+	 * keys do not match. A null key executes any current batch.
+	 */
+	void conditionallyExecuteBatch(@Nullable BatchKey key);
+
+	/**
+	 * Abort the currently managed batch (if any)
+	 */
+	void abortBatch();
+
+	/**
+	 * Obtain the statement preparer associated with this JDBC coordinator.
+	 *
+	 * @return This coordinator's statement preparer
+	 */
+	@Nonnull
+	StatementPreparer getStatementPreparer();
+
+	/**
+	 * Obtain the {@link ResultSet} extractor associated with this JDBC coordinator.
+	 *
+	 * @return This coordinator's resultset extractor
+	 */
+	@Nonnull
+	ResultSetReturn getResultSetReturn();
+
+	/**
+	 * Callback to let us know that a flush is beginning.  We use this fact
+	 * to temporarily circumvent aggressive connection releasing until after
+	 * the flush cycle is complete {@link #flushEnding()}
+	 */
+	void flushBeginning();
+
+	/**
+	 * Callback to let us know that a flush is ending.  We use this fact to
+	 * stop circumventing aggressive releasing connections.
+	 */
+	void flushEnding();
+
+	/**
+	 * Close this coordinator and release its resources.
+	 *
+	 * @return The user-supplied connection, or {@code null} if there is none.
+	 *
+	 * @see LogicalConnectionImplementor#close
+	 */
+	@Nullable
+	Connection close();
+
+	/**
+	 * Signals the end of transaction.
+	 * <p>
+	 * Intended for use from the transaction coordinator, after local transaction completion.  Used to conditionally
+	 * release the JDBC connection aggressively if the configured release mode indicates.
+	 */
+	void afterTransaction();
+
+	/**
+	 * Notification that a statement has completed execution, which
+	 * might indicate that the logical connection should perform an
+	 * aggressive release of its physical connection.
+	 */
+	void afterStatementExecution();
+
+	/**
+	 * Notification that execution of a statement has failed, which
+	 * might mean that the database has marked the transaction for
+	 * rollback.
+	 */
+	void afterFailedStatementExecution(@Nonnull SQLException sqlException);
+
+	/**
+	 * Perform the requested work handling exceptions, coordinating and handling return processing.
+	 *
+	 * @param work The work to be performed.
+	 * @param <T> The result type.
+	 * @return The work result, which may be {@code null}.
+	 */
+	@Nullable
+	<T> T coordinateWork(@Nonnull WorkExecutorVisitable<T> work);
+
+	/**
+	 * Attempt to cancel the last query sent to the JDBC driver.
+	 */
+	void cancelLastQuery();
+
+	/**
+	 * Calculate the amount of time, in seconds, still remaining before transaction timeout occurs.
+	 *
+	 * @return The number of seconds remaining until a transaction timeout occurs.  A negative value indicates
+	 * no timeout was requested.
+	 *
+	 * @throws org.hibernate.TransactionException Indicates the timeout period has already been exceeded.
+	 */
+	int determineRemainingTransactionTimeOutPeriod();
+
+	/**
+	 * Enable connection releases
+	 */
+	void enableReleases();
+
+	/**
+	 * Disable connection releases
+	 */
+	void disableReleases();
+
+	/**
+	 * Register a query statement as being able to be cancelled.
+	 *
+	 * @param statement The query statement, or null to clear the last query.
+	 */
+	void registerLastQuery(@Nullable Statement statement);
+
+	/**
+	 * Can this coordinator be serialized?
+	 *
+	 * @return {@code true} indicates the coordinator can be serialized.
+	 */
+	boolean isReadyForSerialization();
+
+	void serialize(@Nonnull ObjectOutputStream objectOutputStream) throws IOException;
+
+}

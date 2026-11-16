@@ -1,0 +1,381 @@
+package org.hibernate.orm.test.jpa.callbacks.jpa4;
+
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListener;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.PostUpdate;
+import jakarta.persistence.PreUpdate;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.Jira;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * @author Steve Ebersole
+ */
+@DomainModel(annotatedClasses = {
+		AssociationChangeTests.Vendor.class,
+		AssociationChangeTests.Part.class,
+		AssociationChangeTests.Product.class,
+		AssociationChangeTests.UpdateWatcher.class,
+})
+@SessionFactory
+public class AssociationChangeTests {
+	@AfterEach
+	void tearDown(SessionFactoryScope factoryScope) {
+		factoryScope.dropData();
+		UpdateWatcher.reset();
+	}
+
+	@Test
+	void baseline(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+		} );
+
+		UpdateWatcher.reset();
+
+		factoryScope.inTransaction( (session) -> {
+			var vendor = session.get( Vendor.class, 1 );
+			vendor.name = vendor.name + 'a';
+		} );
+
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testOwnedToOneChange(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+			var vendor2 = new Vendor( 2, "Z" );
+			session.persist( vendor2 );
+
+			var part1 = new Part( 1, "Widgeadonk", vendor );
+			session.persist( part1 );
+		} );
+
+		UpdateWatcher.reset();
+
+		factoryScope.inTransaction( (session) -> {
+			var part = session.get( Part.class, 1 );
+			part.vendor = session.getReference( Vendor.class, 2 );
+		} );
+
+		assertThat( UpdateWatcher.partPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.partPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testOwnerElementCollectionChange(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+		} );
+
+		UpdateWatcher.reset();
+
+		factoryScope.inTransaction( (session) -> {
+			var vendor = session.get( Vendor.class, 1 );
+			vendor.superlatives.add( "Amaze balls!" );
+		} );
+
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testOwnerElementCollectionChangeGuardrail(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+		} );
+
+		UpdateWatcher.reset();
+
+		factoryScope.inTransaction( (session) -> {
+			var vendor = session.get( Vendor.class, 1 );
+			// change entity state
+			vendor.name = vendor.name + 'a';
+			// *and* the collection
+			vendor.superlatives.add( "Amaze balls!" );
+		} );
+
+		// make sure we only get one set of callbacks
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	void ownerPreUpdateCollectionChangeIsIncludedInTheSameFlush(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( session -> session.persist( new Vendor( 1, "A" ) ) );
+
+		UpdateWatcher.reset();
+		UpdateWatcher.vendorPreUpdateAction = vendor -> vendor.superlatives.add( "changed in pre-update" );
+
+		factoryScope.inTransaction( session -> {
+			final var vendor = session.get( Vendor.class, 1 );
+			vendor.superlatives.size();
+			vendor.name = "B";
+		} );
+
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 1 );
+		factoryScope.inTransaction( session -> {
+			final var vendor = session.get( Vendor.class, 1 );
+			assertThat( vendor.superlatives ).containsExactly( "changed in pre-update" );
+		} );
+	}
+
+	@Test
+	void ownerPreUpdateCollectionReplacementIsIncludedInAutoFlush(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( session -> session.persist( new Vendor( 1, "A" ) ) );
+
+		UpdateWatcher.reset();
+		UpdateWatcher.vendorPreUpdateAction = vendor ->
+				vendor.superlatives = new HashSet<>( Set.of( "replacement from pre-update" ) );
+
+		factoryScope.inTransaction( session -> {
+			final var vendor = session.get( Vendor.class, 1 );
+			vendor.superlatives.size();
+			vendor.name = "B";
+
+			session.createQuery( "from Product", Product.class ).getResultList();
+			assertThat( UpdateWatcher.vendorPreUpdates ).isEmpty();
+			assertThat( UpdateWatcher.vendorPostUpdates ).isEmpty();
+
+			assertThat( session.createQuery(
+					"select count(s) from Vendor v join v.superlatives s",
+					Long.class
+			).getSingleResult() ).isEqualTo( 1L );
+			assertThat( vendor.superlatives ).containsExactly( "replacement from pre-update" );
+		} );
+
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testOwnerToManyChange(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+
+			var part1 = new Part( 1, "Widgeadonk", vendor );
+			session.persist( part1 );
+
+			var part2 = new Part( 2, "Padankadonk", vendor );
+			session.persist( part2 );
+
+			var product = new Product( 1, "stuff" );
+			product.parts = new HashSet<>();
+			product.parts.add( part1 );
+			session.persist( product );
+		} );
+
+		UpdateWatcher.reset();
+		factoryScope.inTransaction( (session) -> {
+			var product = session.get( Product.class, 1 );
+			product.parts.add( session.getReference( Part.class, 2 ) );
+		} );
+
+		assertThat( UpdateWatcher.productPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.productPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testOwnerToManyChangeGuardrail(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+
+			var part1 = new Part( 1, "Widgeadonk", vendor );
+			session.persist( part1 );
+
+			var part2 = new Part( 2, "Padankadonk", vendor );
+			session.persist( part2 );
+
+			var product = new Product( 1, "stuff" );
+			product.parts = new HashSet<>();
+			product.parts.add( part1 );
+			session.persist( product );
+		} );
+
+		UpdateWatcher.reset();
+		factoryScope.inTransaction( (session) -> {
+			var product = session.get( Product.class, 1 );
+			// change entity state
+			product.name = "Stuff";
+			// *and* the collection
+			product.parts.add( session.getReference( Part.class, 2 ) );
+		} );
+
+		// make sure we only get one set of callbacks
+		assertThat( UpdateWatcher.productPreUpdates ).hasSize( 1 );
+		assertThat( UpdateWatcher.productPostUpdates ).hasSize( 1 );
+	}
+
+	@Test
+	@Jira( "https://hibernate.atlassian.net/browse/HHH-20374" )
+	void testUnownedToManyChange(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			var vendor = new Vendor( 1, "A" );
+			session.persist( vendor );
+
+			var part1 = new Part( 1, "Widgeadonk", vendor );
+			session.persist( part1 );
+
+			var part2 = new Part( 2, "Padankadonk", null );
+			session.persist( part2 );
+		} );
+
+		UpdateWatcher.reset();
+		factoryScope.inTransaction( (session) -> {
+			var vendor = session.get( Vendor.class, 1 );
+			var part2 = session.getReference( Part.class, 2 );
+			// because `Vendor.parts` is the inverse side of the relationship,
+			// this addition should NOT make Vendor dirty and so should NOT
+			// trigger an update
+			vendor.parts.add( part2 );
+		} );
+
+		// ... and therefore, should NOT trigger events
+		assertThat( UpdateWatcher.vendorPreUpdates ).hasSize( 0 );
+		assertThat( UpdateWatcher.vendorPostUpdates ).hasSize( 0 );
+	}
+
+	@Entity(name = "Vendor")
+	public static class Vendor {
+		@Id
+		private Integer id;
+		private String name;
+		@ElementCollection
+		private Set<String> superlatives = new HashSet<>();
+		@OneToMany(mappedBy = "vendor")
+		private Set<Part> parts = new HashSet<>();
+
+		public Vendor() {
+		}
+
+		public Vendor(Integer id, String name) {
+			this.id = id;
+			this.name = name;
+		}
+	}
+
+	@Entity(name = "Part")
+	public static class Part {
+		@Id
+		private Integer id;
+		private String name;
+		@ManyToOne
+		@JoinColumn(name = "vendor_fk")
+		private Vendor vendor;
+
+		public Part() {
+		}
+
+		public Part(Integer id, String name, Vendor vendor) {
+			this.id = id;
+			this.name = name;
+			this.vendor = vendor;
+		}
+	}
+
+	@Entity(name = "Product")
+	public static class Product {
+		@Id
+		private Integer id;
+		private String name;
+		@OneToMany
+		private Set<Part> parts;
+
+		public Product() {
+		}
+
+		public Product(Integer id, String name) {
+			this.id = id;
+			this.name = name;
+		}
+	}
+
+	@EntityListener
+	public static class UpdateWatcher {
+		public static final List<Vendor> vendorPreUpdates = new ArrayList<>();
+		public static final List<Vendor> vendorPostUpdates = new ArrayList<>();
+
+		public static final List<Part> partPreUpdates = new ArrayList<>();
+		public static final List<Part> partPostUpdates = new ArrayList<>();
+
+		public static final List<Product> productPreUpdates = new ArrayList<>();
+		public static final List<Product> productPostUpdates = new ArrayList<>();
+		public static Consumer<Vendor> vendorPreUpdateAction;
+
+		public static void reset() {
+			vendorPreUpdates.clear();
+			vendorPostUpdates.clear();
+
+			partPreUpdates.clear();
+			partPostUpdates.clear();
+
+			productPreUpdates.clear();
+			productPostUpdates.clear();
+			vendorPreUpdateAction = null;
+		}
+
+		@PreUpdate
+		public void preUpdate(Vendor vendor) {
+			vendorPreUpdates.add( vendor );
+			if ( vendorPreUpdateAction != null ) {
+				vendorPreUpdateAction.accept( vendor );
+			}
+		}
+
+		@PostUpdate
+		public void postUpdate(Vendor vendor) {
+			vendorPostUpdates.add( vendor );
+		}
+
+		@PreUpdate
+		public void preUpdate(Part part) {
+			partPreUpdates.add( part );
+		}
+
+		@PostUpdate
+		public void postUpdate(Part part) {
+			partPostUpdates.add( part );
+		}
+
+		@PreUpdate
+		public void preUpdate(Product product) {
+			productPreUpdates.add( product );
+		}
+
+		@PostUpdate
+		public void postUpdate(Product product) {
+			productPostUpdates.add( product );
+		}
+	}
+
+}

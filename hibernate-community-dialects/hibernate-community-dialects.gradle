@@ -1,0 +1,18 @@
+plugins {
+    id "local.publishing-java-module"
+    id "local.publishing-group-relocation"
+}
+
+description = 'Hibernate\'s community supported dialects'
+
+dependencies {
+    api project( ':hibernate-core' )
+
+    testImplementation project( ':hibernate-testing' )
+    testImplementation project( ':hibernate-dialect-testkit' )
+    testImplementation project( path: ':hibernate-core', configuration: 'tests' )
+}
+
+test {
+    include '**/**'
+}

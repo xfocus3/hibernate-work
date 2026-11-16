@@ -1,0 +1,29 @@
+package org.hibernate.action.queue.internal.support;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.action.queue.spi.QueueType;
+import org.hibernate.boot.registry.StandardServiceInitiator;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+import java.util.Map;
+
+import static org.hibernate.cfg.FlushSettings.FLUSH_QUEUE_TYPE;
+
+/// @author Steve Ebersole
+public class ActionQueueFactoryServiceInitiator implements StandardServiceInitiator<ActionQueueFactoryService> {
+	public static final ActionQueueFactoryServiceInitiator INSTANCE = new ActionQueueFactoryServiceInitiator();
+
+	@Override
+	public @Nullable ActionQueueFactoryService initiateService(
+			@Nonnull Map<String, Object> configurationValues,
+			@Nonnull ServiceRegistryImplementor registry) {
+		return new ActionQueueFactoryService( QueueType.fromSetting( configurationValues.get( FLUSH_QUEUE_TYPE ) ) );
+	}
+
+	@Nonnull
+	@Override
+	public Class<ActionQueueFactoryService> getServiceInitiated() {
+		return ActionQueueFactoryService.class;
+	}
+}

@@ -1,0 +1,271 @@
+package org.hibernate.procedure.internal;
+
+import java.util.Locale;
+import java.util.Objects;
+
+import org.hibernate.engine.jdbc.env.spi.JdbcMetadata;
+import org.hibernate.procedure.ParameterTypeException;
+import org.hibernate.procedure.spi.NamedCallableQueryMemento;
+import org.hibernate.procedure.spi.ParameterStrategy;
+import org.hibernate.procedure.spi.ProcedureCallImplementor;
+import org.hibernate.procedure.spi.ProcedureParameterImplementor;
+import org.hibernate.type.BindableType;
+import org.hibernate.type.OutputableType;
+import org.hibernate.query.spi.AbstractQueryParameter;
+import org.hibernate.query.spi.QueryParameterBinding;
+import org.hibernate.sql.exec.internal.JdbcCallParameterExtractorImpl;
+import org.hibernate.sql.exec.internal.JdbcCallParameterRegistrationImpl;
+import org.hibernate.sql.exec.internal.JdbcCallRefCursorExtractorImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterImpl;
+import org.hibernate.sql.exec.spi.JdbcCallParameterRegistration;
+import org.hibernate.sql.exec.spi.JdbcParameterBinder;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.ProcedureParameterNamedBinder;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.ParameterMode;
+
+import static org.hibernate.type.internal.BindingTypeHelper.resolveTemporalPrecision;
+
+/**
+ * @author Steve Ebersole
+ */
+class ProcedureParameterImpl<T> extends AbstractQueryParameter<T> implements ProcedureParameterImplementor<T> {
+
+	private final String name;
+	private final Integer position;
+	private final ParameterMode mode;
+	private final Class<T> javaType;
+
+	/**
+	 * Used for named Query parameters
+	 */
+	ProcedureParameterImpl(
+			String name,
+			ParameterMode mode,
+			Class<T> javaType,
+			BindableType<T> hibernateType) {
+		super( false, hibernateType, javaType );
+		this.name = name;
+		this.position = null;
+		this.mode = mode;
+		this.javaType = javaType;
+	}
+
+	/**
+	 * Used for ordinal Query parameters
+	 */
+	public ProcedureParameterImpl(
+			Integer position,
+			ParameterMode mode,
+			Class<T> javaType,
+			BindableType<T> hibernateType) {
+		super( false, hibernateType, javaType );
+		this.name = null;
+		this.position = position;
+		this.mode = mode;
+		this.javaType = javaType;
+	}
+
+	@Override
+	@Nullable
+	public String getName() {
+		return name;
+	}
+
+	@Override
+	@Nullable
+	public Integer getPosition() {
+		return position;
+	}
+
+	@Override
+	@Nonnull
+	public ParameterMode getMode() {
+		return mode;
+	}
+
+	@Override
+	@Nonnull
+	public Class<T> getParameterType() {
+		return javaType;
+	}
+
+	@Override
+	@Nonnull
+	public NamedCallableQueryMemento.ParameterMemento toMemento() {
+		return session -> isNamed()
+				? new ProcedureParameterImpl<T>( getName(), getMode(), javaType, getHibernateType() )
+				: new ProcedureParameterImpl<T>( getPosition(), getMode(), javaType, getHibernateType() );
+	}
+
+	@Override
+	@Nonnull
+	public JdbcCallParameterRegistration toJdbcParameterRegistration(
+			int startIndex,
+			@Nonnull ProcedureCallImplementor<?> procedureCall) {
+		final QueryParameterBinding<T> binding =
+				procedureCall.getParameterBindings()
+						.getBinding( this );
+		final boolean isNamed =
+				procedureCall.getParameterStrategy() == ParameterStrategy.NAMED
+						&& name != null;
+		final var session = procedureCall.getSession();
+
+		final var typeToUse = (OutputableType<T>)
+				resolveTemporalPrecision(
+						binding == null ? null : binding.getExplicitTemporalPrecision(),
+						getBindableType( binding ),
+						session.getFactory().getQueryEngine().getCriteriaBuilder()
+				);
+
+		final String jdbcParamName;
+		final JdbcParameterBinder parameterBinder;
+		final JdbcCallRefCursorExtractorImpl refCursorExtractor;
+		final JdbcCallParameterExtractorImpl<T> parameterExtractor;
+		final var jdbcMetadata = session.getFactory().getJdbcServices().getJdbcMetadata();
+		final boolean passProcedureParameterNames =
+				session.getFactory().getSessionFactoryOptions()
+						.isPassProcedureParameterNames();
+		switch ( mode ) {
+			case REF_CURSOR:
+				jdbcParamName =
+						name != null
+							&& jdbcMetadata.supportsNamedParameters()
+							&& passProcedureParameterNames
+								? name
+								: null;
+				refCursorExtractor = new JdbcCallRefCursorExtractorImpl( startIndex );
+				parameterBinder = null;
+				parameterExtractor = null;
+				break;
+			case IN:
+				jdbcParamName = getJdbcParamName( procedureCall, isNamed, passProcedureParameterNames, typeToUse, jdbcMetadata );
+				validateBindableType( typeToUse, startIndex );
+				parameterBinder = getParameterBinder( typeToUse, jdbcParamName );
+				parameterExtractor = null;
+				refCursorExtractor = null;
+				break;
+			case INOUT:
+				jdbcParamName = getJdbcParamName( procedureCall, isNamed, passProcedureParameterNames, typeToUse, jdbcMetadata );
+				validateBindableType( typeToUse, startIndex );
+				parameterBinder = getParameterBinder( typeToUse, jdbcParamName );
+				parameterExtractor = new JdbcCallParameterExtractorImpl<>( procedureCall.getProcedureName(), jdbcParamName, startIndex, typeToUse );
+				refCursorExtractor = null;
+				break;
+			default:
+				jdbcParamName = getJdbcParamName( procedureCall, isNamed, passProcedureParameterNames, typeToUse, jdbcMetadata );
+				validateBindableType( typeToUse, startIndex );
+				parameterBinder = null;
+				parameterExtractor = new JdbcCallParameterExtractorImpl<>( procedureCall.getProcedureName(), jdbcParamName, startIndex, typeToUse );
+				refCursorExtractor = null;
+				break;
+		}
+
+		return new JdbcCallParameterRegistrationImpl(
+				jdbcParamName,
+				startIndex,
+				mode,
+				typeToUse,
+				parameterBinder,
+				parameterExtractor,
+				refCursorExtractor
+		);
+	}
+
+	private BindableType<T> getBindableType(QueryParameterBinding<T> binding) {
+		final var type = getHibernateType();
+		if ( type != null ) {
+			return type;
+		}
+		else if ( binding != null ) {
+			return binding.getBindType();
+		}
+		else {
+			return null;
+		}
+	}
+
+	private String getJdbcParamName(
+			ProcedureCallImplementor procedureCall,
+			boolean isNamed,
+			boolean passProcedureParameterNames,
+			OutputableType<T> typeToUse,
+			JdbcMetadata jdbcMetadata) {
+		return isNamed && passProcedureParameterNames
+			&& canDoNameParameterBinding( typeToUse, procedureCall, jdbcMetadata )
+				? name
+				: null;
+	}
+
+	private void validateBindableType(BindableType<T> bindableType, int startIndex) {
+		if ( bindableType == null ) {
+			throw new ParameterTypeException(
+					String.format(
+							Locale.ROOT,
+							"Could not determine ProcedureCall parameter bind type - %s (%s)",
+							this.name != null ? this.name : this.position,
+							startIndex
+					)
+			);
+		}
+	}
+
+	private JdbcParameterBinder getParameterBinder(BindableType<T> typeToUse, String name) {
+		if ( typeToUse == null ) {
+			throw new ParameterTypeException(
+					String.format(
+							Locale.ROOT,
+							"Cannot determine the bindable type for procedure parameter %s (%s)",
+							this.name != null ? this.name : this.position,
+							name
+					)
+			);
+		}
+		else if ( typeToUse instanceof BasicType<?> basicType ) {
+			return new JdbcParameterImpl( basicType );
+		}
+		else {
+			throw new UnsupportedOperationException();
+		}
+	}
+
+	private boolean canDoNameParameterBinding(
+			BindableType<?> hibernateType,
+			ProcedureCallImplementor procedureCall,
+			JdbcMetadata jdbcMetadata) {
+		return procedureCall.getFunctionReturn() == null
+			&& jdbcMetadata.supportsNamedParameters()
+			&& hibernateType instanceof ProcedureParameterNamedBinder<?> binder
+			&& binder.canDoSetting();
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash( name, position, mode );
+	}
+
+	@Override
+	public boolean equals(Object object) {
+		if ( this == object ) {
+			return true;
+		}
+		else if ( object == null ) {
+			return false;
+		}
+		else if ( !(object instanceof ProcedureParameterImpl<?> that) ) {
+			return false;
+		}
+		else {
+			return Objects.equals( name, that.name )
+				&& Objects.equals( position, that.position )
+				&& mode == that.mode;
+		}
+	}
+
+	@Override
+	public String toString() {
+		return position == null ? name : position.toString();
+	}
+}

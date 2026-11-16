@@ -1,0 +1,17 @@
+package org.hibernate.event.spi;
+import jakarta.annotation.Nonnull;
+
+
+/**
+ * Called after an entity update is committed to the datastore.
+ *
+ * @author Shawn Clowater
+ */
+public interface PostCommitUpdateEventListener extends PostUpdateEventListener {
+	/**
+	 * Called when a commit fails and an entity was scheduled for update
+	 *
+	 * @param event the update event to be handled
+	 */
+	void onPostUpdateCommitFailed(@Nonnull PostUpdateEvent event);
+}

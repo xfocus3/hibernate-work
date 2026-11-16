@@ -1,0 +1,75 @@
+package org.hibernate.query.criteria;
+
+import java.util.List;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.query.common.FetchClauseType;
+
+/**
+ * Models a query part i.e. the commonalities between a query group and a query specification.
+ *
+ * @see JpaQueryStructure
+ * @see JpaQueryGroup
+ *
+ * @author Christian Beikov
+ */
+public interface JpaQueryPart<T> extends JpaCriteriaNode {
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Ordering clause
+
+	/**
+	 * Return the ordering specifications.
+	 */
+	@Nonnull
+	List<? extends JpaOrder> getSortSpecifications();
+
+	/**
+	 * Set the ordering specifications.
+	 */
+	@Nonnull
+	JpaQueryPart<T> setSortSpecifications(@Nonnull List<? extends JpaOrder> sortSpecifications);
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Limit/Offset/Fetch clause
+
+	//TODO: these operations should only accept integer literals or parameters
+
+	/**
+	 * Return the query offset expression.
+	 */
+	@Nullable
+	JpaExpression<? extends Number> getOffset();
+
+	/**
+	 * Set the query offset.
+	 */
+	@Nonnull
+	JpaQueryPart<T> setOffset(@Nullable JpaExpression<? extends Number> offset);
+
+	/**
+	 * Return the query fetch expression.
+	 */
+	@Nullable
+	JpaExpression<? extends Number> getFetch();
+
+	/**
+	 * Set the query fetch limit.
+	 */
+	@Nonnull
+	JpaQueryPart<T> setFetch(@Nullable JpaExpression<? extends Number> fetch);
+
+	/**
+	 * Set the query fetch limit.
+	 */
+	@Nonnull
+	JpaQueryPart<T> setFetch(@Nullable JpaExpression<? extends Number> fetch, @Nonnull FetchClauseType fetchClauseType);
+
+	/**
+	 * Return the fetch clause type.
+	 */
+	@Nonnull
+	FetchClauseType getFetchClauseType();
+}

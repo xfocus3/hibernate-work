@@ -1,0 +1,28 @@
+package org.hibernate.event.internal;
+
+import org.hibernate.event.spi.PreLoadEvent;
+import org.hibernate.event.spi.PreLoadEventListener;
+import jakarta.annotation.Nonnull;
+
+/**
+ * Called before injecting property values into a newly
+ * loaded entity instance.
+ *
+ * @author Gavin King
+ */
+public class DefaultPreLoadEventListener implements PreLoadEventListener {
+
+	@Override
+	public void onPreLoad(@Nonnull PreLoadEvent event) {
+		final var persister = event.getPersister();
+		event.getSession().runInterceptorCallback(
+				() -> event.getSession().getInterceptor().onLoad(
+						event.getEntity(),
+						event.getId(),
+						event.getState(),
+						persister.getPropertyNames(),
+						persister.getPropertyTypes()
+				) );
+	}
+
+}

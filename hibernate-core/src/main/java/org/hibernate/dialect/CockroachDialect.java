@@ -1,0 +1,1257 @@
+package org.hibernate.dialect;
+
+import org.hibernate.dialect.temporaltype.spi.TemporalValueSemantics;
+
+import org.hibernate.dialect.temporaltype.spi.CurrentTimestampSelection;
+
+import org.hibernate.dialect.temporaltype.spi.TemporalOperationSupport;
+import org.hibernate.dialect.temporaltype.spi.TemporalOperationSupports;
+
+import org.hibernate.dialect.temporaltype.spi.TemporalFormatSupport;
+
+import org.hibernate.dialect.temporaltype.spi.CurrentTemporalSupport;
+
+import org.hibernate.dialect.lob.spi.LobSupport;
+import org.hibernate.dialect.lob.spi.LobSupports;
+
+import org.hibernate.SPI;
+import static org.hibernate.SPI.Role.USE;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+import static org.hibernate.SPI.Role.SUPPLY;
+
+import org.hibernate.dialect.type.spi.DirectJavaTimeJdbcSupport;
+import org.hibernate.dialect.type.spi.DirectJavaTimeJdbcSupports;
+import org.hibernate.dialect.type.spi.StandardDdlTypes;
+
+import org.hibernate.dialect.type.spi.TypeSizingProfile;
+
+
+
+import org.hibernate.dialect.array.spi.ArraySupport;
+import org.hibernate.dialect.jdbc.spi.PostgreSQLDriverKind;
+
+import org.hibernate.dialect.type.spi.TimeZoneSupport;
+
+import org.hibernate.dialect.type.spi.NationalizationSupport;
+
+import org.hibernate.dialect.aggregate.spi.FunctionalDependencyAnalysisSupport;
+
+import org.hibernate.dialect.sql.ast.spi.NullOrdering;
+
+import org.hibernate.dialect.sql.ast.spi.DmlTargetColumnQualifierSupport;
+
+import org.hibernate.dialect.sql.ast.spi.CteSupport;
+import org.hibernate.dialect.sql.ast.spi.MutationKind;
+import org.hibernate.dialect.sql.ast.spi.MutationSyntaxCapability;
+import org.hibernate.dialect.sql.ast.spi.MutationSyntaxSupport;
+import org.hibernate.dialect.sql.ast.spi.PredicateSupport;
+import org.hibernate.dialect.sql.ast.spi.NullOrderingSupport;
+import org.hibernate.dialect.sql.ast.spi.RowValueSupport;
+import org.hibernate.dialect.sql.ast.spi.SubquerySupport;
+import org.hibernate.dialect.sql.ast.spi.ValuesListSupport;
+
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.TemporalType;
+import jakarta.annotation.Nullable;
+import org.hibernate.QueryTimeoutException;
+import org.hibernate.boot.model.FunctionContributions;
+import org.hibernate.boot.model.TypeContributions;
+import org.hibernate.dialect.aggregate.spi.AggregateSupport;
+import org.hibernate.dialect.aggregate.internal.CockroachDBAggregateSupport;
+import org.hibernate.dialect.function.CommonFunctionFactory;
+import org.hibernate.dialect.function.spi.WindowFunctionSupport;
+import org.hibernate.dialect.function.spi.TupleCountSupport;
+import org.hibernate.dialect.function.FormatFunction;
+import org.hibernate.dialect.function.PostgreSQLTruncFunction;
+import org.hibernate.dialect.generated.spi.GeneratedValuesSupport;
+import org.hibernate.dialect.identity.internal.CockroachDBIdentityColumnSupport;
+import org.hibernate.dialect.identity.spi.IdentityColumnSupport;
+import org.hibernate.dialect.lock.internal.CockroachLockingSupport;
+import org.hibernate.dialect.lock.spi.LockingSupport;
+import org.hibernate.dialect.namespace.spi.NamespaceSupport;
+import org.hibernate.dialect.namespace.spi.NamespaceSupports;
+import org.hibernate.dialect.pagination.spi.LimitHandler;
+import org.hibernate.dialect.schema.spi.AlterColumnTypeRequest;
+import org.hibernate.dialect.schema.spi.ExistenceCheckPlacement;
+import org.hibernate.dialect.schema.spi.IfExistsSupport;
+import org.hibernate.dialect.schema.spi.IndexNameQualification;
+import org.hibernate.dialect.schema.spi.SchemaDropSupport;
+import org.hibernate.dialect.pagination.spi.OffsetFetchLimitHandler;
+import org.hibernate.dialect.rowsecurity.internal.CockroachRowLevelSecurity;
+import org.hibernate.dialect.rowsecurity.spi.RowLevelSecurity;
+import org.hibernate.dialect.rowsecurity.spi.RowLevelSecurityStrategies;
+import org.hibernate.dialect.sequence.internal.PostgreSQLSequenceSupport;
+import org.hibernate.dialect.sequence.spi.SequenceSupport;
+import org.hibernate.dialect.sql.ast.internal.CockroachSqlAstTranslator;
+import org.hibernate.dialect.type.spi.PostgreSQLJdbcTypes;
+import org.hibernate.engine.jdbc.dialect.spi.DialectResolutionInfo;
+import org.hibernate.engine.jdbc.env.spi.IdentifierCaseStrategy;
+import org.hibernate.engine.jdbc.env.spi.IdentifierHelper;
+import org.hibernate.dialect.identifier.spi.IdentifierHelperBuildRequest;
+import org.hibernate.engine.jdbc.env.spi.NameQualifierSupport;
+import org.hibernate.exception.LockAcquisitionException;
+import org.hibernate.exception.LockTimeoutException;
+import org.hibernate.exception.TransactionSerializationException;
+import org.hibernate.exception.spi.SQLExceptionConversionDelegate;
+import org.hibernate.exception.spi.TemplatedViolatedConstraintNameExtractor;
+import org.hibernate.exception.spi.ViolatedConstraintNameExtractor;
+import org.hibernate.internal.util.config.ConfigurationHelper;
+import org.hibernate.query.SemanticException;
+import org.hibernate.query.common.TemporalUnit;
+import org.hibernate.dialect.temporaltype.spi.IntervalType;
+import org.hibernate.query.sqm.produce.function.StandardFunctionArgumentTypeResolvers;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslatorFactory;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.dialect.sql.ast.spi.StandardSqlAstTranslatorFactory;
+import org.hibernate.sql.ast.spi.Statement;
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+import org.hibernate.sql.exec.spi.JdbcOperation;
+import org.hibernate.sql.spi.mutation.MutationOperation;
+import org.hibernate.dialect.sql.ast.spi.OptionalTableUpdateOperationRequest;
+import org.hibernate.sql.spi.mutation.jdbc.OptionalTableUpdateWithUpsertOperation;
+import org.hibernate.tool.schema.extract.spi.ColumnTypeInformation;
+import org.hibernate.tool.schema.extract.spi.ExtractionContext;
+import org.hibernate.tool.schema.extract.spi.InformationExtractor;
+import org.hibernate.tool.schema.extract.spi.InformationExtractors;
+import org.hibernate.tool.schema.extract.spi.SequenceInformationExtractor;
+import org.hibernate.tool.schema.extract.spi.SequenceInformationExtractors;
+import org.hibernate.type.JavaObjectType;
+import org.hibernate.type.descriptor.jdbc.BlobJdbcType;
+import org.hibernate.type.descriptor.jdbc.ClobJdbcType;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.descriptor.jdbc.ObjectNullAsBinaryTypeJdbcType;
+import org.hibernate.type.descriptor.jdbc.UUIDJdbcType;
+import org.hibernate.type.descriptor.jdbc.spi.JdbcTypeRegistry;
+import org.hibernate.type.spi.TypeConfiguration;
+
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.temporal.ChronoField;
+import java.time.temporal.TemporalAccessor;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.List;
+import java.util.TimeZone;
+import java.util.regex.Pattern;
+
+import static java.lang.Integer.parseInt;
+import static org.hibernate.cfg.DialectSpecificSettings.COCKROACH_VERSION_STRING;
+import static org.hibernate.exception.spi.TemplatedViolatedConstraintNameExtractor.extractUsingTemplate;
+import static org.hibernate.jdbc.spi.JdbcExceptionHelper.extractSqlState;
+import static org.hibernate.internal.util.StringHelper.split;
+import static org.hibernate.query.common.TemporalUnit.DAY;
+import static org.hibernate.query.common.TemporalUnit.EPOCH;
+import static org.hibernate.query.common.TemporalUnit.NATIVE;
+import static org.hibernate.type.SqlTypes.ARRAY;
+import static org.hibernate.type.SqlTypes.BINARY;
+import static org.hibernate.type.SqlTypes.BLOB;
+import static org.hibernate.type.SqlTypes.CHAR;
+import static org.hibernate.type.SqlTypes.CLOB;
+import static org.hibernate.type.SqlTypes.GEOGRAPHY;
+import static org.hibernate.type.SqlTypes.GEOMETRY;
+import static org.hibernate.type.SqlTypes.INET;
+import static org.hibernate.type.SqlTypes.INTEGER;
+import static org.hibernate.type.SqlTypes.JSON;
+import static org.hibernate.type.SqlTypes.LONG32NVARCHAR;
+import static org.hibernate.type.SqlTypes.LONG32VARBINARY;
+import static org.hibernate.type.SqlTypes.LONG32VARCHAR;
+import static org.hibernate.type.SqlTypes.NCHAR;
+import static org.hibernate.type.SqlTypes.NCLOB;
+import static org.hibernate.type.SqlTypes.NVARCHAR;
+import static org.hibernate.type.SqlTypes.OTHER;
+import static org.hibernate.type.SqlTypes.TIME;
+import static org.hibernate.type.SqlTypes.TIMESTAMP;
+import static org.hibernate.type.SqlTypes.TIMESTAMP_UTC;
+import static org.hibernate.type.SqlTypes.TIMESTAMP_WITH_TIMEZONE;
+import static org.hibernate.type.SqlTypes.TIME_UTC;
+import static org.hibernate.type.SqlTypes.TINYINT;
+import static org.hibernate.type.SqlTypes.UUID;
+import static org.hibernate.type.SqlTypes.VARBINARY;
+import static org.hibernate.type.SqlTypes.VARCHAR;
+import static org.hibernate.dialect.literal.spi.StandardDateTimeLiteralRendering.appendAsDate;
+import static org.hibernate.dialect.literal.spi.StandardDateTimeLiteralRendering.appendAsLocalTime;
+import static org.hibernate.dialect.literal.spi.StandardDateTimeLiteralRendering.appendAsTime;
+import static org.hibernate.dialect.literal.spi.StandardDateTimeLiteralRendering.appendAsTimestampWithMicros;
+import static org.hibernate.dialect.literal.spi.StandardDateTimeLiteralRendering.appendAsTimestampWithMillis;
+
+/**
+ * A {@linkplain Dialect SQL dialect} for CockroachDB 23.2 and above.
+ *
+ * @author Gavin King
+ * @author Yoobin Yoon
+ */
+public class CockroachDialect extends Dialect implements CurrentTemporalSupport, TemporalFormatSupport, TemporalOperationSupport {
+
+	@Override
+	public DirectJavaTimeJdbcSupport getDirectJavaTimeJdbcSupport() {
+		return DirectJavaTimeJdbcSupports.local();
+	}
+
+	private IfExistsSupport ifExistsSupport;
+	private SchemaDropSupport schemaDropSupport;
+
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public TemporalOperationSupport getTemporalOperationSupport() {
+		return this;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public TemporalFormatSupport getTemporalFormatSupport() {
+		return this;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public CurrentTemporalSupport getCurrentTemporalSupport() {
+		return this;
+	}
+	private final TypeSizingProfile typeSizingProfile = TypeSizingProfile.builder( super.getTypeSizingProfile() )
+			.defaultIntervalSecondScale( 6 )
+			.build();
+
+	@Override
+	public TypeSizingProfile getTypeSizingProfile() {
+		return typeSizingProfile;
+	}
+
+	// KNOWN LIMITATIONS:
+	// * no support for java.sql.Clob
+
+	// Pre-compile and reuse pattern
+	private static final Pattern CRDB_VERSION_PATTERN = Pattern.compile( "v[\\d]+(\\.[\\d]+)?(\\.[\\d]+)?" );
+
+	protected static final DatabaseVersion MINIMUM_VERSION = DatabaseVersion.make( 23, 2 );
+
+	protected final PostgreSQLDriverKind driverKind;
+
+	public CockroachDialect() {
+		this( MINIMUM_VERSION );
+	}
+
+	public CockroachDialect(DialectResolutionInfo info) {
+		this( fetchDataBaseVersion( info ), PostgreSQLDriverKind.determineKind( info ) );
+	}
+
+	public CockroachDialect(DialectResolutionInfo info, String versionString) {
+		this(
+				versionString == null
+						? info.makeCopyOrDefault( MINIMUM_VERSION )
+						: parseVersion( versionString ),
+				PostgreSQLDriverKind.determineKind( info )
+		);
+	}
+
+	public CockroachDialect(DatabaseVersion version) {
+		super(version);
+		driverKind = PostgreSQLDriverKind.PG_JDBC;
+	}
+
+	public CockroachDialect(DatabaseVersion version, PostgreSQLDriverKind driverKind) {
+		super(version);
+		this.driverKind = driverKind;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public DatabaseVersion determineDatabaseVersion(DialectResolutionInfo info) {
+		return fetchDataBaseVersion( info );
+	}
+
+	protected static DatabaseVersion fetchDataBaseVersion(DialectResolutionInfo info) {
+		String versionString = null;
+		final var databaseMetadata = info.getDatabaseMetadata();
+		if ( databaseMetadata != null ) {
+			try ( var statement = databaseMetadata.getConnection().createStatement();
+					var resultSet = statement.executeQuery( "SELECT version()" ) ) {
+				if ( resultSet.next() ) {
+					versionString = resultSet.getString( 1 );
+				}
+			}
+			catch (SQLException ex) {
+				// Ignore
+			}
+		}
+		if ( versionString == null ) {
+			// default to the dialect-specific configuration setting
+			versionString = ConfigurationHelper.getString( COCKROACH_VERSION_STRING, info.getConfigurationValues() );
+		}
+		return versionString != null ? parseVersion( versionString ) : info.makeCopyOrDefault( MINIMUM_VERSION );
+	}
+
+	public static DatabaseVersion parseVersion( String versionString ) {
+		// What the DB select returns is similar to
+		// "CockroachDB CCL v21.2.10 (x86_64-unknown-linux-gnu, built 2022/05/02 17:38:58, go1.16.6)"
+		final var matcher = CRDB_VERSION_PATTERN.matcher( versionString == null ? "" : versionString );
+		if ( matcher.find() ) {
+			final var versionParts = split( ".", matcher.group().substring( 1 ) );
+			// if we got to this point, there is at least a major version, so no need to check [].length > 0
+			final int majorVersion = parseInt( versionParts[0] );
+			final int minorVersion = versionParts.length > 1 ? parseInt( versionParts[1] ) : 0;
+			final int microVersion = versionParts.length > 2 ? parseInt( versionParts[2] ) : 0;
+			return new SimpleDatabaseVersion( majorVersion, minorVersion, microVersion);
+		}
+		else {
+			return MINIMUM_VERSION;
+		}
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	protected DatabaseVersion getMinimumSupportedVersion() {
+		return MINIMUM_VERSION;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	protected String columnType(int sqlTypeCode) {
+		return switch (sqlTypeCode) {
+			case TINYINT -> "smallint"; // no tinyint
+			case INTEGER -> "int4";
+			case NCHAR -> columnType( CHAR );
+			case NVARCHAR -> columnType( VARCHAR );
+			case NCLOB, CLOB -> "string";
+			case BINARY, VARBINARY, BLOB -> "bytes";
+			// We do not use the time with timezone type because PG
+			// deprecated it and it lacks certain operations like
+			// subtraction
+//			case TIME_UTC -> columnType( TIME_WITH_TIMEZONE );
+			case TIMESTAMP_UTC -> columnType( TIMESTAMP_WITH_TIMEZONE );
+			default -> super.columnType(sqlTypeCode);
+		};
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	protected String castType(int sqlTypeCode) {
+		return switch (sqlTypeCode) {
+			case CHAR, NCHAR, VARCHAR, NVARCHAR, LONG32VARCHAR, LONG32NVARCHAR -> "string";
+			case BINARY, VARBINARY, LONG32VARBINARY -> "bytes";
+			default -> super.castType( sqlTypeCode );
+		};
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	protected void registerColumnTypes(TypeContributions typeContributions, ServiceRegistry serviceRegistry) {
+		super.registerColumnTypes( typeContributions, serviceRegistry );
+
+		final var ddlTypeRegistry = typeContributions.getTypeConfiguration().getDdlTypeRegistry();
+
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.simple( UUID, "uuid", this ) );
+
+		// The following DDL types require that the PGobject class is usable/visible,
+		// or that a special JDBC type implementation exists, that supports wrapping read/write expressions
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.simple( GEOMETRY, "geometry", this ) );
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.simple( GEOGRAPHY, "geography", this ) );
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.scale6IntervalSecond( this ) );
+
+		// Prefer jsonb if possible
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.simple( INET, "inet", this ) );
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.simple( JSON, "jsonb", this ) );
+
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.namedNativeEnum() );
+		ddlTypeRegistry.addDescriptor( StandardDdlTypes.namedNativeOrdinalEnum() );
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public JdbcType resolveSqlTypeDescriptor(
+			String columnTypeName,
+			int jdbcTypeCode,
+			int precision,
+			int scale,
+			JdbcTypeRegistry jdbcTypeRegistry) {
+		switch ( jdbcTypeCode ) {
+			case VARCHAR:
+				if ( "text".equals( columnTypeName ) && precision == Integer.MAX_VALUE ) {
+					jdbcTypeCode = LONG32VARCHAR;
+				}
+				break;
+			case OTHER:
+				switch ( columnTypeName ) {
+					case "uuid":
+						jdbcTypeCode = UUID;
+						break;
+					case "json":
+					case "jsonb":
+						jdbcTypeCode = JSON;
+						break;
+					case "inet":
+						jdbcTypeCode = INET;
+						break;
+					case "geometry":
+						jdbcTypeCode = GEOMETRY;
+						break;
+					case "geography":
+						jdbcTypeCode = GEOGRAPHY;
+						break;
+				}
+				break;
+			case TIME:
+				// The PostgreSQL JDBC driver reports TIME for timetz, but we use it only for mapping OffsetTime to UTC
+				if ( "timetz".equals( columnTypeName ) ) {
+					jdbcTypeCode = TIME_UTC;
+				}
+				break;
+			case TIMESTAMP:
+				// The PostgreSQL JDBC driver reports TIMESTAMP for timestamptz, but we use it only for mapping Instant
+				if ( "timestamptz".equals( columnTypeName ) ) {
+					jdbcTypeCode = TIMESTAMP_UTC;
+				}
+				break;
+			case ARRAY:
+				// PostgreSQL names array types by prepending an underscore to the base name
+				if ( columnTypeName.charAt( 0 ) == '_' ) {
+					final String componentTypeName = columnTypeName.substring( 1 );
+					final Integer sqlTypeCode = resolveSqlTypeCode( componentTypeName, jdbcTypeRegistry.getTypeConfiguration() );
+					if ( sqlTypeCode != null ) {
+						return jdbcTypeRegistry.resolveTypeConstructorDescriptor(
+								jdbcTypeCode,
+								jdbcTypeRegistry.getDescriptor( sqlTypeCode ),
+								ColumnTypeInformation.EMPTY
+						);
+					}
+				}
+				break;
+		}
+		return jdbcTypeRegistry.getDescriptor( jdbcTypeCode );
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	protected Integer resolveSqlTypeCode(String columnTypeName, TypeConfiguration typeConfiguration) {
+		return switch (columnTypeName) {
+			case "bool" -> Types.BOOLEAN;
+			case "float4" -> Types.REAL; // Use REAL instead of FLOAT to get Float as recommended Java type
+			case "float8" -> Types.DOUBLE;
+			case "int2" -> Types.SMALLINT;
+			case "int4" -> Types.INTEGER;
+			case "int8" -> Types.BIGINT;
+			default -> super.resolveSqlTypeCode( columnTypeName, typeConfiguration );
+		};
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public boolean equivalentTypes(int typeCode1, int typeCode2) {
+		switch ( typeCode1 ) {
+			// On CockroachDB, we use the same DDL type, so treat the types as equivalent
+			case LONG32VARCHAR, LONG32NVARCHAR, CLOB, NCLOB:
+				switch ( typeCode2 ) {
+					case LONG32VARCHAR, LONG32NVARCHAR, CLOB, NCLOB:
+						return true;
+				}
+			default:
+				return super.equivalentTypes( typeCode1, typeCode2 );
+		}
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public void contributeTypes(TypeContributions typeContributions, ServiceRegistry serviceRegistry) {
+		super.contributeTypes( typeContributions, serviceRegistry );
+		contributeCockroachTypes( typeContributions, serviceRegistry );
+	}
+
+	protected void contributeCockroachTypes(TypeContributions typeContributions, ServiceRegistry serviceRegistry) {
+		final var jdbcTypeRegistry = typeContributions.getTypeConfiguration()
+				.getJdbcTypeRegistry();
+		// Don't use this type due to https://github.com/pgjdbc/pgjdbc/issues/2862
+		//jdbcTypeRegistry.addDescriptor( TimestampUtcAsOffsetDateTimeJdbcType.INSTANCE );
+		if ( driverKind == PostgreSQLDriverKind.PG_JDBC ) {
+			jdbcTypeRegistry.addDescriptor( PostgreSQLJdbcTypes.enumType() );
+			jdbcTypeRegistry.addDescriptor( PostgreSQLJdbcTypes.ordinalEnumType() );
+			jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.uuid() );
+			if ( PostgreSQLJdbcTypes.isDriverUsable( serviceRegistry ) ) {
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.driverIntervalSecond( serviceRegistry ) );
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.driverInet( serviceRegistry ) );
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.driverJsonb( serviceRegistry ) );
+				jdbcTypeRegistry.addTypeConstructorIfAbsent( PostgreSQLJdbcTypes.driverJsonbArrayConstructor( serviceRegistry ) );
+			}
+			else {
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingIntervalSecond() );
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingInet() );
+				jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingJsonb() );
+				jdbcTypeRegistry.addTypeConstructorIfAbsent( PostgreSQLJdbcTypes.castingJsonbArrayConstructor() );
+			}
+		}
+		else {
+			jdbcTypeRegistry.addDescriptorIfAbsent( UUIDJdbcType.INSTANCE );
+			jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingInet() );
+			jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingIntervalSecond() );
+			jdbcTypeRegistry.addDescriptorIfAbsent( PostgreSQLJdbcTypes.castingJsonb() );
+			jdbcTypeRegistry.addTypeConstructorIfAbsent( PostgreSQLJdbcTypes.castingJsonbArrayConstructor() );
+		}
+
+		// Force Blob binding to byte[] for CockroachDB
+		jdbcTypeRegistry.addDescriptor( Types.BLOB, BlobJdbcType.MATERIALIZED );
+		jdbcTypeRegistry.addDescriptor( Types.CLOB, ClobJdbcType.MATERIALIZED );
+		jdbcTypeRegistry.addDescriptor( Types.NCLOB, ClobJdbcType.MATERIALIZED );
+
+		// The next two contributions are the same as for Postgresql
+		typeContributions.contributeJdbcType( ObjectNullAsBinaryTypeJdbcType.INSTANCE );
+
+		// Until we remove StandardBasicTypes, we have to keep this
+		typeContributions.contributeType(
+				new JavaObjectType(
+						ObjectNullAsBinaryTypeJdbcType.INSTANCE,
+						typeContributions.getTypeConfiguration()
+								.getJavaTypeRegistry()
+								.resolveDescriptor( Object.class )
+				)
+		);
+
+		// Replace the standard array constructor
+		jdbcTypeRegistry.addTypeConstructor( PostgreSQLJdbcTypes.arrayConstructor() );
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public void initializeFunctionRegistry(FunctionContributions functionContributions) {
+		super.initializeFunctionRegistry( functionContributions );
+
+		final var functionFactory = new CommonFunctionFactory( functionContributions );
+
+		functionFactory.ascii();
+		functionFactory.char_chr();
+		functionFactory.overlay();
+		functionFactory.position();
+		functionFactory.substringFromFor();
+		functionFactory.locate_positionSubstring();
+		functionFactory.concat_pipeOperator();
+		functionFactory.trim2();
+		functionFactory.substr();
+		functionFactory.reverse();
+		functionFactory.repeat();
+		functionFactory.sha1();
+		functionFactory.octetLength();
+		functionFactory.bitLength();
+		functionFactory.cbrt();
+		functionFactory.cot();
+		functionFactory.degrees();
+		functionFactory.radians();
+		functionFactory.pi();
+		functionFactory.log();
+		functionFactory.log10_log();
+		functionFactory.round();
+
+		functionFactory.bitandorxornot_operator();
+		functionFactory.bitAndOr();
+		functionFactory.everyAny_boolAndOr();
+		functionFactory.median_percentileCont_castDouble();
+		functionFactory.stddev();
+		functionFactory.stddevPopSamp();
+		functionFactory.variance();
+		functionFactory.varPopSamp();
+		functionFactory.covarPopSamp();
+		functionFactory.corr();
+		functionFactory.regrLinearRegressionAggregates();
+
+		functionContributions.getFunctionRegistry().register(
+				"format",
+				new FormatFunction(
+						"experimental_strftime",
+						false,
+						true,
+						false,
+						functionContributions.getTypeConfiguration()
+				)
+		);
+		functionFactory.windowFunctions();
+		functionFactory.listagg_stringAgg( "string" );
+		functionFactory.inverseDistributionOrderedSetAggregates();
+		functionFactory.hypotheticalOrderedSetAggregates_windowEmulation();
+
+		registerArrayFunctions( functionFactory );
+		registerJsonFunctions( functionFactory );
+
+		functionFactory.unnest_postgresql( false );
+		functionFactory.generateSeries( null, "ordinality", true );
+		functionFactory.jsonTable_cockroachdb();
+
+		// Postgres uses # instead of ^ for XOR
+		functionContributions.getFunctionRegistry().patternDescriptorBuilder( "bitxor", "(?1#?2)" )
+				.setExactArgumentCount( 2 )
+				.setArgumentTypeResolver( StandardFunctionArgumentTypeResolvers.ARGUMENT_OR_IMPLIED_RESULT_TYPE )
+				.register();
+
+		functionContributions.getFunctionRegistry().register(
+				"trunc",
+				new PostgreSQLTruncFunction( true, true, functionContributions.getTypeConfiguration() )
+		);
+		functionContributions.getFunctionRegistry().registerAlternateKey( "truncate", "trunc" );
+
+		functionFactory.hex( "encode(?1, 'hex')" );
+		functionFactory.sha( "digest(?1, 'sha256')" );
+		functionFactory.md5( "digest(?1, 'md5')" );
+		functionFactory.regexpLike_postgresql( false );
+	}
+
+	protected static void registerJsonFunctions(CommonFunctionFactory functionFactory) {
+		functionFactory.jsonValue_cockroachdb();
+		functionFactory.jsonQuery_cockroachdb();
+		functionFactory.jsonExists_cockroachdb();
+		functionFactory.jsonObject_postgresql( false );
+		functionFactory.jsonArray_postgresql( false );
+		functionFactory.jsonArrayAgg_postgresql( false );
+		functionFactory.jsonObjectAgg_postgresql( false );
+		functionFactory.jsonSet_postgresql();
+		functionFactory.jsonRemove_cockroachdb();
+		functionFactory.jsonReplace_postgresql();
+		functionFactory.jsonInsert_postgresql();
+		// No support for WITH clause in subquery: https://github.com/cockroachdb/cockroach/issues/131011
+//		functionFactory.jsonMergepatch_postgresql();
+		functionFactory.jsonArrayAppend_postgresql( false );
+		functionFactory.jsonArrayInsert_postgresql();
+	}
+
+	protected static void registerArrayFunctions(CommonFunctionFactory functionFactory) {
+		functionFactory.array_postgresql();
+		functionFactory.arrayAggregate();
+		functionFactory.arrayPosition_postgresql();
+		functionFactory.arrayPositions_postgresql();
+		functionFactory.arrayLength_cardinality();
+		functionFactory.arrayConcat_postgresql();
+		functionFactory.arrayPrepend_postgresql();
+		functionFactory.arrayAppend_postgresql();
+		functionFactory.arrayContains_postgresql();
+		functionFactory.arrayIntersects_postgresql();
+		functionFactory.arrayGet_bracket();
+		functionFactory.arraySet_unnest();
+		functionFactory.arrayRemove();
+		functionFactory.arrayRemoveIndex_unnest( true );
+		functionFactory.arraySlice_operator();
+		functionFactory.arrayReplace();
+		functionFactory.arrayTrim_unnest();
+		functionFactory.arrayReverse_unnest();
+		functionFactory.arraySort_unnest();
+		functionFactory.arrayFill_cockroachdb();
+		functionFactory.arrayToString_postgresql();
+	}
+
+	@Override
+	public @Nullable String getDefaultOrdinalityColumnName() {
+		return "ordinality";
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public TimeZoneSupport getTimeZoneSupport() {
+		return TimeZoneSupport.NORMALIZE;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public void appendBooleanValueString(SqlAppender appender, boolean bool) {
+		appender.appendSql( bool );
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public synchronized SchemaDropSupport getSchemaDropSupport() {
+		if ( schemaDropSupport == null ) {
+			schemaDropSupport = new SchemaDropSupport(
+				List.of(),
+				org.hibernate.dialect.schema.spi.ConstraintDropMode.EXPLICIT,
+				" cascade"
+		);
+		}
+		return schemaDropSupport;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public CurrentTimestampSelection getCurrentTimestampSelection() {
+		return CurrentTimestampSelection.prepared( "select now()" );
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public boolean isCurrentTimestampStable() {
+		return true;
+	}
+
+	@Override
+	public PredicateSupport getPredicateSupport() {
+		return PredicateSupport.builder( super.getPredicateSupport() )
+				.caseInsensitiveLikeOperator( "ilike" )
+				.capability( PredicateSupport.Capability.DISTINCT_FROM, true )
+				.build();
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public synchronized IfExistsSupport getIfExistsSupport() {
+		if ( ifExistsSupport == null ) {
+			ifExistsSupport = new IfExistsSupport(
+				ExistenceCheckPlacement.BEFORE_NAME,
+				ExistenceCheckPlacement.BEFORE_NAME,
+				ExistenceCheckPlacement.BEFORE_NAME,
+				ExistenceCheckPlacement.BEFORE_NAME
+		);
+		}
+		return ifExistsSupport;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public IndexNameQualification nameQualification() {
+		return IndexNameQualification.UNQUALIFIED;
+	}
+
+	@Override
+	public IdentityColumnSupport getIdentityColumnSupport() {
+		return CockroachDBIdentityColumnSupport.INSTANCE;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String alterColumnType(AlterColumnTypeRequest request) {
+		// would need multiple statements to 'set not null'/'drop not null', 'set default'/'drop default', 'set generated', etc
+		return "alter column " + request.columnName() + " set data type " + request.columnType();
+	}
+
+	@Override
+	public ValuesListSupport getValuesListSupport() {
+		return ValuesListSupport.STANDARD;
+	}
+
+	@Override
+	public CteSupport getCteSupport() {
+		return CteSupport.builder()
+				.recursiveFeatures( CteSupport.RecursiveFeature.RECURSIVE )
+				.mutationFeatures(
+						CteSupport.MutationFeature.NON_QUERY,
+						CteSupport.MutationFeature.INSERT_CONFLICT
+				)
+				.build();
+	}
+
+	@Override
+	public NullOrderingSupport getNullOrderingSupport() {
+		// Not yet implemented:
+		// https://www.cockroachlabs.com/docs/v20.2/null-handling.html#nulls-and-sorting
+		return NullOrderingSupport.builder( super.getNullOrderingSupport() )
+				.defaultOrdering( NullOrdering.SMALLEST )
+				.capability( NullOrderingSupport.Capability.NULLS_FIRST_LAST, false )
+				.build();
+	}
+
+	@Override
+	public TupleCountSupport getTupleCountSupport() {
+		return TupleCountSupport.builder()
+				.nonDistinctSyntax( TupleCountSupport.Syntax.PARENTHESIZED_TUPLE )
+				.distinctSyntax( TupleCountSupport.Syntax.PARENTHESIZED_TUPLE )
+				.build();
+	}
+
+	@Override
+	public GenerationType getNativeValueGenerationStrategy() {
+		return GenerationType.SEQUENCE;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public SequenceSupport getSequenceSupport() {
+		return PostgreSQLSequenceSupport.getInstance();
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public RowLevelSecurity getRowLevelSecurity() {
+		return getVersion().isSameOrAfter( 25, 2 )
+				? CockroachRowLevelSecurity.INSTANCE
+				: RowLevelSecurityStrategies.none();
+	}
+
+	private static final SequenceInformationExtractor SEQUENCE_INFORMATION_EXTRACTOR =
+			SequenceInformationExtractors.builder(
+					"select sequence_name,sequence_schema,sequence_catalog,start_value,minimum_value,maximum_value,increment from information_schema.sequences"
+			).build();
+
+	@Override
+	public SequenceInformationExtractor getSequenceInformationExtractor() {
+		return SEQUENCE_INFORMATION_EXTRACTOR;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public SqlAstTranslatorFactory getSqlAstTranslatorFactory() {
+		return new StandardSqlAstTranslatorFactory() {
+			@Override
+			protected <S extends Statement, T extends JdbcOperation> SqlAstTranslator<T> createTranslator(
+					SqlAstTranslationRequest<S, T> request) {
+				return new CockroachSqlAstTranslator<>( request );
+			}
+		};
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT, SUPPLY })
+	public MutationOperation createOptionalTableUpdateOperation(
+			OptionalTableUpdateOperationRequest request) {
+		return new OptionalTableUpdateWithUpsertOperation( request.update(), request.versionedTarget() );
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public NationalizationSupport getNationalizationSupport() {
+		// TEXT / STRING inherently support nationalized data
+		return NationalizationSupport.IMPLICIT;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public AggregateSupport getAggregateSupport() {
+		return CockroachDBAggregateSupport.valueOf( this );
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public int getMaxIdentifierLength() {
+		return 63;
+	}
+
+	@Override
+	public ArraySupport getArraySupport() {
+		return ArraySupport.STANDARD;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public TemporalValueSemantics getTemporalValueSemantics() {
+		return TemporalValueSemantics.OFFSET_LITERALS;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public void appendDateTimeLiteral(
+			SqlAppender appender,
+			TemporalAccessor temporalAccessor,
+			@SuppressWarnings("deprecation")
+			TemporalType precision,
+			TimeZone jdbcTimeZone) {
+		switch ( precision ) {
+			case DATE:
+				appender.appendSql( "date '" );
+				appendAsDate( appender, temporalAccessor );
+				appender.appendSql( '\'' );
+				break;
+			case TIME:
+				if ( getTemporalValueSemantics().supportsLiteralOffset() && temporalAccessor.isSupported( ChronoField.OFFSET_SECONDS ) ) {
+					appender.appendSql( "time with time zone '" );
+					appendAsTime( appender, temporalAccessor, true, jdbcTimeZone );
+				}
+				else {
+					appender.appendSql( "time '" );
+					appendAsLocalTime( appender, temporalAccessor );
+				}
+				appender.appendSql( '\'' );
+				break;
+			case TIMESTAMP:
+				if ( getTemporalValueSemantics().supportsLiteralOffset() && temporalAccessor.isSupported( ChronoField.OFFSET_SECONDS ) ) {
+					appender.appendSql( "timestamp with time zone '" );
+					appendAsTimestampWithMicros( appender, temporalAccessor, true, jdbcTimeZone );
+					appender.appendSql( '\'' );
+				}
+				else {
+					appender.appendSql( "timestamp '" );
+					appendAsTimestampWithMicros( appender, temporalAccessor, false, jdbcTimeZone );
+					appender.appendSql( '\'' );
+				}
+				break;
+			default:
+				throw new IllegalArgumentException();
+		}
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public void appendDateTimeLiteral(
+			SqlAppender appender,
+			Date date,
+			@SuppressWarnings("deprecation")
+			TemporalType precision,
+			TimeZone jdbcTimeZone) {
+		switch ( precision ) {
+			case DATE:
+				appender.appendSql( "date '" );
+				appendAsDate( appender, date );
+				appender.appendSql( '\'' );
+				break;
+			case TIME:
+				appender.appendSql( "time with time zone '" );
+				appendAsTime( appender, date, jdbcTimeZone );
+				appender.appendSql( '\'' );
+				break;
+			case TIMESTAMP:
+				appender.appendSql( "timestamp with time zone '" );
+				appendAsTimestampWithMicros( appender,date, jdbcTimeZone );
+				appender.appendSql( '\'' );
+				break;
+			default:
+				throw new IllegalArgumentException();
+		}
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public void appendDateTimeLiteral(
+			SqlAppender appender,
+			Calendar calendar,
+			@SuppressWarnings("deprecation")
+			TemporalType precision,
+			TimeZone jdbcTimeZone) {
+		switch ( precision ) {
+			case DATE:
+				appender.appendSql( "date '" );
+				appendAsDate( appender, calendar );
+				appender.appendSql( '\'' );
+				break;
+			case TIME:
+				appender.appendSql( "time with time zone '" );
+				appendAsTime( appender, calendar, jdbcTimeZone );
+				appender.appendSql( '\'' );
+				break;
+			case TIMESTAMP:
+				appender.appendSql( "timestamp with time zone '" );
+				appendAsTimestampWithMillis( appender, calendar, jdbcTimeZone );
+				appender.appendSql( '\'' );
+				break;
+			default:
+				throw new IllegalArgumentException();
+		}
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String currentTime() {
+		return "localtime";
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String currentTimestamp() {
+		return "localtimestamp";
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String currentTimestampWithTimeZone() {
+		return "current_timestamp";
+	}
+
+	/**
+	 * The {@code extract()} function returns {@link TemporalUnit#DAY_OF_WEEK}
+	 * numbered from 0 to 6. This isn't consistent with what most other
+	 * databases do, so here we adjust the result by generating
+	 * {@code (extract(dayofweek,arg)+1))}.
+	 */
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String extractPattern(TemporalUnit unit) {
+		return switch (unit) {
+			case DAY_OF_WEEK -> "(" + TemporalOperationSupports.standard().extractPattern( unit ) + "+1)";
+			default -> TemporalOperationSupports.standard().extractPattern( unit );
+		};
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String translateExtractField(TemporalUnit unit) {
+		return switch (unit) {
+			case DAY_OF_MONTH -> "day";
+			case DAY_OF_YEAR -> "dayofyear";
+			case DAY_OF_WEEK -> "dayofweek";
+			default -> TemporalOperationSupports.standard().translateExtractField( unit );
+		};
+	}
+
+	/**
+	 * {@code microsecond} is the smallest unit for an {@code interval},
+	 * and the highest precision for a {@code timestamp}.
+	 */
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public long fractionalSecondPrecisionInNanos() {
+		return 1_000; //microseconds
+	}
+
+	@Override @SuppressWarnings("deprecation")
+	@SPI({ USE, IMPLEMENT })
+	public String timestampaddPattern(TemporalUnit unit, TemporalType temporalType, IntervalType intervalType) {
+		return intervalType != null
+				? "(?2+?3)"
+				: "cast(?3+" + intervalPattern( unit ) + " as " + temporalType.name().toLowerCase() + ")";
+	}
+
+	private static String intervalPattern(TemporalUnit unit) {
+		return switch (unit) {
+			case NATIVE -> "(?2)*interval '1 microsecond'";
+			case NANOSECOND -> "(?2)/1e3*interval '1 microsecond'";
+			case QUARTER -> "(?2)*interval '3 month'"; // quarter is not supported in interval literals
+			case WEEK -> "(?2)*interval '7 day'"; // week is not supported in interval literals
+			default -> "(?2)*interval '1 " + unit + "'";
+		};
+	}
+
+	@Override @SuppressWarnings("deprecation")
+	@SPI({ USE, IMPLEMENT })
+	public String timestampdiffPattern(TemporalUnit unit, TemporalType fromTemporalType, TemporalType toTemporalType) {
+		if ( unit == null ) {
+			return "(?3-?2)";
+		}
+		if ( toTemporalType == TemporalType.DATE && fromTemporalType == TemporalType.DATE ) {
+			// special case: subtraction of two dates
+			// results in an integer number of days
+			// instead of an INTERVAL
+			return switch (unit) {
+				case YEAR, MONTH, QUARTER ->
+					// age only supports timestamptz, so we have to cast the date expressions
+						"extract(" + translateDurationField( unit )
+								+ " from age(cast(?3 as timestamptz),cast(?2 as timestamptz)))";
+				default -> "(?3-?2)" + DAY.conversionFactor( unit, this );
+			};
+		}
+		else {
+			return switch (unit) {
+				case YEAR -> "extract(year from ?3-?2)";
+				case QUARTER -> "(extract(year from ?3-?2)*4+extract(month from ?3-?2)//3)";
+				case MONTH -> "(extract(year from ?3-?2)*12+extract(month from ?3-?2))";
+				case WEEK -> "(extract(day from ?3-?2)/7)"; // week is not supported by extract() when the argument is a duration
+				case DAY -> "extract(day from ?3-?2)";
+				//in order to avoid multiple calls to extract(),
+				//we use extract(epoch from x - y) * factor for
+				//all the following units:
+				// Note that CockroachDB also has an extract_duration function which returns an int,
+				// but we don't use that here because it is deprecated since v20.
+				// We need to use round() instead of cast(... as int) because extract epoch returns
+				// float8 which can cause loss-of-precision in some cases
+				// https://github.com/cockroachdb/cockroach/issues/72523
+				case HOUR, MINUTE, SECOND, NANOSECOND, NATIVE ->
+						"round(extract(epoch from ?3-?2)" + EPOCH.conversionFactor( unit, this ) + ")::int";
+				default -> throw new SemanticException( "Unrecognized field: " + unit, (String) null );
+			};
+		}
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String translateDurationField(TemporalUnit unit) {
+		return unit==NATIVE
+				? "microsecond"
+				: TemporalOperationSupports.standard().translateDurationField( unit );
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public void appendFormat(SqlAppender appender, String format) {
+		appender.appendSql( SpannerDialect.datetimeFormat( format ).result() );
+	}
+
+	@Override
+	public LimitHandler getLimitHandler() {
+		return OffsetFetchLimitHandler.INSTANCE;
+	}
+
+	@Override
+	public LockingSupport getLockingSupport() {
+		return CockroachLockingSupport.COCKROACH_LOCKING_SUPPORT;
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public LobSupport getLobSupport() {
+		return LobSupports.nonStreaming();
+	}
+
+	@Override
+	public SubquerySupport getSubquerySupport() {
+		return SubquerySupport.builder()
+				.features( SubquerySupport.Feature.OFFSET, SubquerySupport.Feature.LATERAL )
+				.build();
+	}
+
+	@Override
+	public GeneratedValuesSupport getGeneratedValuesSupport() {
+		return GeneratedValuesSupport.builder( super.getGeneratedValuesSupport() )
+				.enable(
+						GeneratedValuesSupport.Capability.INSERT_RETURNING,
+						GeneratedValuesSupport.Capability.UPDATE_RETURNING,
+						GeneratedValuesSupport.Capability.INSERT_RETURNING_ROW_ID
+				)
+				.build();
+	}
+
+	@Override
+	public WindowFunctionSupport getWindowFunctionSupport() {
+		return WindowFunctionSupport.builder()
+				.features( WindowFunctionSupport.Feature.values() )
+				.build();
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public FunctionalDependencyAnalysisSupport getFunctionalDependencyAnalysisSupport() {
+		return FunctionalDependencyAnalysisSupport.TABLE_REFERENCE;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public NameQualifierSupport getNameQualifierSupport() {
+		// This method is overridden so the correct value will be returned when
+		// DatabaseMetaData is not available.
+		return NameQualifierSupport.SCHEMA;
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT, SUPPLY })
+	public IdentifierHelper buildIdentifierHelper(IdentifierHelperBuildRequest request) {
+		final var builder = request.builder();
+
+		if ( !request.jdbcMetadata().isJdbcMetadataAccessible() ) {
+			builder.setUnquotedCaseStrategy( IdentifierCaseStrategy.LOWER );
+			builder.setQuotedCaseStrategy( IdentifierCaseStrategy.MIXED );
+		}
+
+		return super.buildIdentifierHelper( request );
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public ViolatedConstraintNameExtractor getViolatedConstraintNameExtractor() {
+		return EXTRACTOR;
+	}
+
+	/**
+	 * Constraint-name extractor for Postgres constraint violation exceptions.
+	 * Originally contributed by Denny Bartelt.
+	 */
+	private static final ViolatedConstraintNameExtractor EXTRACTOR =
+			new TemplatedViolatedConstraintNameExtractor( sqle -> {
+				final String sqlState = extractSqlState( sqle );
+				return sqlState == null ? null : switch ( parseInt( sqlState ) ) {
+					case 23505, 23514, 23503 ->
+						// UNIQUE, CHECK, OR FOREIGN KEY VIOLATION
+							extractUsingTemplate( "constraint \"", "\"", sqle.getMessage() );
+					case 23502 ->
+						// NOT NULL VIOLATION
+							extractUsingTemplate( "column \"", "\"", sqle.getMessage() );
+					default -> null;
+				};
+			} );
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public SQLExceptionConversionDelegate buildSQLExceptionConversionDelegate() {
+		return (sqlException, message, sql) -> {
+			final String sqlState = extractSqlState( sqlException );
+			return sqlState == null ? null : switch ( sqlState ) {
+				case "40001" ->
+						message.contains( "WriteTooOldError" ) // Serialization Exception
+							? new TransactionSerializationException( message, sqlException, sql )
+							: null;
+				case "40P01" ->
+					// DEADLOCK DETECTED
+						new LockAcquisitionException( message, sqlException, sql );
+				case "55P03" ->
+					// LOCK NOT AVAILABLE
+					//TODO: should we check that the message is "canceling statement due to lock timeout"
+					//      and return LockAcquisitionException if it is not?
+						new LockTimeoutException( message, sqlException, sql );
+				case "57014" ->
+					// QUERY CANCELLED
+						new QueryTimeoutException( message, sqlException, sql );
+				// returning null allows other delegates to operate
+				default -> null;
+			};
+		};
+	}
+
+	/**
+	 * Applies the hints to the query string.
+	 *
+	 * The hints can be <a href="https://www.cockroachlabs.com/docs/v23.1/table-expressions#force-index-selection">index selection hints</a>
+	 * or <a href="https://www.cockroachlabs.com/docs/stable/sql-grammar#opt_join_hint">join hints</a>.
+	 * <p>
+	 * For index selection hints, use the format {@code <tablename>@{FORCE_INDEX=<index>[,<DIRECTION>]}}
+	 * where the optional DIRECTION is either ASC (ascending) or DESC (descending). Multiple index hints can be provided.
+	 * The effect is that in the final SQL statement the hint is added to the table name mentioned in the hint.
+	 *<p>
+	 * For join hints, use the format {@code "<MERGE|HASH|LOOKUP|INVERTED> JOIN"}. Only one join hint will be added. It is
+	 * applied to all join statements in the SQL statement.
+	 * <p>
+	 * Hints are only added to select statements.
+	 *
+	 * @param query The query to which to apply the hint.
+	 * @param hintList The hints to apply
+	 *
+	 * @return the query with hints added
+	 */
+	@Override
+	@SPI({ USE, IMPLEMENT })
+	public String getQueryHintString(String query, List<String> hintList) {
+		return new CockroachDialectQueryHints(query, hintList).getQueryHintString();
+	}
+
+	@Override
+	@SPI({ USE, IMPLEMENT, SUPPLY })
+	public DmlTargetColumnQualifierSupport getDmlTargetColumnQualifierSupport() {
+		return DmlTargetColumnQualifierSupport.TABLE_ALIAS;
+	}
+
+	@Override
+	public MutationSyntaxSupport getMutationSyntaxSupport() {
+		return MutationSyntaxSupport.of( MutationKind.UPDATE, MutationSyntaxCapability.FROM_CLAUSE );
+	}
+
+	@Override
+	public RowValueSupport getRowValueSupport() {
+		return RowValueSupport.builder( super.getRowValueSupport() )
+				.feature( RowValueSupport.Feature.ROW_CONSTRUCTOR, true )
+				.feature( RowValueSupport.Feature.QUANTIFIED_COMPARISON, false )
+				.build();
+	}
+
+
+
+
+
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public InformationExtractor getInformationExtractor(ExtractionContext extractionContext) {
+		return InformationExtractors.postgresql( extractionContext );
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public boolean causesRollback(SQLException sqlException) {
+		return true;
+	}
+
+	@Override
+	@SPI({ IMPLEMENT, SUPPLY })
+	public NamespaceSupport getNamespaceSupport() {
+		return NamespaceSupports.standard( true, true );
+	}
+}

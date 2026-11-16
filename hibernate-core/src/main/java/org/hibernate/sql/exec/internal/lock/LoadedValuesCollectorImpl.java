@@ -1,0 +1,71 @@
+package org.hibernate.sql.exec.internal.lock;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.exec.spi.LoadedValuesCollector;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+
+public class LoadedValuesCollectorImpl implements LoadedValuesCollector {
+	private final Collection<NavigablePath> pathsToLock;
+	private final DirectLockingCompletion directLockingCompletion;
+
+	private List<LoadedValuesCollector.LoadedEntityRegistration> entitiesToLock;
+	private List<LoadedValuesCollector.LoadedCollectionRegistration> collectionsToLock;
+
+	public LoadedValuesCollectorImpl(Collection<NavigablePath> pathsToLock) {
+		this( pathsToLock, false );
+	}
+
+	public LoadedValuesCollectorImpl(Collection<NavigablePath> pathsToLock, boolean deferForceIncrement) {
+		this.pathsToLock = pathsToLock;
+		directLockingCompletion = deferForceIncrement ? new DirectLockingCompletion() : null;
+	}
+
+	public DirectLockingCompletion getDirectLockingCompletion() {
+		return directLockingCompletion;
+	}
+
+	public void registerEntity(NavigablePath navigablePath, EntityMappingType entityDescriptor, EntityKey entityKey) {
+		registerEntity( navigablePath, entityDescriptor, entityKey, false );
+	}
+
+	@Override
+	public void registerEntity(
+			NavigablePath navigablePath, EntityMappingType entityDescriptor, EntityKey entityKey, boolean reloaded) {
+		if ( pathsToLock.contains( navigablePath ) ) {
+			if ( entitiesToLock == null ) {
+				entitiesToLock = new ArrayList<>();
+			}
+			entitiesToLock.add(
+					new LoadedValuesCollector.LoadedEntityRegistration( navigablePath, entityDescriptor, entityKey, reloaded ) );
+		}
+	}
+
+	public void registerCollection(NavigablePath navigablePath, PluralAttributeMapping collectionDescriptor, CollectionKey collectionKey) {
+		if ( collectionsToLock == null ) {
+			collectionsToLock = new ArrayList<>();
+		}
+		collectionsToLock.add(
+				new LoadedValuesCollector.LoadedCollectionRegistration( navigablePath, collectionDescriptor,
+						collectionKey ) );
+	}
+
+
+	@Override
+	public @Nonnull List<LoadedEntityRegistration> getCollectedEntities() {
+		return entitiesToLock == null ? Collections.emptyList() : entitiesToLock;
+	}
+
+	@Override
+	public @Nonnull List<LoadedCollectionRegistration> getCollectedCollections() {
+		return collectionsToLock == null ? Collections.emptyList() : collectionsToLock;
+	}
+}

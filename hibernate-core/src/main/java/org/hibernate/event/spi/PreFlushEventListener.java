@@ -1,0 +1,16 @@
+package org.hibernate.event.spi;
+
+import org.hibernate.HibernateException;
+import org.hibernate.Incubating;
+import jakarta.annotation.Nonnull;
+
+/**
+ * A listener for events of type {@link PreFlushEvent}.
+ *
+ * @author Gavin King
+ * @since 7.2
+ */
+@Incubating(since = "8.0")
+public interface PreFlushEventListener {
+	void onAutoPreFlush(@Nonnull PreFlushEvent event) throws HibernateException;
+}

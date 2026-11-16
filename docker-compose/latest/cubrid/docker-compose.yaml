@@ -1,0 +1,16 @@
+services:
+  cubrid:
+    image: ${CUBRID_IMAGE:-docker.io/cubrid/cubrid:11.4@sha256:1248b77ad39888df9e064655937188ab99fe056ed7e35b57d06155a015dc1791}
+    container_name: cubrid
+    environment:
+      CUBRID_DB: hibernate_orm
+      CUBRID_USER: hibernate_orm_test
+      CUBRID_PASSWORD: hibernate_orm_test
+      CUBRID_LOCALE: en_US.utf8
+    ports:
+      - "33000:33000"
+    healthcheck:
+      test: ["CMD-SHELL", "csql -u hibernate_orm_test -p hibernate_orm_test hibernate_orm -c 'SELECT 1' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

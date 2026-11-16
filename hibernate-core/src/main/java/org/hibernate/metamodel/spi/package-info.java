@@ -1,0 +1,9 @@
+/**
+ * An SPI supporting custom instantiation of
+ * {@linkplain org.hibernate.metamodel.spi.EntityInstantiator entity instances} and
+ * {@linkplain org.hibernate.metamodel.spi.EmbeddableInstantiator embeddable objects}.
+ */
+@Incubating(since = "5.4")
+package org.hibernate.metamodel.spi;
+
+import org.hibernate.Incubating;

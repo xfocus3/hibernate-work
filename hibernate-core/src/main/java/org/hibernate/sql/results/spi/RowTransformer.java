@@ -1,0 +1,26 @@
+package org.hibernate.sql.results.spi;
+
+import org.hibernate.Incubating;
+
+/**
+ * Defines transformation of a raw row in the domain query result row.
+ *
+ * @see org.hibernate.query.TupleTransformer
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.0", group = "result-processing")
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface RowTransformer<T> {
+	/**
+	 * Transform the "raw" row values into the ultimate query result (for a row)
+	 */
+	T transformRow(Object[] row);
+
+	/**
+	 * How many result elements will this transformation produce?
+	 */
+	default int determineNumberOfResultElements(int rawElementCount) {
+		return rawElementCount;
+	}
+}

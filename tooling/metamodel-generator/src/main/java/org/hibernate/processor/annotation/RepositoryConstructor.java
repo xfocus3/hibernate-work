@@ -1,0 +1,270 @@
+package org.hibernate.processor.annotation;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.processor.model.MetaAttribute;
+import org.hibernate.processor.model.Metamodel;
+import org.hibernate.processor.util.Constants;
+
+import static org.hibernate.processor.util.Constants.ENTITY_AGENT;
+import static org.hibernate.processor.util.Constants.ENTITY_MANAGER;
+import static org.hibernate.processor.util.Constants.INJECT;
+import static org.hibernate.processor.util.Constants.NONNULL;
+import static org.hibernate.processor.util.Constants.PERSISTENCE_AGENT;
+import static org.hibernate.processor.util.Constants.PERSISTENCE_CONTEXT;
+
+/**
+ * A general purpose constructor which accepts the session as an
+ * argument. This constructor is compatible with use via direct
+ * instantiation or CDI-style constructor injection. By contrast,
+ * {@link DefaultConstructor} is used to instantiate a repository
+ * which obtains its session using field injection. This class
+ * also takes care of adding the resource accessor method.
+ *
+ * @author Gavin King
+ */
+public class RepositoryConstructor implements MetaAttribute {
+	private final AnnotationMetaEntity annotationMetaEntity;
+	private final String constructorName;
+	private final String methodName;
+	private final String sessionTypeName;
+	private final String sessionVariableName;
+	private final @Nullable String dataStore;
+	private final boolean addInjectAnnotation;
+	private final boolean addNonnullAnnotation;
+	private final boolean addOverrideAnnotation;
+	private final boolean dataRepository;
+
+	public RepositoryConstructor(
+			AnnotationMetaEntity annotationMetaEntity,
+			String constructorName,
+			String methodName,
+			String sessionTypeName,
+			String sessionVariableName,
+			@Nullable String dataStore,
+			boolean addInjectAnnotation,
+			boolean addNonnullAnnotation,
+			boolean addOverrideAnnotation,
+			boolean dataRepository) {
+		this.annotationMetaEntity = annotationMetaEntity;
+		this.constructorName = constructorName;
+		this.methodName = methodName;
+		this.sessionTypeName = sessionTypeName;
+		this.sessionVariableName = sessionVariableName;
+		this.dataStore = dataStore;
+		this.addInjectAnnotation = addInjectAnnotation;
+		this.addNonnullAnnotation = addNonnullAnnotation;
+		this.addOverrideAnnotation = addOverrideAnnotation;
+		this.dataRepository = dataRepository;
+	}
+
+	@Override
+	public boolean hasTypedAttribute() {
+		return true;
+	}
+
+	@Override
+	public boolean hasStringAttribute() {
+		return false;
+	}
+
+	@Override
+	public String getAttributeDeclarationString() {
+		final var declaration = new StringBuilder();
+		declaration
+				.append('\n');
+		if ( annotationMetaEntity.getSuperTypeElement() == null ) {
+			backingField( declaration );
+		}
+		constructor( declaration );
+		// resource accessor method a.k.a. session getter
+		if ( annotationMetaEntity.getSuperTypeElement() == null ) {
+			accessor( declaration );
+		}
+		return declaration.toString();
+	}
+
+	private void accessor(StringBuilder declaration) {
+		declaration
+				.append("\n\n");
+		if (addOverrideAnnotation) {
+			declaration.append("@Override\n");
+		}
+		declaration
+				.append("public ");
+		notNull( declaration );
+		declaration
+				.append(annotationMetaEntity.importType(providedSessionType()))
+				.append(" ")
+				.append(methodName)
+				.append("() {")
+				.append("\n\treturn ")
+				.append(sessionVariableName);
+		if ( annotationMetaEntity.isProvidedSessionAccess() ) {
+			declaration
+					.append( ".getObject()" );
+		}
+		declaration
+				.append(";\n}");
+	}
+
+	private void constructor(StringBuilder declaration) {
+		inject( declaration );
+		declaration
+				.append("public ")
+				.append(constructorName)
+				.append("(");
+		notNull( declaration );
+		qualifier( declaration );
+		declaration
+				.append(annotationMetaEntity.importType(sessionTypeName))
+				.append(" ")
+				.append(sessionVariableName)
+				.append(") {\n");
+		if ( annotationMetaEntity.getSuperTypeElement() != null ) {
+			declaration
+					.append("\tsuper(")
+					.append(sessionVariableName)
+					.append(");\n");
+		}
+		else {
+			declaration
+					.append("\tthis.")
+					.append(sessionVariableName)
+					.append(" = ")
+					.append(sessionVariableName)
+					.append(";\n");
+		}
+		declaration
+				.append("}");
+	}
+
+	private void backingField(StringBuilder declaration) {
+		directInjection( declaration );
+		declaration
+				.append("protected ");
+		if ( !dataRepository ) {
+			// don't mark the field final
+			// because it will be initialized
+			// in @PostConstruct
+			declaration
+					.append("final ");
+		}
+		notNull( declaration );
+		declaration
+				.append(annotationMetaEntity.importType(sessionTypeName))
+				.append(" ")
+				.append(sessionVariableName)
+				.append(";\n\n");
+	}
+
+	private void directInjection(StringBuilder declaration) {
+		if ( dataRepository
+				&& annotationMetaEntity.needsDefaultConstructor()
+				&& isDirectlyInjected() ) {
+			declaration
+					.append('@')
+					.append(annotationMetaEntity.importType(directInjectionAnnotation()));
+			if ( dataStore != null ) {
+				declaration
+						.append("(unitName=\"")
+						.append(dataStore)
+						.append("\")");
+			}
+			declaration
+					.append('\n');
+		}
+	}
+
+	private boolean isDirectlyInjected() {
+		return ENTITY_MANAGER.equals( sessionTypeName )
+			|| ENTITY_AGENT.equals( sessionTypeName );
+	}
+
+	private String directInjectionAnnotation() {
+		return switch ( sessionTypeName ) {
+			case ENTITY_MANAGER -> PERSISTENCE_CONTEXT;
+			case ENTITY_AGENT -> PERSISTENCE_AGENT;
+			default -> throw new IllegalStateException( "Unexpected value: " + sessionTypeName );
+		};
+	}
+
+	private String providedSessionType() {
+		if ( annotationMetaEntity.isProvidedSessionAccess() ) {
+			final var start = sessionTypeName.indexOf( '<' );
+			final var end = sessionTypeName.lastIndexOf( '>' );
+			return start > 0 && end > start
+					? sessionTypeName.substring( start + 1, end )
+					: ENTITY_AGENT;
+		}
+		return sessionTypeName;
+	}
+
+	/**
+	 * The qualifier of the injected session, if any, as decided by the
+	 * {@linkplain org.hibernate.processor.spi.HibernateProcessorExtension#sessionQualifier extension}.
+	 */
+	private void qualifier(StringBuilder declaration) {
+		final var qualifier = annotationMetaEntity.sessionQualifier();
+		if ( qualifier != null ) {
+			declaration
+					.append(qualifier)
+					.append(' ');
+		}
+	}
+
+	/**
+	 * In Quarkus we inject the {@code StatelessSession}
+	 * directly via the constructor. But this doesn't work
+	 * in other CDI implementations, where Jakarta Data
+	 * repositories are instantiated via a
+	 * {@link DefaultConstructor default constructor},
+	 * so we don't need to mark this one {@code @Inject}.
+	 */
+	private void inject(StringBuilder declaration) {
+		// Jakarta Data repositories are instantiated
+		// via the default constructor, so in that
+		// case, this one is just for testing, unless
+		// we are in Quarkus where we can use
+		// constructor injection
+		if ( addInjectAnnotation && !annotationMetaEntity.needsDefaultConstructor() ) {
+			declaration
+					.append('@')
+					.append(annotationMetaEntity.importType(INJECT))
+					.append('\n');
+		}
+	}
+
+	private void notNull(StringBuilder declaration) {
+		if ( addNonnullAnnotation ) {
+			declaration
+					.append('@')
+					.append(annotationMetaEntity.importType(NONNULL))
+					.append(' ');
+		}
+	}
+
+	@Override
+	public String getAttributeNameDeclarationString() {
+		throw new UnsupportedOperationException("operation not supported");
+	}
+
+	@Override
+	public String getMetaType() {
+		throw new UnsupportedOperationException("operation not supported");
+	}
+
+	@Override
+	public String getPropertyName() {
+		return methodName;
+	}
+
+	@Override
+	public String getTypeDeclaration() {
+		return Constants.ENTITY_MANAGER;
+	}
+
+	@Override
+	public Metamodel getHostingEntity() {
+		return annotationMetaEntity;
+	}
+}

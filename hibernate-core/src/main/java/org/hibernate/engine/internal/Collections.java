@@ -1,0 +1,357 @@
+package org.hibernate.engine.internal;
+
+import org.hibernate.AssertionFailure;
+import org.hibernate.HibernateException;
+import org.hibernate.action.internal.DelayedPostInsertIdentifier;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.CollectionEntry;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.event.spi.EventSource;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.type.CollectionType;
+
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.pretty.MessageHelper.collectionInfoString;
+
+/**
+ * Implements book-keeping for the collection persistence by reachability algorithm
+ *
+ * @author Gavin King
+ */
+public final class Collections {
+
+	/**
+	 * record the fact that this collection was dereferenced
+	 *
+	 * @param collection The collection to be updated by unreachability.
+	 * @param session The session
+	 */
+	public static void processUnreachableCollection(
+			PersistentCollection<?> collection,
+			EventSource session,
+			FlushProcessingContext flushProcessingContext) {
+		if ( collection.getOwner() == null ) {
+			processNeverReferencedCollection( collection, session, flushProcessingContext );
+		}
+		else {
+			processDereferencedCollection( collection, session, flushProcessingContext );
+		}
+	}
+
+	private static void processDereferencedCollection(
+			PersistentCollection<?> collection,
+			EventSource session,
+			FlushProcessingContext flushProcessingContext) {
+		final var persistenceContext = session.getPersistenceContextInternal();
+		final var entry = persistenceContext.getCollectionEntry( collection );
+		final var loadedPersister = entry.getLoadedPersister();
+
+		if ( loadedPersister != null && CORE_LOGGER.isTraceEnabled() ) {
+			CORE_LOGGER.collectionDereferenced(
+					collectionInfoString( loadedPersister, collection, entry.getLoadedKey(), session ) );
+		}
+
+		// do a check
+		if ( loadedPersister != null && loadedPersister.hasOrphanDelete() ) {
+			final Object ownerId = getOwnerId( collection, session, loadedPersister );
+			final var key = session.generateEntityKey( ownerId, loadedPersister.getOwnerEntityPersister() );
+			final Object owner = persistenceContext.getEntity( key );
+			// If owner is null, the owning entity was deleted (removed from persistence context),
+			// which is allowed for collections with orphan delete
+			if ( owner != null ) {
+				final var entityEntry = persistenceContext.getEntry( owner );
+				//only collections belonging to deleted entities are allowed to be dereferenced in the case of orphan delete
+				if ( entityEntry != null && !entityEntry.getStatus().isDeletedOrGone() ) {
+					throw new HibernateException(
+							"A collection with orphan deletion was no longer referenced by the owning entity instance: "
+							+ loadedPersister.getRole()
+					);
+				}
+			}
+		}
+
+		// do the work
+		entry.setCurrentPersister( null );
+		entry.setCurrentKey( null );
+		prepareCollectionForUpdate( collection, entry, session.getFactory(), flushProcessingContext );
+
+	}
+
+	private static Object getOwnerId(
+			PersistentCollection<?> collection,
+			SessionImplementor session,
+			CollectionPersister loadedPersister) {
+		final Object owner = collection.getOwner();
+		Object ownerId =
+				loadedPersister.getOwnerEntityPersister()
+						.getIdentifier( owner, session );
+		if ( ownerId == null ) {
+			// the owning entity may have been deleted and its identifier unset due to
+			// identifier rollback; in which case, try to look up its identifier from
+			// the persistence context
+			if ( session.getFactory().getSessionFactoryOptions()
+					.isIdentifierRollbackEnabled() ) {
+				final var ownerEntry =
+						session.getPersistenceContextInternal()
+								.getEntry( owner );
+				if ( ownerEntry != null ) {
+					ownerId = ownerEntry.getId();
+				}
+			}
+			if ( ownerId == null ) {
+				throw new AssertionFailure( "Unable to determine collection owner identifier for orphan delete processing" );
+			}
+		}
+		return ownerId;
+	}
+
+	private static void processNeverReferencedCollection(
+			PersistentCollection<?> collection,
+			EventSource session,
+			FlushProcessingContext flushProcessingContext)
+			throws HibernateException {
+		final var entry =
+				session.getPersistenceContextInternal()
+						.getCollectionEntry( collection );
+		final var loadedPersister = entry.getLoadedPersister();
+		final Object loadedKey = entry.getLoadedKey();
+
+		if ( CORE_LOGGER.isTraceEnabled() ) {
+			CORE_LOGGER.collectionWithUnloadedOwner(
+					collectionInfoString( loadedPersister, collection, loadedKey, session ) );
+		}
+
+		entry.setCurrentPersister( loadedPersister );
+		entry.setCurrentKey( loadedKey );
+		prepareCollectionForUpdate( collection, entry, session.getFactory(), flushProcessingContext );
+	}
+
+	/**
+	 * Initialize the role of the collection.
+	 *
+	 * @param collection The collection to be updated by reachability.
+	 * @param type The type of the collection.
+	 * @param entity The owner of the collection.
+	 * @param session The session from which this request originates
+	 */
+	public static void processReachableCollection(
+			PersistentCollection<?> collection,
+			CollectionType type,
+			Object entity,
+			EventSource session,
+			FlushProcessingContext flushProcessingContext) {
+		collection.setOwner( entity );
+		final var collectionEntry =
+				session.getPersistenceContextInternal()
+						.getCollectionEntry( collection );
+
+		if ( collectionEntry == null ) {
+			// refer to comment in StatefulPersistenceContext.addCollection()
+			throw new HibernateException( "Found two representations of same collection: " + type.getRole() );
+		}
+
+		final var factory = session.getFactory();
+		final var persister =
+				factory.getMappingMetamodel()
+						.getCollectionDescriptor( type.getRole() );
+
+		collectionEntry.setCurrentPersister( persister );
+		//TODO: better to pass the id in as an argument?
+		collectionEntry.setCurrentKey( type.getKeyOfOwner( entity, session ) );
+
+		final boolean isBytecodeEnhanced =
+				persister.getOwnerEntityPersister()
+						.getBytecodeEnhancementMetadata()
+						.isEnhancedForLazyLoading();
+		if ( isBytecodeEnhanced && !collection.wasInitialized() ) {
+			// the class of the collection owner is enhanced for lazy loading,
+			// and we found an un-initialized PersistentCollection, so skip it
+			if ( CORE_LOGGER.isTraceEnabled() ) {
+				CORE_LOGGER.skippingUninitializedBytecodeLazyCollection(
+						collectionInfoString( persister, collection, collectionEntry.getCurrentKey(), session ) );
+			}
+			collectionEntry.markReachedDuringFlush();
+			collectionEntry.markProcessedDuringFlush();
+		}
+		// The reached status is just to detect any silly users
+		// who set up circular or shared references between/to collections.
+		else if ( collectionEntry.wasReachedDuringFlush() ) {
+			// We've been here before
+			throw new HibernateException( "Found shared references to a collection: " + type.getRole() );
+		}
+		else {
+			collectionEntry.markReachedDuringFlush();
+			logReachedCollection( collection, session, persister, collectionEntry );
+			prepareCollectionForUpdate( collection, collectionEntry, factory, flushProcessingContext );
+		}
+	}
+
+	private static void logReachedCollection(
+			PersistentCollection<?> collection,
+			SessionImplementor session,
+			CollectionPersister persister,
+			CollectionEntry collectionEntry) {
+		if ( CORE_LOGGER.isTraceEnabled() ) {
+			if ( collection.wasInitialized() ) {
+				CORE_LOGGER.collectionFoundInitialized(
+						collectionInfoString(
+								persister,
+								collection,
+								collectionEntry.getCurrentKey(),
+								session
+						),
+						collectionInfoString(
+								collectionEntry.getLoadedPersister(),
+								collection,
+								collectionEntry.getLoadedKey(),
+								session
+						)
+				);
+			}
+			else {
+				CORE_LOGGER.collectionFoundUninitialized(
+						collectionInfoString(
+								persister,
+								collection,
+								collectionEntry.getCurrentKey(),
+								session
+						),
+						collectionInfoString(
+								collectionEntry.getLoadedPersister(),
+								collection,
+								collectionEntry.getLoadedKey(),
+								session
+						)
+				);
+			}
+		}
+	}
+
+	/**
+	 * 1. record the collection role that this collection is referenced by
+	 * 2. decide if the collection needs deleting/creating/updating
+	 */
+	private static void prepareCollectionForUpdate(
+			PersistentCollection<?> collection,
+			CollectionEntry collectionEntry,
+			SessionFactoryImplementor factory,
+			FlushProcessingContext flushProcessingContext) {
+		collectionEntry.markProcessedDuringFlush();
+
+		final var loadedPersister = collectionEntry.getLoadedPersister();
+		final var currentPersister = collectionEntry.getCurrentPersister();
+
+		if ( loadedPersister != null || currentPersister != null ) {
+			// it is or was referenced _somewhere_
+
+			// if either its role changed or its key changed
+			final boolean ownerChanged =
+					loadedPersister != currentPersister
+						|| wasKeyChanged( collectionEntry, factory, currentPersister );
+
+			if ( ownerChanged ) {
+				// do some checks
+				checkOnChangedOwner( collection, collectionEntry, loadedPersister, currentPersister );
+
+				// do the work
+				if ( loadedPersister != null ) {
+					// we will need to remove the old entries
+					flushProcessingContext.queueCollectionRemove(
+							collection,
+							loadedPersister,
+							collectionEntry.getLoadedKey(),
+							collectionEntry.isSnapshotEmpty( collection )
+					);
+					if ( currentPersister != null ) {
+						CORE_LOGGER.forcingCollectionInitialization();
+						collection.forceInitialization();
+					}
+				}
+
+				if ( currentPersister != null ) {
+					flushProcessingContext.queueCollectionRecreate(
+							collection,
+							currentPersister,
+							collectionEntry.getCurrentKey()
+					);
+				}
+			}
+			else if ( collection.isDirty() ) {
+				// the collection's elements have changed
+				flushProcessingContext.queueCollectionUpdate(
+						collection,
+						loadedPersister,
+						collectionEntry.getLoadedKey(),
+						collectionEntry.isSnapshotEmpty( collection )
+				);
+			}
+		}
+	}
+
+	private static void checkOnChangedOwner(PersistentCollection<?> collection, CollectionEntry collectionEntry, CollectionPersister loadedPersister, CollectionPersister currentPersister) {
+		final boolean immutableDereferenced =
+				collectionEntry.isReadOnly()
+				&& loadedPersister != null
+				&& !isOwnerDeletedOrGone( collection );
+		if ( immutableDereferenced ) {
+			throw new HibernateException( "Immutable collection dereferenced by owner: "
+						+ collectionInfoString( loadedPersister.getRole(), collectionEntry.getLoadedKey() ) );
+		}
+
+
+		final boolean orphanDeleteAndRoleChanged =
+				loadedPersister != null
+				&& currentPersister != null
+				&& loadedPersister.hasOrphanDelete();
+		if ( orphanDeleteAndRoleChanged ) {
+			throw new HibernateException(
+					"Collection with orphan orphan delete enabled has modifier owner: "
+					+ collectionInfoString( loadedPersister.getRole(), collectionEntry.getLoadedKey() ) );
+		}
+	}
+
+	private static boolean isOwnerDeletedOrGone(PersistentCollection<?> collection) {
+		final Object owner = collection.getOwner();
+		assert owner != null;
+		final var session = collection.getSession();
+		assert session != null;
+		final var entry = session.getPersistenceContextInternal().getEntry( owner );
+		return entry != null && entry.getStatus().isDeletedOrGone();
+	}
+
+	/**
+	 * Check if the key changed.
+	 * Excludes marking key changed when the loaded key is a {@code DelayedPostInsertIdentifier}.
+	 */
+	private static boolean wasKeyChanged(
+			CollectionEntry entry, SessionFactoryImplementor factory, CollectionPersister currentPersister) {
+		return currentPersister != null
+			&& !currentPersister.getKeyType().isEqual( entry.getLoadedKey(), entry.getCurrentKey(), factory )
+			&& !( entry.getLoadedKey() instanceof DelayedPostInsertIdentifier );
+	}
+
+	/**
+	 * Determines if we can skip the explicit SQL delete statement, since
+	 * the rows will be deleted by {@code on delete cascade}.
+	 */
+	public static boolean skipRemoval(EventSource session, CollectionPersister persister, Object key) {
+		if ( persister != null
+				// TODO: same optimization for @OneToMany @OnDelete(action=SET_NULL)
+				&& !persister.isOneToMany() && persister.isCascadeDeleteEnabled() ) {
+			final var entityKey = session.generateEntityKey( key, persister.getOwnerEntityPersister() );
+			final var persistenceContext = session.getPersistenceContextInternal();
+			final var entry = persistenceContext.getEntry( persistenceContext.getEntity( entityKey ) );
+			return entry == null || entry.getStatus().isDeletedOrGone();
+		}
+		else {
+			return false;
+		}
+	}
+
+	/**
+	 * Disallow instantiation
+	 */
+	private Collections() {
+	}
+}

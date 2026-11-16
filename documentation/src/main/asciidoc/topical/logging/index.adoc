@@ -1,0 +1,18 @@
+include::{root-project-dir}/.asciidoctorconfig.adoc[]
+:doctype: book
+:icons: font
+:html-meta-canonical-link: https://docs.hibernate.org/stable/orm/topical/html_single/logging/
+
+
+:jboss-logging-url: https://github.com/jboss-logging
+
+[[root]]
+= Logging
+
+Hibernate uses the link:{jboss-logging-url}[JBoss Logging] library for its logging API.
+
+JBoss Logging is a logging facade, similar to SLF4J.
+
+[[logger-names]]
+== Logger Names
+

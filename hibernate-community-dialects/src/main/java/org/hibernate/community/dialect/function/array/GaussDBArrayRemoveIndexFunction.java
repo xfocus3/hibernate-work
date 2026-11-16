@@ -1,0 +1,63 @@
+package org.hibernate.community.dialect.function.array;
+
+import org.hibernate.dialect.function.array.ArrayRemoveIndexUnnestFunction;
+import org.hibernate.metamodel.model.domain.ReturnableType;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+
+import java.util.List;
+
+import static org.hibernate.sql.ast.spi.query.SqlAstTreeHelper.isNullLiteral;
+
+/**
+ * GaussDB array_remove index function.
+ * @author chenzhida
+ */
+public class GaussDBArrayRemoveIndexFunction extends ArrayRemoveIndexUnnestFunction {
+
+	private final boolean castEmptyArrayLiteral;
+
+	public GaussDBArrayRemoveIndexFunction(boolean castEmptyArrayLiteral) {
+		super( castEmptyArrayLiteral );
+		this.castEmptyArrayLiteral = castEmptyArrayLiteral;
+	}
+
+	@Override
+	public void render(
+			SqlAppender sqlAppender,
+			List<? extends SqlAstNode> sqlAstArguments,
+			ReturnableType<?> returnType,
+			SqlAstTranslator<?> walker) {
+		final Expression arrayExpression = (Expression) sqlAstArguments.get( 0 );
+		final Expression indexExpression = (Expression) sqlAstArguments.get( 1 );
+
+		sqlAppender.append( "case when ");
+		arrayExpression.accept( walker );
+		sqlAppender.append( " IS NOT NULL THEN COALESCE((SELECT array_agg(" );
+		arrayExpression.accept( walker );
+		sqlAppender.append( "[idx]) FROM generate_subscripts(" );
+		arrayExpression.accept( walker );
+		sqlAppender.append( ", 1) AS idx " );
+
+		if ( isNullLiteral( indexExpression ) ) {
+			// no-op
+		}
+		else {
+			appendWhere( sqlAppender, walker, indexExpression );
+		}
+
+		sqlAppender.append( "), CAST(ARRAY[] AS VARCHAR ARRAY)) " );
+		if ( castEmptyArrayLiteral ) {
+			sqlAppender.append( "ELSE CAST(ARRAY[] AS VARCHAR ARRAY) " );
+		}
+		sqlAppender.append( "END AS result_array" );
+	}
+
+	private static void appendWhere(SqlAppender sqlAppender, SqlAstTranslator<?> walker, Expression indexExpression) {
+		sqlAppender.append( "where idx not in (" );
+		indexExpression.accept( walker );
+		sqlAppender.append( ")" );
+	}
+}

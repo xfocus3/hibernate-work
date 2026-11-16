@@ -1,0 +1,167 @@
+package org.hibernate.id;
+
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+
+import org.hibernate.HibernateException;
+import org.hibernate.MappingException;
+import org.hibernate.boot.model.naming.Identifier;
+import org.hibernate.boot.model.relational.QualifiedTableName;
+import org.hibernate.boot.model.relational.SqlStringGenerationContext;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.GeneratorCreationContext;
+import org.hibernate.query.sqm.SetOperator;
+
+import static org.hibernate.id.IdentifierGeneratorHelper.extractLong;
+import static org.hibernate.id.IdentifierGeneratorHelper.makeIntegralValue;
+import static org.hibernate.id.PersistentIdentifierGenerator.CATALOG;
+import static org.hibernate.id.PersistentIdentifierGenerator.PK;
+import static org.hibernate.id.PersistentIdentifierGenerator.SCHEMA;
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.internal.util.StringHelper.splitAtCommas;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getString;
+
+/**
+ * An {@link IdentifierGenerator} that returns a {@code long}, constructed by counting
+ * from the maximum primary key value obtained by querying the table or tables at startup.
+ * <p>
+ * This id generator is not safe unless a single VM has exclusive access to the database.
+ * <p>
+ * Mapping parameters supported, but not usually needed: {@value #TABLES}, {@value #COLUMN}.
+ * (The {@value #TABLES} parameter specifies a comma-separated list of table names.)
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ * @author Brett Meyer
+ *
+ * @implNote This also implements the {@code increment} generation type in {@code hbm.xml} mappings.
+ */
+public class IncrementGenerator implements IdentifierGenerator {
+
+	/**
+	 * A parameter identifying the column holding the id.
+	 */
+	public static final String COLUMN = "column";
+	/**
+	 * A parameter specifying a list of tables over which the generated id should be unique.
+	 */
+	public static final String TABLES = "tables";
+
+	private Class<?> returnClass;
+	private String column;
+	private List<QualifiedTableName> physicalTableNames;
+	private String sql;
+
+	private long previousValue;
+
+	/**
+	 * @deprecated Exposed for tests only.
+	 */
+	@Deprecated
+	public String[] getAllSqlForTests() {
+		return new String[] { sql };
+	}
+
+	@Override
+	public synchronized Object generate(SharedSessionContractImplementor session, Object object) throws HibernateException {
+		if ( sql != null ) {
+			initializePreviousValue( session );
+		}
+		return makeIntegralValue( previousValue++, returnClass );
+	}
+
+	@Override
+	public Class<?> getGeneratedType() {
+		return returnClass;
+	}
+
+	@Override
+	public void configure(GeneratorCreationContext creationContext, Properties parameters) throws MappingException {
+		returnClass = creationContext.getType().getReturnedClass();
+
+		final var jdbcEnvironment = creationContext.getDatabase().getJdbcEnvironment();
+		final var identifierHelper = jdbcEnvironment.getIdentifierHelper();
+
+		column = identifierHelper.normalizeQuoting( identifierHelper.toIdentifier( getString( COLUMN, PK, parameters ) ) )
+				.render( jdbcEnvironment.getDialect() );
+
+		final Identifier catalog = identifierHelper.toIdentifier( getString( CATALOG, parameters ) );
+		final Identifier schema =  identifierHelper.toIdentifier( getString( SCHEMA, parameters ) );
+
+		physicalTableNames = new ArrayList<>();
+		for ( String tableName : splitAtCommas( getString( TABLES, PersistentIdentifierGenerator.TABLES, parameters ) ) ) {
+			physicalTableNames.add( new QualifiedTableName( catalog, schema, identifierHelper.toIdentifier( tableName ) ) );
+		}
+	}
+
+	@Override
+	public void initialize(SqlStringGenerationContext context) {
+		final var union = new StringBuilder();
+		for ( int i = 0; i < physicalTableNames.size(); i++ ) {
+			final String tableName = context.format( physicalTableNames.get( i ) );
+			if ( physicalTableNames.size() > 1 ) {
+				union.append( "select max(" ).append( column ).append( ") as mx from " );
+			}
+			union.append( tableName );
+			final var dialect = context.getDialect();
+			if ( i < physicalTableNames.size() - 1 ) {
+				union.append( " union " );
+				if ( dialect.getSetOperationSupport().supports( SetOperator.UNION_ALL ) ) {
+					union.append( "all " );
+				}
+			}
+		}
+		String maxColumn;
+		if ( physicalTableNames.size() > 1 ) {
+			union.insert( 0, "( " ).append( " ) ids_" );
+			maxColumn = "ids_.mx";
+		}
+		else {
+			maxColumn = column;
+		}
+
+		sql = "select max(" + maxColumn + ") from " + union;
+	}
+
+	private void initializePreviousValue(SharedSessionContractImplementor session) {
+		if ( CORE_LOGGER.isTraceEnabled() ) {
+			CORE_LOGGER.tracef( "Fetching initial value: %s", sql );
+		}
+		try {
+			final var jdbcCoordinator = session.getJdbcCoordinator();
+			final var statement = jdbcCoordinator.getStatementPreparer().prepareStatement( sql );
+			final var resourceRegistry = jdbcCoordinator.getLogicalConnection().getResourceRegistry();
+			try {
+				final var resultSet = jdbcCoordinator.getResultSetReturn().extract( statement, sql );
+					try {
+						if ( resultSet.next() ) {
+							previousValue = extractLong( resultSet, 0L ) + 1;
+						}
+						else {
+							previousValue = 1L;
+						}
+						sql = null;
+						if ( CORE_LOGGER.isTraceEnabled() ) {
+							CORE_LOGGER.tracef( "First free id: %s", makeIntegralValue( previousValue, returnClass ) );
+						}
+					}
+				finally {
+					resourceRegistry.release( resultSet, statement );
+				}
+			}
+			finally {
+				resourceRegistry.release( statement );
+				jdbcCoordinator.afterStatementExecution();
+			}
+		}
+		catch (SQLException sqle) {
+			throw session.getJdbcServices().getSqlExceptionHelper().convert(
+					sqle,
+					"could not fetch initial value for increment generator",
+					sql
+			);
+		}
+	}
+}

@@ -1,0 +1,22 @@
+package org.hibernate.processor.test.data.hhh20212;
+
+import jakarta.persistence.EntityAgent;
+import org.hibernate.processor.test.util.CompilationTest;
+import org.hibernate.processor.test.util.WithClasses;
+import org.junit.jupiter.api.Test;
+
+import static org.hibernate.processor.test.util.TestUtil.assertMetamodelClassGeneratedFor;
+import static org.hibernate.processor.test.util.TestUtil.getMetaModelSourceAsString;
+import static org.hibernate.processor.test.util.TestUtil.getMetamodelClassFor;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+@CompilationTest
+class HHH20212Test {
+	@Test
+	@WithClasses({ HHH20212Entity.class, HHH20212Repository.class })
+	void test() throws Exception {
+		System.out.println( getMetaModelSourceAsString( HHH20212Repository.class, true ) );
+		assertMetamodelClassGeneratedFor( HHH20212Repository.class, true );
+		assertNotNull( getMetamodelClassFor( HHH20212Repository.class, true ).getDeclaredConstructor( EntityAgent.class ) );
+	}
+}

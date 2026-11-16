@@ -1,0 +1,35 @@
+package org.hibernate.sql.results.jdbc.spi;
+
+import org.hibernate.type.BasicType;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ * Access to information about the underlying JDBC values
+ * such as type, position, column name, etc
+ */
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface JdbcValuesMetadata {
+	/**
+	 * Number of values in the underlying result
+	 */
+	int getColumnCount();
+
+	/**
+	 * Position of a particular result value by name
+	 */
+	int resolveColumnPosition(String columnName);
+
+	/**
+	 * Name of a particular result value by position
+	 */
+	String resolveColumnName(int position);
+
+	/**
+	 * Determine the mapping to use for a particular position in the result
+	 */
+	<J> BasicType<J> resolveType(
+			int position,
+			JavaType<J> explicitJavaType,
+			TypeConfiguration typeConfiguration);
+}

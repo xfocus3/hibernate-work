@@ -1,0 +1,25 @@
+services:
+  mysql:
+    image: ${MYSQL_IMAGE:-docker.io/library/mysql:26.10@sha256:3819b2b23835c4a73c8b022fafc33c8095c0f81c929a8b7a84613d2fba6c52f5}
+    container_name: mysql
+    environment:
+      MYSQL_USER: hibernate_orm_test
+      MYSQL_PASSWORD: hibernate_orm_test
+      MYSQL_ROOT_PASSWORD: hibernate_orm_test
+      MYSQL_DATABASE: hibernate_orm_test
+    ports:
+      - "3306:3306"
+    tmpfs:
+      - /var/lib/mysql
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_as_cs
+      - --log-bin-trust-function-creators=1
+      - --lower_case_table_names=2
+      - --innodb_native_foreign_keys
+      - --init-connect=SET character_set_client='utf8mb4';SET character_set_results='utf8mb4';SET character_set_connection='utf8mb4';SET collation_connection='utf8mb4_0900_as_cs';
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-u", "root", "-phibernate_orm_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12

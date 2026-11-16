@@ -1,0 +1,43 @@
+package org.hibernate.metamodel.model.domain.internal;
+
+import java.util.Set;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.query.hql.spi.SqmCreationState;
+import org.hibernate.query.sqm.tree.spi.SqmJoinType;
+import org.hibernate.query.sqm.tree.spi.domain.SqmSetJoin;
+import org.hibernate.query.sqm.tree.spi.domain.SqmSetPersistentAttribute;
+import org.hibernate.query.sqm.tree.spi.from.SqmAttributeJoin;
+import org.hibernate.query.sqm.tree.spi.from.SqmFrom;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SetAttributeImpl<X, E>
+		extends AbstractPluralAttribute<X, Set<E>, E>
+		implements SqmSetPersistentAttribute<X, E> {
+
+	public SetAttributeImpl(PluralAttributeBuilder<X, Set<E>, E, ?> xceBuilder) {
+		super( xceBuilder );
+	}
+
+	@Override
+	@Nonnull
+	public CollectionType getCollectionType() {
+		return CollectionType.SET;
+	}
+
+	@Override
+	public SqmAttributeJoin<X, E> createSqmJoin(
+			SqmFrom<?,X> lhs, SqmJoinType joinType, @Nullable String alias, boolean fetched, SqmCreationState creationState) {
+		return new SqmSetJoin<>(
+				lhs,
+				this,
+				alias,
+				joinType,
+				fetched,
+				creationState.getCreationContext().getNodeBuilder()
+		);
+	}
+}

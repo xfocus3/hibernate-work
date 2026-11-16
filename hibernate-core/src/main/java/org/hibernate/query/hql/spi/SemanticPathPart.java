@@ -1,0 +1,25 @@
+package org.hibernate.query.hql.spi;
+
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.query.sqm.tree.spi.expression.SqmExpression;
+
+/// Contract for things that can be part of a path structure, including:
+///
+/// * package name
+/// * class name
+/// * field name
+/// * enum name
+/// * [org.hibernate.query.sqm.tree.spi.domain.SqmSimplePath]
+///
+/// @author Steve Ebersole
+public interface SemanticPathPart {
+	SemanticPathPart resolvePathPart(
+			String name,
+			boolean isTerminal,
+			SqmCreationState creationState);
+
+	SqmPath<?> resolveIndexedAccess(
+			SqmExpression<?> selector,
+			boolean isTerminal,
+			SqmCreationState creationState);
+}

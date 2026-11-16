@@ -1,0 +1,18 @@
+package org.hibernate.query.criteria;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.Incubating;
+
+/**
+ * A set returning function criteria.
+ */
+@Incubating(since = "6.3")
+public interface JpaSetReturningFunction<T> extends JpaCriteriaNode {
+
+	/**
+	 * The name of the function.
+	 */
+	@Nonnull
+	String getFunctionName();
+
+}

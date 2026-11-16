@@ -1,0 +1,22 @@
+package org.hibernate.boot.xsd;
+
+/**
+ * @author Steve Ebersole
+ */
+public class XsdHelper {
+	public static boolean isValidJpaVersion(String version) {
+		return switch ( version ) {
+			// JPA versions
+			case "1.0", "2.0", "2.1", "2.2", "3.0", "3.1", "3.2", "4.0" -> true;
+			// Hibernate mapping.xsd versions
+			case "7.0", "8.0" -> true;
+			default -> false;
+		};
+	}
+
+	public static boolean shouldBeMappedToLatestJpaDescriptor(String uri) {
+		// JPA 1.0 and 2.0 share the same namespace URI
+		// JPA 2.1 and 2.2 share the same namespace URI
+		return MappingXsdSupport.jpa10.getNamespaceUri().equals( uri );
+	}
+}

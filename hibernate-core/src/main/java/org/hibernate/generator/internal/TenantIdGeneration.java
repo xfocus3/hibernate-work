@@ -1,0 +1,84 @@
+package org.hibernate.generator.internal;
+
+import java.util.EnumSet;
+
+import org.hibernate.PropertyValueException;
+import org.hibernate.annotations.TenantId;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.BeforeExecutionGenerator;
+import org.hibernate.generator.EventType;
+import org.hibernate.generator.EventTypeSets;
+import org.hibernate.generator.GeneratorCreationContext;
+
+import static org.hibernate.generator.EventTypeSets.INSERT_ONLY;
+
+/**
+ * A generator that produces the current tenant identifier
+ * to be assigned to the {@link TenantId} property.
+ *
+ * @author Gavin King
+ */
+public class TenantIdGeneration implements BeforeExecutionGenerator {
+
+	private final String entityName;
+	private final String propertyName;
+	private final Class<?> generatedType;
+
+	public TenantIdGeneration(TenantId annotation, GeneratorCreationContext context) {
+		final var persistentClass = context.getPersistentClass();
+		entityName =
+				persistentClass != null
+						? persistentClass.getEntityName()
+						// it's an attribute of an embeddable
+						: context.getMemberDetails().toJavaMember().getDeclaringClass().getName();
+		propertyName = context.getProperty().getName();
+		generatedType = context.getType().getReturnedClass();
+	}
+
+	/**
+	 * @return {@link EventTypeSets#INSERT_ONLY}
+	 */
+	@Override
+	public EnumSet<EventType> getEventTypes() {
+		return INSERT_ONLY;
+	}
+
+	@Override
+	public Class<?> getGeneratedType() {
+		return generatedType;
+	}
+
+	@Override
+	public Object generate(SharedSessionContractImplementor session, Object owner, Object currentValue, EventType eventType) {
+		final Object tenantId = session.getTenantIdentifierValue();
+		if ( currentValue != null ) {
+			validateTenantId( session, currentValue );
+			if ( session.isRootTenant() ) {
+				// the "root" tenant is allowed to set the tenant id explicitly
+				return currentValue;
+			}
+		}
+		return tenantId;
+	}
+
+	/**
+	 * Validate a supplied tenant id without generating a value or accessing the database.
+	 */
+	public void validateTenantId(SharedSessionContractImplementor session, Object currentValue) {
+		final var sessionFactory = session.getSessionFactory();
+		final Object tenantId = session.getTenantIdentifierValue();
+		if ( !session.isRootTenant() ) {
+			final var tenantIdJavaType = sessionFactory.getTenantIdentifierJavaType();
+			if ( !tenantIdJavaType.areEqual( currentValue, tenantId ) ) {
+				throw new PropertyValueException(
+						"assigned tenant id differs from current tenant id ["
+								+ ( currentValue == null ? "null" : tenantIdJavaType.toString( currentValue ) )
+								+ " != "
+								+ tenantIdJavaType.toString( tenantId ) + "]",
+						entityName,
+						propertyName
+				);
+			}
+		}
+	}
+}

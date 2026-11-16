@@ -1,0 +1,33 @@
+package org.hibernate.engine.jdbc.internal;
+
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.registry.StandardServiceInitiator;
+import org.hibernate.engine.jdbc.spi.JdbcServices;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+/**
+ * Standard initiator for the standard {@link JdbcServices} service
+ *
+ * TODO : should this maybe be a SessionFactory service?
+ *
+ * @author Steve Ebersole
+ */
+public class JdbcServicesInitiator implements StandardServiceInitiator<JdbcServices> {
+	/**
+	 * Singleton access
+	 */
+	public static final JdbcServicesInitiator INSTANCE = new JdbcServicesInitiator();
+
+	@Nonnull
+	@Override
+	public Class<JdbcServices> getServiceInitiated() {
+		return JdbcServices.class;
+	}
+
+	@Override
+	public JdbcServices initiateService(@Nonnull Map<String, Object> configurationValues, @Nonnull ServiceRegistryImplementor registry) {
+		return new JdbcServicesImpl();
+	}
+}

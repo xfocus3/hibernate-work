@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hibernate-mapping xmlns="http://www.hibernate.org/xsd/orm/hbm"
+                   default-lazy="false" default-access="field">
+    <class name="org.hibernate.orm.test.boot.jaxb.mapping.UnmappedPropEntity" table="unmapped_prop" >
+        <id name="id" type="long" column="id"/>
+        <property name="name" type="string"/>
+        <property name="anotherCompositeName" access="property" />
+    </class>
+    <class name="org.hibernate.orm.test.boot.jaxb.mapping.UnmappedPropTarget" table="unmapped_prop_target">
+        <id name="id" type="long" column="id"/>
+        <property name="value" type="string"/>
+    </class>
+</hibernate-mapping>

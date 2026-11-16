@@ -1,0 +1,393 @@
+package org.hibernate;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.EntityAgent;
+import jakarta.persistence.EntityGraph;
+import jakarta.persistence.FindOption;
+import org.hibernate.graph.GraphSemantic;
+
+import java.util.List;
+
+/**
+ * A command-oriented API often used for performing bulk operations against
+ * the database. A stateless session has no persistence context, and always
+ * works directly with detached entity instances. When a method of this
+ * interface is called, any necessary interaction with the database happens
+ * immediately and synchronously.
+ * <p>
+ * Viewed in opposition to {@link Session}, the {@code StatelessSession} is
+ * a whole competing programming model, one preferred by some developers
+ * for its simplicity and somewhat lower level of abstraction. But the two
+ * kinds of session are not enemies, and may comfortably coexist in a single
+ * program.
+ * <p>
+ * A stateless session comes some with designed-in limitations:
+ * <ul>
+ * <li>it does not have a first-level cache,
+ * <li>nor does it implement transactional write-behind or automatic dirty
+ *     checking.
+ * </ul>
+ * <p>
+ * Furthermore, the basic operations of a stateless session do not have
+ * corresponding {@linkplain jakarta.persistence.CascadeType cascade types},
+ * and so an operation performed on one entity via a stateless session never
+ * cascades to associated entities.
+ * <p>
+ * The basic operations of a stateless session are {@link #get(Class, Object)},
+ * {@link #insert(Object)}, {@link #update(Object)}, {@link #delete(Object)},
+ * and {@link #upsert(Object)}. These operations are always performed
+ * synchronously, resulting in immediate access to the database. Notice that
+ * update is an explicit operation. There is no "flush" operation for a
+ * stateless session, and so modifications to entities are never automatically
+ * detected and made persistent.
+ * <p>
+ * Similarly, lazy association fetching is an explicit operation. A collection
+ * or proxy may be fetched by calling {@link #fetch(Object)}.
+ * <p>
+ * Stateless sessions are vulnerable to data aliasing effects, due to the
+ * lack of a first-level cache.
+ * <p>
+ * On the other hand, for certain kinds of transactions, a stateless session
+ * may perform slightly faster than a stateful session.
+ * <p>
+ * Certain rules applying to stateful sessions are relaxed in a stateless
+ * session:
+ * <ul>
+ * <li>it's not necessary to discard a stateless session and its entities
+ *     after an exception is thrown by the stateless session, and
+ * <li>when an exception is thrown by a stateless session, the current
+ *     transaction is not automatically marked for rollback.
+ * </ul>
+ * The database may nevertheless abort the transaction. Check the actual
+ * transaction state and roll back a failed unit of work as appropriate;
+ * the absence of a Hibernate rollback-only mark does not prove that the
+ * transaction is usable. Rollback does not restore entity field values.
+ * <p>
+ * Explicit lock modes behave differently to a stateful session. The lock
+ * modes {@link jakarta.persistence.LockModeType#OPTIMISTIC OPTIMISTIC}
+ * and {@link jakarta.persistence.LockModeType#OPTIMISTIC_FORCE_INCREMENT
+ * OPTIMISTIC_FORCE_INCREMENT} are implemented as immediate pessimistic
+ * locks, as explicitly permitted by the JPA specification. The lock modes
+ * {@link jakarta.persistence.LockModeType#OPTIMISTIC_FORCE_INCREMENT
+ * OPTIMISTIC_FORCE_INCREMENT} and
+ * {@link jakarta.persistence.LockModeType#PESSIMISTIC_FORCE_INCREMENT
+ * PESSIMISTIC_FORCE_INCREMENT} both increment the version immediately.
+ * An {@code OPTIMISTIC} request requires protection against concurrent
+ * modification retained through transaction completion. A fresh version
+ * read or a stable snapshot alone is insufficient. Hibernate uses the
+ * resolved concurrency configuration to select a suitable read strategy
+ * and rejects the request if no such strategy is established.
+ * These requests do not schedule the stateful session's deferred version
+ * validation or increment.
+ * <p>
+ * Since version 7, the configuration property
+ * {@value org.hibernate.cfg.BatchSettings#STATEMENT_BATCH_SIZE} has no effect
+ * on a stateless session. Automatic batching may be enabled by explicitly
+ * {@linkplain #setJdbcBatchSize setting the batch size}. However, automatic
+ * batching has the side effect of delaying execution of the batched operation,
+ * thus undermining the synchronous nature of operations performed through a
+ * stateless session. A preferred approach is to explicitly batch operations via
+ * {@link #insertMultiple}, {@link #updateMultiple}, or {@link #deleteMultiple}.
+ * <p>
+ * Since version 7, a stateless session makes use of the second-level cache by
+ * default. To bypass the second-level cache, call {@link #setCacheMode(CacheMode)},
+ * passing {@link CacheMode#IGNORE}, or set the configuration properties
+ * {@value org.hibernate.cfg.CacheSettings#JAKARTA_SHARED_CACHE_RETRIEVE_MODE}
+ * and {@value org.hibernate.cfg.CacheSettings#JAKARTA_SHARED_CACHE_STORE_MODE}
+ * to {@code BYPASS}.
+ *
+ * @author Gavin King
+ */
+public interface StatelessSession extends SharedSessionContract, EntityAgent {
+
+	/**
+	 * Insert a record.
+	 * <p>
+	 * If the entity {@code @Id} field is declared to be generated,
+	 * for example, if it is annotated {@code @GeneratedValue}, the
+	 * id is generated and assigned to the given instance.
+	 * <p>
+	 * The {@link jakarta.persistence.PostPersist} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entity a new transient instance
+	 */
+	void insert(@Nonnull Object entity);
+
+	/**
+	 * Insert multiple records in the same order as the entity
+	 * instances representing the new records occur in the given
+	 * list.
+	 *
+	 * @param entities a list of transient instances to be inserted
+	 *
+	 * @since 7.0
+	 */
+	void insertMultiple(@Nonnull List<?> entities);
+
+	/**
+	 * Insert a record.
+	 * <p>
+	 * The {@link jakarta.persistence.PostPersist} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entityName The entityName for the entity to be inserted
+	 * @param entity a new transient instance
+	 *
+	 * @return the identifier of the instance
+	 */
+	Object insert(@Nonnull String entityName, @Nonnull Object entity);
+
+	/**
+	 * Update a record.
+	 * <p>
+	 * The {@link jakarta.persistence.PostUpdate} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entity a detached entity instance
+	 */
+	void update(@Nonnull Object entity);
+
+	/**
+	 * Update multiple records in the same order as the entity
+	 * instances representing the records occur in the given
+	 * list.
+	 *
+	 * @param entities a list of detached instances to be updated
+	 *
+	 * @since 7.0
+	 */
+	void updateMultiple(@Nonnull List<?> entities);
+
+	/**
+	 * Update a record.
+	 * <p>
+	 * The {@link jakarta.persistence.PostUpdate} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entityName The entityName for the entity to be updated
+	 * @param entity a detached entity instance
+	 */
+	void update(@Nonnull String entityName, @Nonnull Object entity);
+
+	/**
+	 * Delete a record.
+	 * <p>
+	 * The {@link jakarta.persistence.PostRemove} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entity a detached entity instance
+	 */
+	void delete(@Nonnull Object entity);
+
+	/**
+	 * Delete multiple records in the same order as the entity
+	 * instances representing the records occur in the given
+	 * list.
+	 *
+	 * @param entities a list of detached instances to be deleted
+	 *
+	 * @since 7.0
+	 */
+	void deleteMultiple(@Nonnull List<?> entities);
+
+	/**
+	 * Delete a record.
+	 * <p>
+	 * The {@link jakarta.persistence.PostRemove} callback will be
+	 * triggered if the operation is successful.
+	 *
+	 * @param entityName The entity name for the entity to be deleted
+	 * @param entity a detached entity instance
+	 */
+	void delete(@Nonnull String entityName, @Nonnull Object entity);
+
+	/**
+	 * Use a SQL {@code merge into} statement to perform an upsert,
+	 * that is, to insert the record if it does not exist, or update
+	 * it if it already exists.
+	 * <p>
+	 * This method never performs id generation, and does not accept
+	 * an entity instance with a null identifier. When id generation
+	 * is required, use {@link #insert(Object)}.
+	 * <p>
+	 * On the other hand, {@code upsert()} does accept an entity
+	 * instance with an assigned identifier value, even if the entity
+	 * {@code @Id} field is declared to be generated, for example, if
+	 * it is annotated {@code @GeneratedValue}. Thus, this method may
+	 * be used to import data from an external source.
+	 *
+	 * @param entity a detached entity instance, or a new instance
+	 *               with an assigned identifier
+	 * @throws TransientObjectException if the entity has a null id
+	 *
+	 * @since 6.3
+	 */
+	void upsert(@Nonnull Object entity);
+
+	/**
+	 * Upsert multiple records, that is, for a given record,
+	 * insert the record if it does not exist or update the
+	 * record if it already exists, in the same order as the
+	 * entity instances representing the records occur in
+	 * the given list.
+	 *
+	 * @param entities a list of detached instances and new
+	 *                 instances with assigned identifiers
+	 *
+	 * @since 7.0
+	 */
+	void upsertMultiple(@Nonnull List<?> entities);
+
+	/**
+	 * Use a SQL {@code merge into} statement to perform an upsert.
+	 *
+	 * @param entityName The entity name for the entity to be merged
+	 * @param entity a detached entity instance
+	 * @throws TransientObjectException if the entity has a null id
+	 *
+	 * @since 6.3
+	 */
+	void upsert(@Nonnull String entityName, @Nonnull Object entity);
+
+	/**
+	 * Retrieve a record, obtaining the specified lock mode.
+	 *
+	 * @param entityName The name of the entity to retrieve
+	 * @param id The id of the entity to retrieve
+	 * @param lockMode The lock mode to apply to the entity
+	 *
+	 * @return a detached entity instance, or null if there
+	 *         is no instance with the given id
+	 */
+	@Nonnull
+	@Deprecated(forRemoval = true, since = "8.0")
+	Object get(@Nonnull String entityName, @Nonnull Object id, @Nonnull LockMode lockMode);
+
+	/**
+	 * Retrieve a record, fetching associations specified by the
+	 * given {@link EntityGraph}.
+	 *
+	 * @param graph The {@link EntityGraph}
+	 * @param graphSemantic a {@link GraphSemantic} specifying
+	 *                      how the graph should be interpreted
+	 * @param id The id of the entity to retrieve
+	 * @return a detached entity instance, or null if there
+	 *         is no instance with the given id
+	 * @deprecated Use {@link #get(EntityGraph, Object, FindOption...)}
+	 *             instead
+	 * @since 6.3
+	 */
+	@Nonnull
+	@Deprecated(forRemoval = true, since = "8.0")
+	<T> T get(@Nonnull EntityGraph<T> graph, @Nonnull GraphSemantic graphSemantic, @Nonnull Object id);
+
+	/**
+	 * Retrieve a record, fetching associations specified by the
+	 * given {@link EntityGraph}, and obtaining the specified
+	 * lock mode.
+	 *
+	 * @param graph The {@link EntityGraph}
+	 * @param graphSemantic a {@link GraphSemantic} specifying
+	 *                      how the graph should be interpreted
+	 * @param id The id of the entity to retrieve
+	 * @param lockMode The lock mode to apply to the entity
+	 * @return a detached entity instance, or null if there
+	 *         is no instance with the given id
+	 * @deprecated Use {@link #get(EntityGraph, Object, FindOption...)}
+	 *             instead
+	 * @since 6.3
+	 */
+	@Nonnull
+	@Deprecated(forRemoval = true, since = "8.0")
+	<T> T get(@Nonnull EntityGraph<T> graph, @Nonnull GraphSemantic graphSemantic, @Nonnull Object id, @Nonnull LockMode lockMode);
+
+	/**
+	 * Retrieve multiple rows, returning instances of the root
+	 * entity of the given {@link EntityGraph} with the fetched
+	 * associations specified by the graph, in a list where the
+	 * position of an instance in the list matches the position
+	 * of its identifier in the given array, and the list
+	 * contains a null value if there is no persistent instance
+	 * matching a given identifier.
+	 *
+	 * @param entityGraph The {@link EntityGraph}
+	 * @param graphSemantic a {@link GraphSemantic} specifying
+	 *                      how the graph should be interpreted
+	 * @param ids The ids of the entities to retrieve
+	 * @return an ordered list of detached entity instances, with
+	 *         null elements representing missing entities
+	 * @deprecated Use {@link #get(EntityGraph, Object, FindOption...)}
+	 *             instead
+	 * @since 7.0
+	 */
+	@Nonnull
+	@Deprecated(forRemoval = true, since = "8.0")
+	<T> List<T> getMultiple(@Nonnull EntityGraph<T> entityGraph, @Nonnull GraphSemantic graphSemantic, @Nonnull List<?> ids);
+
+	/**
+	 * Refresh the entity instance state from the database.
+	 *
+	 * @param entity The entity to be refreshed.
+	 */
+	void refresh(@Nonnull Object entity);
+
+	/**
+	 * Refresh the entity instance state from the database.
+	 *
+	 * @param entityName The entity name for the entity to be refreshed.
+	 * @param entity The entity to be refreshed.
+	 */
+	void refresh(@Nonnull String entityName, @Nonnull Object entity);
+
+	/**
+	 * Refresh the entity instance state from the database.
+	 *
+	 * @param entity The entity to be refreshed.
+	 * @param lockMode The LockMode to be applied.
+	 */
+	void refresh(@Nonnull Object entity, @Nonnull LockMode lockMode);
+
+	/**
+	 * Refresh the entity instance state from the database.
+	 *
+	 * @param entityName The entity name for the entity to be refreshed.
+	 * @param entity The entity to be refreshed.
+	 * @param lockMode The LockMode to be applied.
+	 */
+	void refresh(@Nonnull String entityName, @Nonnull Object entity, @Nonnull LockMode lockMode);
+
+	/**
+	 * Fetch an association or collection that's configured for lazy loading.
+	 * <pre>
+	 * Book book = session.get(Book.class, isbn);  // book is immediately detached
+	 * session.fetch(book.getAuthors());           // fetch the associated authors
+	 * book.getAuthors().forEach(author -> ... );  // iterate the collection
+	 * </pre>
+	 * <p>
+	 * Warning: this operation in a stateless session is quite sensitive
+	 * to data aliasing effects and should be used with great care. It's
+	 * usually better to fetch associations using eager join fetching.
+	 *
+	 * @param association a lazy-loaded association
+	 *
+	 * @see org.hibernate.Hibernate#initialize(Object)
+	 *
+	 * @since 6.0
+	 */
+	@Nonnull
+	<T> T fetch(@Nonnull T association);
+
+	/**
+	 * Return the identifier value of the given entity, which may be detached.
+	 *
+	 * @param entity a persistent instance associated with this session
+	 *
+	 * @return the identifier
+	 *
+	 * @since 6.6
+	 */
+	@Nullable
+	Object getIdentifier(@Nonnull Object entity);
+}

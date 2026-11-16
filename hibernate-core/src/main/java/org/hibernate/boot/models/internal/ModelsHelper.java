@@ -1,0 +1,80 @@
+package org.hibernate.boot.models.internal;
+
+import java.sql.Blob;
+import java.sql.Clob;
+import java.sql.NClob;
+import java.util.function.Supplier;
+
+import org.hibernate.HibernateException;
+import org.hibernate.annotations.TenantId;
+import org.hibernate.boot.models.xml.spi.XmlDocumentContext;
+import org.hibernate.models.internal.MutableClassDetailsRegistry;
+import org.hibernate.models.internal.jdk.JdkClassDetails;
+import org.hibernate.models.spi.ClassDetails;
+import org.hibernate.models.spi.ClassDetailsRegistry;
+import org.hibernate.models.spi.RegistryPrimer;
+import org.hibernate.models.spi.ModelsContext;
+
+
+/**
+ * @author Steve Ebersole
+ */
+public class ModelsHelper {
+	public static void preFillRegistries(RegistryPrimer.Contributions contributions, ModelsContext buildingContext) {
+		OrmAnnotationHelper.forEachOrmAnnotation( contributions::registerAnnotation );
+
+		registerPrimitive( boolean.class, buildingContext );
+		registerPrimitive( byte.class, buildingContext );
+		registerPrimitive( short.class, buildingContext );
+		registerPrimitive( int.class, buildingContext );
+		registerPrimitive( long.class, buildingContext );
+		registerPrimitive( double.class, buildingContext );
+		registerPrimitive( float.class, buildingContext );
+		registerPrimitive( char.class, buildingContext );
+		registerPrimitive( Blob.class, buildingContext );
+		registerPrimitive( Clob.class, buildingContext );
+		registerPrimitive( NClob.class, buildingContext );
+		registerPrimitive( java.sql.Date.class, buildingContext );
+		registerPrimitive( java.sql.Time.class, buildingContext );
+		registerPrimitive( java.sql.Timestamp.class, buildingContext );
+
+		buildingContext.getAnnotationDescriptorRegistry().getDescriptor( TenantId.class );
+	}
+
+	private static void registerPrimitive(Class<?> theClass, ModelsContext buildingContext) {
+		buildingContext.getClassDetailsRegistry()
+				.as( MutableClassDetailsRegistry.class )
+				.addClassDetails( new JdkClassDetails( theClass, buildingContext ) );
+
+	}
+
+	public static ClassDetails resolveClassDetails(
+			String className,
+			ClassDetailsRegistry classDetailsRegistry,
+			Supplier<ClassDetails> classDetailsSupplier) {
+		var classDetails = classDetailsRegistry.findClassDetails( className );
+		if ( classDetails != null ) {
+			return classDetails;
+		}
+		else {
+			classDetails = classDetailsSupplier.get();
+			classDetailsRegistry.as( MutableClassDetailsRegistry.class )
+					.addClassDetails( className, classDetails );
+			return classDetails;
+		}
+	}
+
+	public static ClassDetails resolveClassDetails(
+			String className,
+			XmlDocumentContext xmlDocumentContext,
+			ClassDetailsRegistry classDetailsRegistry,
+			Supplier<ClassDetails> classDetailsSupplier) {
+		try {
+			return xmlDocumentContext.resolveJavaType( className );
+		}
+		catch (HibernateException e) {
+			//ignore
+		}
+		return resolveClassDetails( className, classDetailsRegistry, classDetailsSupplier );
+	}
+}

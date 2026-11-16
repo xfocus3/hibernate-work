@@ -1,0 +1,1124 @@
+package org.hibernate.persister.entity;
+
+import jakarta.annotation.Nonnull;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Function;
+
+import org.hibernate.HibernateException;
+import org.hibernate.Internal;
+import org.hibernate.MappingException;
+import org.hibernate.annotations.NotFoundAction;
+import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.boot.spi.MetadataImplementor;
+import org.hibernate.bytecode.internal.BytecodeEnhancementMetadataNonPojoImpl;
+import org.hibernate.bytecode.internal.BytecodeEnhancementMetadataPojoImpl;
+import org.hibernate.bytecode.spi.BytecodeEnhancementMetadata;
+import org.hibernate.cascade.spi.CascadePropertySelection;
+import org.hibernate.engine.OptimisticLockStyle;
+import org.hibernate.cascade.spi.CascadeStyle;
+import org.hibernate.cascade.spi.CascadeStyles;
+import org.hibernate.cascade.spi.CascadingAction;
+import org.hibernate.cascade.spi.CascadingActions;
+import org.hibernate.generator.EventType;
+import org.hibernate.generator.Generator;
+import org.hibernate.generator.OnExecutionGenerator;
+import org.hibernate.generator.BeforeExecutionGenerator;
+import org.hibernate.generator.internal.CompositeGeneratorBuilder;
+import org.hibernate.mapping.Component;
+import org.hibernate.mapping.ManyToOne;
+import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.Property;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.type.AssociationType;
+import org.hibernate.type.CollectionType;
+import org.hibernate.type.ComponentType;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.ManyToOneType;
+import org.hibernate.type.OneToOneType;
+import org.hibernate.type.Type;
+
+import jakarta.annotation.Nullable;
+
+import static java.util.Collections.singleton;
+import static java.util.Collections.unmodifiableSet;
+import static org.hibernate.bytecode.enhance.spi.interceptor.EnhancementHelper.includeInBaseFetchGroup;
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.internal.util.ReflectHelper.isAbstractClass;
+import static org.hibernate.internal.util.ReflectHelper.isFinalClass;
+import static org.hibernate.internal.util.collections.ArrayHelper.toIntArray;
+import static org.hibernate.internal.util.collections.CollectionHelper.toSmallSet;
+
+/**
+ * Runtime metadata used by {@link AbstractEntityPersister}.
+ */
+@Internal
+abstract class BaseEntityPersister implements Serializable {
+
+	public static final int NO_VERSION_INDX = -66;
+
+	private final String name;
+	private final String rootName;
+	private final EntityType entityType;
+
+	private final int subclassId;
+	@Nullable
+	private final String identifierPropertyName;
+	private final Type identifierType;
+	private final boolean identifierVirtual;
+	private final boolean identifierEmbedded;
+	private final boolean identifierAssignedByInsert;
+	private final Generator identifierGenerator;
+	private final boolean versioned;
+
+	private final int propertySpan;
+	private final int versionPropertyIndex;
+	// temporary ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	private final String[] propertyNames;
+	private final Type[] propertyTypes;
+	private final @Nonnull Type[] dirtyCheckablePropertyTypes;
+	private final boolean[] propertyDirtyCheckability;
+	private final boolean[] propertyLaziness;
+	private final boolean[] propertyUpdateability;
+	private final boolean[] nonlazyPropertyUpdateability;
+	private final boolean[] propertyCheckability;
+	private final boolean[] propertyInsertability;
+	private final boolean[] propertyNullability;
+	private final boolean[] propertyVersionability;
+	private final OnDeleteAction[] propertyOnDeleteActions;
+	private final CascadeStyle[] cascadeStyles;
+	private final CascadePropertySelection removePropertySelection;
+	private final CascadePropertySelection refreshPropertySelection;
+	private final CascadePropertySelection evictPropertySelection;
+	private final CascadePropertySelection mergePropertySelection;
+	private final CascadePropertySelection persistPropertySelection;
+	private final CascadePropertySelection persistOnFlushPropertySelection;
+	private final CascadePropertySelection checkOnFlushPropertySelection;
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	// value generations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	private final boolean hasPreInsertGeneratedValues;
+	private final boolean hasPreUpdateGeneratedValues;
+	private final boolean hasInsertGeneratedValues;
+	private final boolean hasUpdateGeneratedValues;
+
+	private final Generator[] generators;
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	private final Map<String, Integer> propertyIndexes = new HashMap<>();
+	private final boolean hasCollections;
+	private final boolean hasOwnedCollections;
+	private final BitSet mutablePropertiesIndexes;
+	private final boolean hasLazyProperties;
+	private final boolean hasNonIdentifierPropertyNamedId;
+
+	@Nullable
+	private final int[] naturalIdPropertyNumbers;
+	private final boolean hasImmutableNaturalId;
+//	private final boolean hasCacheableNaturalId;
+
+	private final boolean lazy;
+	private final CascadeStyle identifierCascadeStyle;
+	private final boolean hasCascades;
+	private final boolean hasToOnes;
+	private final boolean hasCascadePersist;
+	private final boolean hasCascadeDelete;
+	private final boolean mutable;
+	private final boolean isAbstract;
+	private final boolean selectBeforeUpdate;
+	private final boolean dynamicUpdate;
+	private final boolean dynamicInsert;
+	private final OptimisticLockStyle optimisticLockStyle;
+
+	private final boolean polymorphic;
+	@Nullable
+	private final String superclass;  // superclass entity-name
+	private final boolean inherited;
+	private final boolean hasSubclasses;
+	private final Set<String> subclassEntityNames;
+//	private final Map<Class<?>,String> entityNameByInheritanceClassMap;
+
+	@Nullable
+	private BeforeExecutionGenerator versionGenerator;
+
+	private final BytecodeEnhancementMetadata bytecodeEnhancementMetadata;
+
+	protected BaseEntityPersister(
+			@Nonnull PersistentClass persistentClass,
+			@Nonnull RuntimeModelCreationContext creationContext) {
+		this( persistentClass, creationContext,
+				rootName -> creationContext.getOrCreateIdGenerator( rootName, persistentClass ) );
+	}
+
+	/*
+	 * Used by Hibernate Reactive to adapt the id generators
+	 */
+	protected BaseEntityPersister(
+			@Nonnull PersistentClass persistentClass,
+			@Nonnull RuntimeModelCreationContext creationContext,
+			@Nonnull Function<String, Generator> generatorSupplier) {
+		// Improves performance of EntityKey#equals by avoiding content check in String#equals
+		name = persistentClass.getEntityName().intern();
+		rootName = persistentClass.getRootClass().getEntityName().intern();
+		// Make sure the hashCodes are cached
+		//noinspection ResultOfMethodCallIgnored
+		name.hashCode();
+		//noinspection ResultOfMethodCallIgnored
+		rootName.hashCode();
+
+		entityType = new ManyToOneType( name, creationContext.getTypeConfiguration() );
+
+		subclassId = persistentClass.getSubclassId();
+
+		final var identifierProperty = persistentClass.getIdentifierProperty();
+		identifierType = persistentClass.getIdentifier().getType();
+		identifierVirtual = identifierProperty == null;
+		identifierPropertyName = identifierProperty == null ? null : identifierProperty.getName();
+		identifierEmbedded = persistentClass.hasEmbeddedIdentifier();
+		identifierGenerator = generatorSupplier.apply( rootName );
+		identifierAssignedByInsert = identifierGenerator.generatedOnExecution();
+
+		versioned = persistentClass.isVersioned();
+
+		final boolean collectionsInDefaultFetchGroup =
+				creationContext.getSessionFactoryOptions()
+						.isCollectionsInDefaultFetchGroupEnabled();
+
+		bytecodeEnhancementMetadata =
+				bytecodeEnhancementMetadata(
+						persistentClass,
+						creationContext,
+						collectionsInDefaultFetchGroup
+				);
+
+		boolean hasLazy = false;
+
+		propertySpan = persistentClass.getPropertyClosureSpan();
+		List<Integer> naturalIdNumbers = new ArrayList<>();
+		// temporary ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		propertyNames = new String[propertySpan];
+		propertyTypes = new Type[propertySpan];
+		dirtyCheckablePropertyTypes = new Type[propertySpan];
+		propertyDirtyCheckability = new boolean[propertySpan];
+		propertyUpdateability = new boolean[propertySpan];
+		propertyInsertability = new boolean[propertySpan];
+		nonlazyPropertyUpdateability = new boolean[propertySpan];
+		propertyCheckability = new boolean[propertySpan];
+		propertyNullability = new boolean[propertySpan];
+		propertyVersionability = new boolean[propertySpan];
+		propertyLaziness = new boolean[propertySpan];
+		propertyOnDeleteActions = new OnDeleteAction[propertySpan];
+		cascadeStyles = new CascadeStyle[propertySpan];
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+		// generated value strategies ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		generators = new Generator[propertySpan];
+
+		boolean foundPreInsertGeneratedValues = false;
+		boolean foundPreUpdateGeneratedValues = false;
+		boolean foundPostInsertGeneratedValues = false;
+		boolean foundPostUpdateGeneratedValues = false;
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+		final boolean supportsCascadeDelete = creationContext.getDialect().getForeignKeySupport().supportsOnDeleteAction( org.hibernate.annotations.OnDeleteAction.CASCADE );
+
+		int tempVersionProperty = NO_VERSION_INDX;
+		boolean foundCascade = false;
+		boolean foundToOne = false;
+		boolean foundCascadePersist = false;
+		boolean foundCascadeDelete = false;
+		boolean foundCollection = false;
+		boolean foundOwnedCollection = false;
+		BitSet mutableIndexes = new BitSet();
+		boolean foundNonIdentifierPropertyNamedId = false;
+		boolean foundUpdateableNaturalIdProperty = false;
+		boolean hasIdentifierMapperProperty = false;
+		BeforeExecutionGenerator tempVersionGenerator = null;
+
+		final var props = persistentClass.getPropertyClosure();
+		for ( int i=0; i<props.size(); i++ ) {
+			final var property = props.get(i);
+			if ( property == persistentClass.getVersion() ) {
+				tempVersionProperty = i;
+			}
+
+			if ( property.isNaturalIdentifier() ) {
+				verifyNaturalIdProperty( property );
+				naturalIdNumbers.add( i );
+				if ( property.isUpdatable() ) {
+					foundUpdateableNaturalIdProperty = true;
+				}
+			}
+
+			if ( "id".equals( property.getName() ) ) {
+				foundNonIdentifierPropertyNamedId = true;
+			}
+
+			if ( NavigablePath.IDENTIFIER_MAPPER_PROPERTY.equals( property.getName() ) ) {
+				hasIdentifierMapperProperty = true;
+			}
+
+			// temporary ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+			final boolean lazy =
+					isLazy( creationContext, property, collectionsInDefaultFetchGroup, bytecodeEnhancementMetadata );
+			if ( lazy ) {
+				hasLazy = true;
+			}
+			propertyLaziness[i] = lazy;
+			propertyNames[i] = property.getName();
+			final var propertyType = property.getValue().getType();
+			propertyTypes[i] = propertyType;
+			final boolean alwaysDirtyCheck = propertyType instanceof AssociationType associationType
+					&& associationType.isAlwaysDirtyChecked();
+			final boolean dirtyCheckable =
+					property == persistentClass.getVersion()
+							? property.isUpdatable()
+									&& !( bytecodeEnhancementMetadata.isEnhancedForLazyLoading() && property.isLazy() )
+							: alwaysDirtyCheck || property.isUpdatable();
+			propertyDirtyCheckability[i] = dirtyCheckable;
+			if ( dirtyCheckable && !( propertyType instanceof OneToOneType ) ) {
+				dirtyCheckablePropertyTypes[i] = propertyType;
+			}
+			propertyNullability[i] = property.isOptional();
+			propertyUpdateability[i] = property.isUpdatable();
+			propertyInsertability[i] = property.isInsertable();
+			propertyVersionability[i] = property.isOptimisticLocked();
+			nonlazyPropertyUpdateability[i] = property.isUpdatable() && !lazy;
+			propertyCheckability[i] = propertyUpdateability[i]
+					|| alwaysDirtyCheck;
+			propertyOnDeleteActions[i] = supportsCascadeDelete ? property.getOnDeleteAction() : null;
+			cascadeStyles[i] = property.getCascadeStyle();
+			// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+			// generated value strategies ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+			final var generator = buildGenerator( name, property, creationContext );
+			if ( generator != null ) {
+				final boolean generatedOnExecution = generator.generatedOnExecution();
+				if ( i == tempVersionProperty && !generatedOnExecution ) {
+					// when we have an in-memory generator for the version, we
+					// want to plug it in to the older infrastructure specific
+					// to version generation, instead of treating it like a
+					// plain "value" generator for a regular attribute
+					tempVersionGenerator = (BeforeExecutionGenerator) generator;
+				}
+				else {
+					generators[i] = generator;
+					final boolean allowMutation = generator.allowMutation();
+					if ( !allowMutation ) {
+						propertyCheckability[i] = false;
+					}
+					if ( generator.generatesOnInsert() ) {
+						if ( generatedOnExecution ) {
+							propertyInsertability[i] =
+									writePropertyValue( (OnExecutionGenerator) generator, EventType.INSERT );
+						}
+						foundPostInsertGeneratedValues = foundPostInsertGeneratedValues
+								|| generatedOnExecution;
+						foundPreInsertGeneratedValues = foundPreInsertGeneratedValues
+								|| !generatedOnExecution
+								|| generator instanceof BeforeExecutionGenerator;
+					}
+					else if ( !allowMutation ) {
+						propertyInsertability[i] = false;
+					}
+					if ( generator.generatesOnUpdate() ) {
+						if ( generatedOnExecution ) {
+							propertyUpdateability[i] =
+									writePropertyValue( (OnExecutionGenerator) generator, EventType.UPDATE );
+						}
+						foundPostUpdateGeneratedValues = foundPostInsertGeneratedValues
+								|| generatedOnExecution;
+						foundPreUpdateGeneratedValues = foundPreInsertGeneratedValues
+								|| !generatedOnExecution
+								|| generator instanceof BeforeExecutionGenerator;
+					}
+					else if ( !allowMutation ) {
+						propertyUpdateability[i] = false;
+					}
+				}
+			}
+
+			// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+			if ( cascadeStyles[i] != CascadeStyles.NONE ) {
+				foundCascade = true;
+			}
+			if ( cascadeStyles[i].doCascade(CascadingActions.PERSIST)
+					|| cascadeStyles[i].doCascade(CascadingActions.PERSIST_ON_FLUSH) ) {
+				foundCascadePersist = true;
+			}
+			if ( cascadeStyles[i].doCascade(CascadingActions.REMOVE) ) {
+				foundCascadeDelete = true;
+			}
+
+			if ( indicatesToOne( propertyType ) ) {
+				foundToOne = true;
+			}
+			if ( indicatesCollection( propertyType ) ) {
+				foundCollection = true;
+			}
+			if ( indicatesOwnedCollection( propertyType, creationContext.getMetadata() ) ) {
+				foundOwnedCollection = true;
+			}
+
+			// Component types are dirty-tracked as well, so they
+			// are not exactly mutable for the "maybeDirty" check
+			if ( propertyType.isMutable()
+					&& propertyCheckability[i]
+					&& !( propertyType instanceof ComponentType ) ) {
+				mutableIndexes.set( i );
+			}
+
+			mapPropertyToIndex( property, i );
+		}
+
+		removePropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.REMOVE
+		);
+		refreshPropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.REFRESH
+		);
+		evictPropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.EVICT
+		);
+		mergePropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.MERGE
+		);
+		persistPropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.PERSIST
+		);
+		persistOnFlushPropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.PERSIST_ON_FLUSH
+		);
+		checkOnFlushPropertySelection = CascadePropertySelection.determine(
+				propertyTypes,
+				cascadeStyles,
+				CascadingActions.CHECK_ON_FLUSH
+		);
+
+		if ( naturalIdNumbers.isEmpty() ) {
+			naturalIdPropertyNumbers = null;
+			hasImmutableNaturalId = false;
+//			hasCacheableNaturalId = false;
+		}
+		else {
+			naturalIdPropertyNumbers = toIntArray( naturalIdNumbers );
+			hasImmutableNaturalId = !foundUpdateableNaturalIdProperty;
+//			hasCacheableNaturalId = persistentClass.getNaturalIdCacheRegionName() != null;
+		}
+
+		hasPreInsertGeneratedValues = foundPreInsertGeneratedValues;
+		hasPreUpdateGeneratedValues = foundPreUpdateGeneratedValues;
+		hasInsertGeneratedValues = foundPostInsertGeneratedValues;
+		hasUpdateGeneratedValues = foundPostUpdateGeneratedValues;
+
+		versionGenerator = tempVersionGenerator;
+
+		if ( identifierProperty != null ) {
+			final CascadeStyle idCascade = identifierProperty.getCascadeStyle();
+			identifierCascadeStyle = idCascade;
+			if ( idCascade != CascadeStyles.NONE ) {
+				foundCascade = true;
+				if ( idCascade.doCascade( CascadingActions.PERSIST )
+						|| idCascade.doCascade( CascadingActions.PERSIST_ON_FLUSH ) ) {
+					foundCascadePersist = true;
+				}
+				if ( idCascade.doCascade( CascadingActions.REMOVE ) ) {
+					foundCascadeDelete = true;
+				}
+			}
+			if ( indicatesToOne( identifierType ) ) {
+				foundToOne = true;
+			}
+		}
+		else if ( !hasIdentifierMapperProperty
+				&& identifierType instanceof ComponentType componentType ) {
+			CascadeStyle idCascade = CascadeStyles.NONE;
+			final Type[] subtypes = componentType.getSubtypes();
+			for ( int k = 0; k < subtypes.length; k++ ) {
+				if ( componentType.getCascadeStyle( k ) != CascadeStyles.NONE ) {
+					idCascade = CascadeStyles.ALL;
+					break;
+				}
+			}
+			identifierCascadeStyle = idCascade;
+			if ( idCascade != CascadeStyles.NONE ) {
+				foundCascade = true;
+				if ( idCascade.doCascade( CascadingActions.PERSIST )
+						|| idCascade.doCascade( CascadingActions.PERSIST_ON_FLUSH ) ) {
+					foundCascadePersist = true;
+				}
+				if ( idCascade.doCascade( CascadingActions.REMOVE ) ) {
+					foundCascadeDelete = true;
+				}
+			}
+			for ( final Type subtype : subtypes ) {
+				if ( indicatesToOne( subtype ) ) {
+					foundToOne = true;
+					break;
+				}
+			}
+		}
+		else {
+			identifierCascadeStyle = CascadeStyles.NONE;
+		}
+
+		hasCascades = foundCascade;
+		hasToOnes = foundToOne;
+		hasCascadePersist = foundCascadePersist;
+		hasCascadeDelete = foundCascadeDelete;
+		hasNonIdentifierPropertyNamedId = foundNonIdentifierPropertyNamedId;
+		versionPropertyIndex = tempVersionProperty;
+		hasLazyProperties = hasLazy;
+		if ( hasLazyProperties ) {
+			CORE_LOGGER.lazyPropertyFetchingAvailable( name );
+		}
+
+		lazy = determineLazyByMetadata( persistentClass, bytecodeEnhancementMetadata );
+
+		mutable = persistentClass.isMutable();
+		isAbstract = isAbstract( persistentClass );
+
+		selectBeforeUpdate = persistentClass.hasSelectBeforeUpdate();
+
+		dynamicUpdate = persistentClass.useDynamicUpdate() || hasMultipleFetchGroups( bytecodeEnhancementMetadata );
+		dynamicInsert = persistentClass.useDynamicInsert();
+
+		polymorphic = persistentClass.isPolymorphic();
+		inherited = persistentClass.isInherited();
+		superclass = inherited ? persistentClass.getSuperclass().getEntityName() : null;
+		hasSubclasses = persistentClass.hasSubclasses();
+
+		optimisticLockStyle = persistentClass.getOptimisticLockStyle();
+		//TODO: move these checks into the Binders
+		if ( optimisticLockStyle.isAllOrDirty() ) {
+			if ( !dynamicUpdate ) {
+				throw new MappingException( "Entity '" + name
+											+ "' has 'OptimisticLockType." + optimisticLockStyle
+											+ "' but is not annotated '@DynamicUpdate'" );
+			}
+			if ( versionPropertyIndex != NO_VERSION_INDX ) {
+				throw new MappingException( "Entity '" + name
+											+ "' has 'OptimisticLockType." + optimisticLockStyle
+											+ "' but declares a '@Version' field" );
+			}
+		}
+
+		hasCollections = foundCollection;
+		hasOwnedCollections = foundOwnedCollection;
+		mutablePropertiesIndexes = mutableIndexes;
+
+		subclassEntityNames = collectSubclassEntityNames( persistentClass );
+
+//		HashMap<Class<?>, String> entityNameByInheritanceClassMapLocal = new HashMap<>();
+//		if ( persistentClass.hasPojoRepresentation() ) {
+//			entityNameByInheritanceClassMapLocal.put( persistentClass.getMappedClass(), persistentClass.getEntityName() );
+//			for ( Subclass subclass : persistentClass.getSubclasses() ) {
+//				entityNameByInheritanceClassMapLocal.put( subclass.getMappedClass(), subclass.getEntityName() );
+//			}
+//		}
+//		entityNameByInheritanceClassMap = toSmallMap( entityNameByInheritanceClassMapLocal );
+	}
+
+	@Nonnull
+	private Set<String> collectSubclassEntityNames(@Nonnull PersistentClass persistentClass) {
+		final Set<String> entityNames = new LinkedHashSet<>(); // Need deterministic ordering
+		entityNames.add( name );
+		for ( var subclass : persistentClass.getSubclasses() ) {
+			entityNames.add( subclass.getEntityName() );
+		}
+		return toSmallSet( entityNames );
+	}
+
+	private static boolean isAbstract(@Nonnull PersistentClass persistentClass) {
+		final Boolean isAbstract = persistentClass.isAbstract();
+		if ( isAbstract == null ) {
+			// legacy behavior (with no abstract attribute specified)
+			return persistentClass.hasPojoRepresentation()
+				&& isAbstractClass( persistentClass.getMappedClass() );
+		}
+		else {
+			if ( !isAbstract
+					&& persistentClass.hasPojoRepresentation()
+					&& isAbstractClass( persistentClass.getMappedClass() ) ) {
+				CORE_LOGGER.entityMappedAsNonAbstract( persistentClass.getEntityName() );
+			}
+			return isAbstract;
+		}
+	}
+
+	private boolean determineLazyByMetadata(@Nonnull PersistentClass persistentClass, @Nonnull BytecodeEnhancementMetadata enhancementMetadata) {
+		return persistentClass.isLazy()
+				// TODO: this disables laziness even in non-pojo entity modes:
+				&& ( !persistentClass.hasPojoRepresentation() || !isFinalClass( persistentClass.getProxyInterface() ) )
+			|| enhancementMetadata.isEnhancedForLazyLoading();
+	}
+
+	private boolean hasMultipleFetchGroups(@Nonnull BytecodeEnhancementMetadata enhancementMetadata) {
+		return enhancementMetadata.isEnhancedForLazyLoading()
+			&& enhancementMetadata.getLazyAttributesMetadata().getFetchGroupNames().size() > 1;
+	}
+
+	private static boolean isLazy(
+			@Nonnull RuntimeModelCreationContext creationContext,
+			@Nonnull Property property,
+			boolean collectionsInDefaultFetchGroupEnabled,
+			@Nonnull BytecodeEnhancementMetadata enhancementMetadata) {
+		return !includeInBaseFetchGroup(
+				property,
+				enhancementMetadata.isEnhancedForLazyLoading(),
+				entityName -> {
+					final var entityBinding =
+							creationContext.getMetadata().getEntityBinding( entityName );
+					assert entityBinding != null;
+					return entityBinding.hasSubclasses();
+				},
+				collectionsInDefaultFetchGroupEnabled
+		);
+	}
+
+	@Nonnull
+	private BytecodeEnhancementMetadata bytecodeEnhancementMetadata(
+			@Nonnull PersistentClass persistentClass,
+			@Nonnull RuntimeModelCreationContext creationContext,
+			boolean collectionsInDefaultFetchGroupEnabled) {
+		if ( persistentClass.hasPojoRepresentation() ) {
+			final var identifierMapperComponent = persistentClass.getIdentifierMapper();
+			final CompositeType nonAggregatedCidMapper;
+			final Set<String> idAttributeNames;
+			if ( identifierMapperComponent != null ) {
+				nonAggregatedCidMapper = identifierMapperComponent.getType();
+				final HashSet<String> propertyNames = new HashSet<>();
+				for ( var property : identifierMapperComponent.getProperties() ) {
+					propertyNames.add( property.getName() );
+				}
+				idAttributeNames = toSmallSet( unmodifiableSet( propertyNames ) );
+			}
+			else {
+				nonAggregatedCidMapper = null;
+				idAttributeNames = singleton( identifierPropertyName );
+			}
+
+			return getBytecodeEnhancementMetadataPojo(
+					persistentClass,
+					creationContext,
+					idAttributeNames,
+					nonAggregatedCidMapper,
+					collectionsInDefaultFetchGroupEnabled
+			);
+		}
+		else {
+			return new BytecodeEnhancementMetadataNonPojoImpl( persistentClass.getEntityName() );
+		}
+	}
+
+	/*
+	 * Used by Hibernate Reactive
+	 */
+	@Nonnull
+	protected BytecodeEnhancementMetadata getBytecodeEnhancementMetadataPojo(
+			@Nonnull PersistentClass persistentClass,
+			@Nonnull RuntimeModelCreationContext creationContext,
+			@Nonnull Set<String> idAttributeNames,
+			@Nonnull CompositeType nonAggregatedCidMapper,
+			boolean collectionsInDefaultFetchGroupEnabled) {
+		return BytecodeEnhancementMetadataPojoImpl.from(
+				persistentClass,
+				idAttributeNames,
+				nonAggregatedCidMapper,
+				collectionsInDefaultFetchGroupEnabled,
+				creationContext.getMetadata()
+		);
+	}
+
+	private static boolean writePropertyValue(@Nonnull OnExecutionGenerator generator, @Nonnull EventType eventType) {
+		final boolean writePropertyValue = generator.writePropertyValue( eventType );
+		// TODO: move this validation somewhere else!
+//		if ( !writePropertyValue && generator instanceof BeforeExecutionGenerator ) {
+//			throw new HibernateException( "BeforeExecutionGenerator returned false from OnExecutionGenerator.writePropertyValue()" );
+//		}
+		return writePropertyValue;
+	}
+
+	private void verifyNaturalIdProperty(@Nonnull Property property) {
+		final var value = property.getValue();
+		if ( value instanceof ManyToOne toOne ) {
+			if ( toOne.getNotFoundAction() == NotFoundAction.IGNORE ) {
+				throw new MappingException( "Association '" + propertyName( property )
+											+ "' marked as '@NaturalId' is also annotated '@NotFound(IGNORE)'"
+				);
+			}
+		}
+		else if ( value instanceof Component component ) {
+			for ( var componentProperty : component.getProperties() ) {
+				verifyNaturalIdProperty( componentProperty );
+			}
+		}
+	}
+
+	@Nonnull
+	private String propertyName(@Nonnull Property property) {
+		return getName() + "." + property.getName();
+	}
+
+	@Nullable
+	private static Generator buildGenerator(
+			@Nonnull final String entityName,
+			@Nonnull final Property mappingProperty,
+			@Nonnull final RuntimeModelCreationContext context) {
+		final var generatorCreator = mappingProperty.getValueGeneratorCreator();
+		if ( generatorCreator != null ) {
+			final var generator = mappingProperty.createGenerator( context );
+			if ( generator.generatesSometimes() ) {
+				return generator;
+			}
+		}
+		if ( mappingProperty.getValue() instanceof Component component ) {
+			final var builder =
+					new CompositeGeneratorBuilder( entityName, mappingProperty, context.getDialect() );
+			for ( var property : component.getProperties() ) {
+				builder.add( buildGenerator( entityName, property, context ) );
+			}
+			return builder.build();
+		}
+		return null;
+	}
+
+	@Nonnull
+	public Generator[] getGenerators() {
+		return generators;
+	}
+
+	@Nullable
+	public BeforeExecutionGenerator getVersionGenerator() {
+		return versionGenerator;
+	}
+
+	protected void setVersionGenerator(@Nullable BeforeExecutionGenerator versionGenerator) {
+		this.versionGenerator = versionGenerator;
+	}
+
+	private void mapPropertyToIndex(@Nonnull Property property, int i) {
+		propertyIndexes.put( property.getName(), i );
+		if ( property.getValue() instanceof Component composite ) {
+			for ( var subproperty : composite.getProperties() ) {
+				propertyIndexes.put(
+						property.getName() + '.' + subproperty.getName(),
+						i
+					);
+			}
+		}
+	}
+
+	/**
+	 * @return {@code true} if one of the properties belonging to the natural id
+	 *         is generated during the execution of an {@code insert} statement
+	 */
+	public boolean isNaturalIdentifierInsertGenerated() {
+		if ( naturalIdPropertyNumbers == null || naturalIdPropertyNumbers.length == 0 ) {
+			throw new IllegalStateException( "Entity '" + name + "' does not have a natural id" );
+		}
+		for ( int naturalIdPropertyNumber : naturalIdPropertyNumbers ) {
+			final var strategy = generators[naturalIdPropertyNumber];
+			if ( strategy != null
+					&& strategy.generatesOnInsert()
+					&& strategy.generatedOnExecution() ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@Nullable
+	public int[] getNaturalIdentifierProperties() {
+		return naturalIdPropertyNumbers;
+	}
+
+	public boolean hasNaturalIdentifier() {
+		return naturalIdPropertyNumbers!=null;
+	}
+
+//	public boolean isNaturalIdentifierCached() {
+//		return hasNaturalIdentifier() && hasCacheableNaturalId;
+//	}
+
+	public boolean hasImmutableNaturalId() {
+		return hasImmutableNaturalId;
+	}
+
+	@Nonnull
+	public Set<String> getSubclassEntityNames() {
+		return subclassEntityNames;
+	}
+
+	private static boolean indicatesToOne(@Nonnull Type type) {
+		if ( type.isEntityType() ) {
+			return true;
+		}
+		else if ( type instanceof CompositeType compositeType ) {
+			for ( var subtype : compositeType.getSubtypes() ) {
+				if ( indicatesToOne( subtype ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean indicatesCollection(@Nonnull Type type) {
+		if ( type instanceof CollectionType ) {
+			return true;
+		}
+		else if ( type instanceof CompositeType compositeType ) {
+			for ( var subtype : compositeType.getSubtypes() ) {
+				if ( indicatesCollection( subtype ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean indicatesOwnedCollection(@Nonnull Type type, @Nonnull MetadataImplementor metadata) {
+		if ( type instanceof CollectionType collectionType ) {
+			return !metadata.getCollectionBinding( collectionType.getRole() ).isInverse();
+		}
+		else if ( type instanceof CompositeType compositeType ) {
+			for ( var subtype : compositeType.getSubtypes() ) {
+				if ( indicatesOwnedCollection( subtype, metadata ) ) {
+					return true;
+				}
+			}
+			return false;
+		}
+		else {
+			return false;
+		}
+	}
+
+	@Nonnull
+	public String getName() {
+		return name;
+	}
+
+	@Nonnull
+	public String getRootName() {
+		return rootName;
+	}
+
+	public int getSubclassId() {
+		return subclassId;
+	}
+
+	@Nonnull
+	public EntityType getEntityType() {
+		return entityType;
+	}
+
+	@Nullable
+	protected String getIdentifierAttributeName() {
+		return identifierPropertyName;
+	}
+
+	@Nonnull
+	protected Type getIdentifierAttributeType() {
+		return identifierType;
+	}
+
+	protected boolean isIdentifierVirtual() {
+		return identifierVirtual;
+	}
+
+	protected boolean isIdentifierEmbedded() {
+		return identifierEmbedded;
+	}
+
+	protected boolean isIdentifierAssignedByInsertInternal() {
+		return identifierAssignedByInsert;
+	}
+
+	@Nonnull
+	protected Generator getIdentifierGenerator() {
+		return identifierGenerator;
+	}
+
+	public int getPropertySpan() {
+		return propertySpan;
+	}
+
+	public int getVersionPropertyIndex() {
+		return versionPropertyIndex;
+	}
+
+	public int getPropertyIndex(@Nonnull String propertyName) {
+		final Integer index = getPropertyIndexOrNull( propertyName );
+		if ( index == null ) {
+			throw new HibernateException( "Unable to resolve property: " + propertyName );
+		}
+		return index;
+	}
+
+	@Nullable
+	public Integer getPropertyIndexOrNull(@Nonnull String propertyName) {
+		return propertyIndexes.get( propertyName );
+	}
+
+	public boolean hasCollections() {
+		return hasCollections;
+	}
+
+	public boolean hasOwnedCollections() {
+		return hasOwnedCollections;
+	}
+
+	public boolean hasMutableProperties() {
+		return !mutablePropertiesIndexes.isEmpty();
+	}
+
+	@Nonnull
+	public BitSet getMutablePropertiesIndexes() {
+		return mutablePropertiesIndexes;
+	}
+
+	public boolean hasNonIdentifierPropertyNamedId() {
+		return hasNonIdentifierPropertyNamedId;
+	}
+
+	public boolean hasLazyProperties() {
+		return hasLazyProperties;
+	}
+
+	@Nonnull
+	public CascadeStyle getIdentifierCascadeStyle() {
+		return identifierCascadeStyle;
+	}
+
+	public boolean hasCascades() {
+		return hasCascades;
+	}
+
+	public boolean hasToOnes() {
+		return hasToOnes;
+	}
+
+	public boolean hasCascadeDelete() {
+		return hasCascadeDelete;
+	}
+
+	public boolean hasCascadePersist() {
+		return hasCascadePersist;
+	}
+
+	@Nonnull
+	protected CascadePropertySelection getCascadePropertySelection(@Nonnull CascadingAction<?> action) {
+		if ( action == CascadingActions.REMOVE ) {
+			return removePropertySelection;
+		}
+		if ( action == CascadingActions.REFRESH ) {
+			return refreshPropertySelection;
+		}
+		if ( action == CascadingActions.EVICT ) {
+			return evictPropertySelection;
+		}
+		if ( action == CascadingActions.MERGE ) {
+			return mergePropertySelection;
+		}
+		if ( action == CascadingActions.PERSIST ) {
+			return persistPropertySelection;
+		}
+		if ( action == CascadingActions.PERSIST_ON_FLUSH ) {
+			return persistOnFlushPropertySelection;
+		}
+		if ( action == CascadingActions.CHECK_ON_FLUSH ) {
+			return checkOnFlushPropertySelection;
+		}
+		return CascadePropertySelection.all();
+	}
+
+	public boolean isMutable() {
+		return mutable;
+	}
+
+	public boolean isSelectBeforeUpdate() {
+		return selectBeforeUpdate;
+	}
+
+	public boolean isDynamicUpdate() {
+		return dynamicUpdate;
+	}
+
+	public boolean isDynamicInsert() {
+		return dynamicInsert;
+	}
+
+	@Nonnull
+	public OptimisticLockStyle getOptimisticLockStyle() {
+		return optimisticLockStyle;
+	}
+
+	public boolean isPolymorphic() {
+		return polymorphic;
+	}
+
+	@Nullable
+	public String getSuperclass() {
+		return superclass;
+	}
+
+	public boolean isInherited() {
+		return inherited;
+	}
+
+	public boolean hasSubclasses() {
+		return hasSubclasses;
+	}
+
+	public boolean isLazy() {
+		return isLazyByMetadata();
+	}
+
+	protected final boolean isLazyByMetadata() {
+		return lazy;
+	}
+
+	public boolean isVersioned() {
+		return versioned;
+	}
+
+	public boolean isAbstract() {
+		return isAbstract;
+	}
+
+//	/**
+//	 * Return the entity-name mapped to the given class within our inheritance hierarchy, if any.
+//	 *
+//	 * @param inheritanceClass The class for which to resolve the entity-name.
+//	 * @return The mapped entity-name, or null if no such mapping was found.
+//	 */
+//	public String findEntityNameByEntityClass(Class<?> inheritanceClass) {
+//		return entityNameByInheritanceClassMap.get( inheritanceClass );
+//	}
+
+	@Nonnull
+	@Override
+	public String toString() {
+		return "EntityPersisterRuntimeModel(" + name + ')';
+	}
+
+	// temporary ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	@Nonnull
+	public String[] getPropertyNames() {
+		return propertyNames;
+	}
+
+	@Nonnull
+	public Type[] getPropertyTypes() {
+		return propertyTypes;
+	}
+
+	public @Nonnull Type[] getDirtyCheckablePropertyTypes() {
+		return dirtyCheckablePropertyTypes;
+	}
+
+	@Nonnull
+	protected boolean[] getPropertyDirtyCheckability() {
+		return propertyDirtyCheckability;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyLaziness() {
+		return propertyLaziness;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyUpdateability() {
+		return propertyUpdateability;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyCheckability() {
+		return propertyCheckability;
+	}
+
+	@Nonnull
+	public boolean[] getNonlazyPropertyUpdateability() {
+		return nonlazyPropertyUpdateability;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyInsertability() {
+		return propertyInsertability;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyNullability() {
+		return propertyNullability;
+	}
+
+	@Nonnull
+	public boolean[] getPropertyVersionability() {
+		return propertyVersionability;
+	}
+
+	@Nonnull
+	public CascadeStyle[] getCascadeStyles() {
+		return cascadeStyles;
+	}
+
+	public boolean hasPreInsertGeneratedValues() {
+		return hasPreInsertGeneratedValues;
+	}
+
+	public boolean hasPreUpdateGeneratedValues() {
+		return hasPreUpdateGeneratedValues;
+	}
+
+	public boolean hasInsertGeneratedValues() {
+		return hasInsertGeneratedValues;
+	}
+
+	public boolean hasUpdateGeneratedValues() {
+		return hasUpdateGeneratedValues;
+	}
+
+	/**
+	 * Whether this class can be lazy (ie intercepted)
+	 */
+	public boolean isInstrumented() {
+		return bytecodeEnhancementMetadata.isEnhancedForLazyLoading();
+	}
+
+	@Nonnull
+	public BytecodeEnhancementMetadata getBytecodeEnhancementMetadata() {
+		return bytecodeEnhancementMetadata;
+	}
+
+	@Nonnull
+	public OnDeleteAction[] getPropertyOnDeleteActions() {
+		return propertyOnDeleteActions;
+	}
+}

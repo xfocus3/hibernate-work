@@ -1,0 +1,25 @@
+services:
+  db2spatial:
+    image: ${DB_IMAGE_DB2_SPATIAL:-docker.io/ibmcom/db2:11.5.8.0@sha256:d678ec116f66992366bf8e7f23df24fe16ccc3f70710243d2c88e3c687670e4c}
+    container_name: db2spatial
+    privileged: true
+    ports:
+      - "50000:50000"
+    environment:
+      DB2INSTANCE: orm_test
+      DB2INST1_PASSWORD: orm_test
+      DBNAME: orm_test
+      LICENSE: accept
+      AUTOCONFIG: "false"
+      ARCHIVE_LOGS: "false"
+      TO_CREATE_SAMPLEDB: "false"
+      REPODB: "false"
+    volumes:
+      - ../../build-config/db2_spatial/ewkt.sql:/conf/ewkt.sql
+    shm_size: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "su - orm_test -c 'source ~/sqllib/db2profile && db2 connect to orm_test && db2 connect reset'"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 200s

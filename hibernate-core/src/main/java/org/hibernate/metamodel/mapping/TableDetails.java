@@ -1,0 +1,122 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+
+import java.util.List;
+
+/**
+ * Details about a table
+ *
+ * @author Steve Ebersole
+ */
+public interface TableDetails {
+	/**
+	 * The name of the table
+	 */
+	@Nonnull
+	String getTableName();
+
+	/**
+	 * Details about the primary-key of this table
+	 */
+	@Nullable
+	KeyDetails getKeyDetails();
+
+	/**
+	 * Whether this table is the root for a given {@link ModelPartContainer}.
+	 * <p>
+	 * Only relevant for entity-mappings where this indicates whether this
+	 * table holds the entity's identifier.
+	 */
+	boolean isIdentifierTable();
+
+	/**
+	 * Details about the primary key of a table
+	 */
+	interface KeyDetails extends SelectableMappings {
+		/**
+		 * Number of columns
+		 */
+		int getColumnCount();
+
+		/**
+		 * Group of columns defined on the primary key
+		 */
+		@Nonnull
+		List<? extends KeyColumn> getKeyColumns();
+
+		/**
+		 * Get a key column by relative position
+		 */
+		@Nonnull
+		KeyColumn getKeyColumn(int position);
+
+
+		@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+		@FunctionalInterface
+		interface KeyValueConsumer {
+			void consume(@Nullable Object jdbcValue, @Nonnull KeyColumn columnMapping);
+		}
+
+		/**
+		 * Visit each key column
+		 */
+		void forEachKeyColumn(@Nonnull KeyColumnConsumer consumer);
+
+		/**
+		 * Break a key value down into its constituent parts, calling the consumer for each.
+		 */
+		void breakDownKeyJdbcValues(
+				@Nonnull Object domainValue,
+				@Nonnull KeyValueConsumer valueConsumer,
+				@Nonnull SharedSessionContractImplementor session);
+
+		/**
+		 * Create a DomainResult for selecting and retrieving the key.
+		 */
+		@Nonnull
+		@org.hibernate.SPI(org.hibernate.SPI.Role.SUPPLY)
+		<K> DomainResult<K> createDomainResult(
+				@Nonnull NavigablePath navigablePath,
+				@Nonnull TableReference tableReference,
+				@Nullable String resultVariable,
+				@Nonnull DomainResultCreationState creationState);
+	}
+
+	/**
+	 * Details about a column within the key group
+	 */
+	interface KeyColumn extends SelectableMapping {
+		/**
+		 * The name of the column
+		 */
+		@Nonnull
+		String getColumnName();
+
+		/**
+		 * Describes the mapping between object and relational for this column
+		 */
+		@Nonnull
+		JdbcMapping getJdbcMapping();
+	}
+
+	@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+	@FunctionalInterface
+	interface KeyColumnConsumer {
+		/**
+		 * Callback a particular key column
+		 *
+		 * @param position The position of the column within the key group
+		 * @param column The column details
+		 */
+		void consume(int position, @Nonnull KeyColumn column);
+	}
+}

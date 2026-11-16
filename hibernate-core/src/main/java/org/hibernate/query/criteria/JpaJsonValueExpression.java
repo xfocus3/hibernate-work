@@ -1,0 +1,74 @@
+package org.hibernate.query.criteria;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.Incubating;
+
+import jakarta.persistence.criteria.Expression;
+
+/**
+ * A special expression for the {@code json_value} function.
+ * @since 7.0
+ */
+@Incubating(since = "6.3")
+public interface JpaJsonValueExpression<T> extends JpaExpression<T>, JpaJsonValueNode<T> {
+
+	/**
+	 * Passes the given {@link Expression} as value for the parameter with the given name in the JSON path.
+	 *
+	 * @return {@code this} for method chaining
+	 */
+	@Nonnull
+	JpaJsonValueExpression<T> passing(@Nonnull String parameterName, @Nonnull Expression<?> expression);
+
+	/**
+	 * Use the unspecified JSON error behavior.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> unspecifiedOnError();
+	/**
+	 * Use the JSON error behavior that raises an error.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> errorOnError();
+	/**
+	 * Use the JSON error behavior that returns null.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> nullOnError();
+	/**
+	 * Use the JSON error behavior that returns the given default value.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> defaultOnError(@Nonnull Expression<?> expression);
+
+	/**
+	 * Use the unspecified JSON empty behavior.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> unspecifiedOnEmpty();
+	/**
+	 * Use the JSON empty behavior that raises an error.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> errorOnEmpty();
+	/**
+	 * Use the JSON empty behavior that returns null.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> nullOnEmpty();
+	/**
+	 * Use the JSON empty behavior that returns the given default value.
+	 */
+	@Nonnull
+	@Override
+	JpaJsonValueExpression<T> defaultOnEmpty(@Nonnull Expression<?> expression);
+
+}

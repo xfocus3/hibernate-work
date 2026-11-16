@@ -1,0 +1,68 @@
+package org.hibernate.sql.results.graph.collection.internal;
+
+import org.hibernate.LockMode;
+import org.hibernate.collection.spi.CollectionInitializerProducer;
+import org.hibernate.engine.spi.FetchOptions;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.results.graph.AssemblerCreationState;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.Fetch;
+import org.hibernate.sql.results.graph.InitializerParent;
+import org.hibernate.sql.results.graph.collection.CollectionInitializer;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * @author Steve Ebersole
+ */
+public class BagInitializerProducer implements CollectionInitializerProducer {
+	private final PluralAttributeMapping bagDescriptor;
+	private final @Nullable Fetch collectionIdFetch;
+	private final Fetch elementFetch;
+
+	public BagInitializerProducer(
+			PluralAttributeMapping bagDescriptor,
+			Fetch collectionIdFetch,
+			Fetch elementFetch) {
+		this.bagDescriptor = bagDescriptor;
+
+		if ( bagDescriptor.getIdentifierDescriptor() != null ) {
+			assert collectionIdFetch != null;
+			this.collectionIdFetch = collectionIdFetch;
+		}
+		else {
+			assert collectionIdFetch == null;
+			this.collectionIdFetch = null;
+		}
+
+		this.elementFetch = elementFetch;
+
+	}
+
+	@Override
+	public CollectionInitializer<?> produceInitializer(
+			NavigablePath navigablePath,
+			PluralAttributeMapping attribute,
+			InitializerParent<?> parent,
+			LockMode lockMode,
+			DomainResult<?> collectionKeyResult,
+			DomainResult<?> collectionValueKeyResult,
+			boolean isResultInitializer,
+			FetchOptions fetchOptions,
+			AssemblerCreationState creationState) {
+		return new BagInitializer(
+				navigablePath,
+				bagDescriptor,
+				parent,
+				lockMode,
+				collectionKeyResult,
+				collectionValueKeyResult,
+				isResultInitializer,
+				fetchOptions,
+				creationState,
+				elementFetch,
+				collectionIdFetch
+		);
+	}
+}

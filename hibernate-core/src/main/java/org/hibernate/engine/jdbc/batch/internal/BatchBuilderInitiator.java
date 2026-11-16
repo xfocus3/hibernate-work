@@ -1,0 +1,84 @@
+package org.hibernate.engine.jdbc.batch.internal;
+
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.registry.StandardServiceInitiator;
+import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+import org.hibernate.engine.jdbc.batch.spi.BatchBuilder;
+import org.hibernate.service.spi.ServiceException;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+import static org.hibernate.cfg.BatchSettings.BATCH_STRATEGY;
+import static org.hibernate.cfg.BatchSettings.BUILDER;
+import static org.hibernate.cfg.BatchSettings.STATEMENT_BATCH_SIZE;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getInt;
+
+/**
+ * Initiator for the {@link BatchBuilder} service
+ *
+ * @author Steve Ebersole
+ */
+public class BatchBuilderInitiator implements StandardServiceInitiator<BatchBuilder> {
+	/**
+	 * Singleton access
+	 */
+	public static final BatchBuilderInitiator INSTANCE = new BatchBuilderInitiator();
+
+	@Nonnull
+	@Override
+	public Class<BatchBuilder> getServiceInitiated() {
+		return BatchBuilder.class;
+	}
+
+	@Override
+	public BatchBuilder initiateService(@Nonnull Map<String, Object> configurationValues, @Nonnull ServiceRegistryImplementor registry) {
+		Object builder = configurationValues.get( BUILDER );
+
+		if ( builder == null ) {
+			builder = configurationValues.get( BATCH_STRATEGY );
+		}
+
+		final var classLoaderService = registry.requireService( ClassLoaderService.class );
+
+		if ( builder == null ) {
+			final var discovered = discover( classLoaderService );
+			return discovered != null
+					? discovered
+					: new BatchBuilderImpl( getInt( STATEMENT_BATCH_SIZE, configurationValues, 1 ) );
+		}
+		else if ( builder instanceof BatchBuilder batchBuilder ) {
+			return batchBuilder;
+		}
+		else {
+			final String builderClassName = builder.toString();
+			try {
+				return (BatchBuilder)
+						classLoaderService
+								.classForName( builderClassName )
+								.getConstructor()
+								.newInstance();
+			}
+			catch (Exception e) {
+				throw new ServiceException( "Could not build explicit BatchBuilder [" + builderClassName + "]", e );
+			}
+		}
+	}
+
+	private static BatchBuilder discover(ClassLoaderService classLoaderService) {
+		final var discovered = classLoaderService.loadJavaServices( BatchBuilder.class );
+		final var iterator = discovered.iterator();
+		if ( iterator.hasNext() ) {
+			final var selected = iterator.next();
+			if ( iterator.hasNext() ) {
+				throw new ServiceException(
+						"Multiple BatchBuilder service registrations found via ServiceLoader; "
+						+ "specify one explicitly via '" + BUILDER + "'" );
+			}
+			return selected;
+		}
+		else {
+			return null;
+		}
+	}
+}

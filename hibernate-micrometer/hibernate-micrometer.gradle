@@ -1,0 +1,26 @@
+plugins {
+    id "local.publishing-java-module"
+    id "local.publishing-group-relocation"
+}
+
+description = 'Integration for Micrometer metrics into Hibernate as a metrics collection package'
+
+dependencies {
+    implementation project( ':hibernate-core' )
+    compileOnly libs.micrometer
+
+    testImplementation project( ':hibernate-testing' )
+    testImplementation libs.micrometer
+
+    testAnnotationProcessor project( ':hibernate-processor' )
+    testCompileOnly libs.jakarta.annotation
+}
+
+sourceSets {
+    // resources inherently exclude sources
+    test {
+        resources {
+            setSrcDirs( ['src/test/resources'] )
+        }
+    }
+}

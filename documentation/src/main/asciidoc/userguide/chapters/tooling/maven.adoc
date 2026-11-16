@@ -1,0 +1,172 @@
+[[tooling-maven]]
+=== Maven
+
+:tooling-maven-examples: {root-project-dir}/tooling/hibernate-maven-plugin/src/intTest/resources/guide
+
+Use `org.hibernate.orm:hibernate-maven-plugin` for enhancement, reverse engineering,
+and HBM XML transformation. Keep the plugin, processor, and runtime versions aligned.
+
+[[tooling-maven-enhancement]]
+==== Enhancement and compilation
+
+[[maven-enhance-goal]]
+The `enhance` goal binds to `process-classes`, after Java compilation. It enhances main
+classes by default; it does not automatically enhance test outputs. The following POM also
+configures metamodel generation and demonstrates an explicit enhancement exclusion:
+
+[source,xml,subs="attributes+"]
+----
+include::{tooling-maven-examples}/enhance/pom.xml[]
+----
+
+Run `mvn process-classes` to execute compilation, annotation processing, and enhancement.
+The generated metamodel participates in compilation before enhancement runs. Removing the
+optional `fileSets` configuration selects the default classes directory without that exclusion.
+
+[[maven-enhance-configuration]]
+===== Enhancement options
+
+See <<BytecodeEnhancement>> for feature semantics. The plugin accepts:
+
+[cols="2,2,4",options="header"]
+|===
+|Parameter |Default |Purpose
+|[[maven-enhance-classesDirectory-parameter,classesDirectory]]`classesDirectory`
+|`${project.build.directory}/classes`
+|Directory to enhance when `fileSets` is absent.
+|[[maven-enhance-filesets-parameter,fileSets]]`fileSets`
+|Unset
+|Explicit Maven FileSets; replaces `classesDirectory` selection. Use `directory`, `includes/include`, and `excludes/exclude`, as in the POM above.
+|[[maven-enhance-enableLazyInitialization-parameter,enableLazyInitialization]]`enableLazyInitialization`
+|`true`
+|Lazy-loading support; disabling it is deprecated for removal.
+|[[maven-enhance-enableDirtyTracking-parameter,enableDirtyTracking]]`enableDirtyTracking`
+|`true`
+|Inline dirty tracking; disabling it is deprecated for removal.
+|[[maven-enhance-enableAssociationManagement-parameter,enableAssociationManagement]]`enableAssociationManagement`
+|`false`
+|Enhancement-based bidirectional association management; deprecated for removal. Use <<auto-bidir-mgmt,flush-time bidirectional association management>> instead.
+|[[maven-enhance-enableClientEnhancement,enableClientEnhancement]]`enableClientEnhancement`
+|`false`
+|Client field-access enhancement; see <<BytecodeEnhancement-client>>.
+|[[maven-enhance-enableExtendedEnhancement-paremeter,enableExtendedEnhancement]]`enableExtendedEnhancement`
+|Unset
+|Deprecated client-enhancement alias. An explicit `enableClientEnhancement` value wins, including `false`.
+|===
+
+FileSets use Maven's configuration model, not Ant fileset attributes. See
+https://maven.apache.org/shared/file-management/fileset.html[the Maven FileSet reference].
+When selecting another output, configure the appropriate lifecycle phase explicitly and
+ensure the selected classes and their dependencies are available before enhancement.
+
+[[tooling-maven-modelgen]]
+==== Annotation processing
+
+The first POM declares `hibernate-processor` through the compiler plugin's
+`annotationProcessorPaths`, including its transitive dependencies. This explicitly enables
+processor discovery on current JDKs. The provided annotation dependency makes
+`jakarta.annotation.Generated` available when compiling the generated sources.
+
+`annotationProcessorPathsUseDepMgmt` applies dependency-management rules to the processor's
+transitive dependencies; it is useful when the project manages those versions. It is separate
+from supplying the processor version and from the application runtime dependency.
+Generated sources normally appear in `target/generated-sources/annotations`; the compiler
+plugin includes them in compilation. See <<tooling-modelgen>> for generated types and options.
+
+[[tooling-maven-reveng]]
+==== Reverse engineering
+
+[[tooling-maven-reveng-plugin]]
+The same plugin provides database reverse-engineering goals. The database must already
+exist, and its JDBC driver must be available to the project runtime classpath used by these goals.
+
+[[tooling-maven-reveng-example]]
+.Generating entities and compiling them
+[source,xml,subs="attributes+"]
+----
+include::{tooling-maven-examples}/reveng/pom.xml[]
+----
+
+Supply `src/main/resources/hibernate.properties` as described in <<tooling-reveng-connection>>,
+then run `mvn compile`. `hbm2java` generates sources during `generate-sources`; the build-helper
+execution registers the output directory with the compiler. Generating files alone does not
+register that directory as a compilation source root in the current Hibernate plugin.
+
+[[tooling-maven-reveng-goals]]
+===== Goals
+
+[cols="2,2,4",options="header"]
+|===
+|Goal |Default phase |Output
+|`hbm2java` |`generate-sources` |Annotated Java entity classes.
+|`hbm2dao` |`generate-sources` |DAO sources.
+|`hbm2ddl` |`generate-resources` |DDL exported from reverse-engineered metadata.
+|`generateHbm` |`generate-sources` |Legacy `hbm.xml`; deprecated for removal. Prefer `hbm2java`.
+|===
+
+[[tooling-maven-reveng-common-params]]
+===== Shared reverse-engineering parameters
+
+[cols="2,2,4",options="header"]
+|===
+|Parameter |Default |Purpose
+|`propertyFile` |`${project.basedir}/src/main/resources/hibernate.properties` |JDBC settings file.
+|`packageName` |Unset |Default package for generated classes.
+|`revengFile` |Unset |Reverse-engineering XML file; see <<tooling-reveng-config>>.
+|`revengStrategy` |Unset |Custom `RevengStrategy` implementation; see <<tooling-reveng-custom-strategy>>.
+|`detectManyToMany` |`true` |Detect pure link tables.
+|`detectOneToOne` |`true` |Detect supported primary-key/foreign-key one-to-one relationships; not every foreign key.
+|`detectOptimisticLock` |`true` |Detect supported version columns.
+|`createCollectionForForeignKey` |`true` |Generate collection sides of foreign-key associations.
+|`createManyToOneForForeignKey` |`true` |Generate many-to-one sides of foreign-key associations.
+|===
+
+Shared detection semantics and XML overrides are described once in <<tooling-reveng>>.
+
+[[tooling-maven-reveng-hbm2java-params]]
+===== Java entity output
+
+For `hbm2java`, `outputDirectory` defaults to `${project.build.directory}/generated-sources/`.
+`ejb3=true` generates Jakarta Persistence annotations, and `jdk5=true` enables generics and
+related Java constructs. `templatePath` selects custom FreeMarker templates when supplied.
+The example uses a dedicated generated-source subdirectory to make ownership explicit.
+
+[[tooling-maven-reveng-hbm2ddl-params]]
+===== DDL output
+
+For `hbm2ddl`, `outputDirectory` defaults to `${project.build.directory}/generated-resources/`
+and `outputFileName` to `schema.ddl`. Its remaining parameters are:
+
+[cols="2,2,4",options="header"]
+|===
+|Parameter |Default |Purpose
+|`targetTypes` |`SCRIPT` |Targets: `SCRIPT`, `DATABASE`, or `STDOUT`.
+|`schemaExportAction` |`CREATE` |Action: `NONE`, `CREATE`, `DROP`, or `BOTH` (drop then create).
+|`delimiter` |`;` |SQL statement delimiter.
+|`format` |`true` |Format SQL output.
+|`haltOnError` |`true` |Stop on errors.
+|===
+
+The script default writes DDL without executing it against the database. Selecting `DATABASE`
+performs the selected schema action. For exporting application mappings, validation, and
+alteration scripts, see <<schema-generation>> instead of assuming reverse engineering is required.
+
+[[tooling-maven-reveng-hbm2dao-params]]
+===== DAO output
+
+For `hbm2dao`, `outputDirectory` defaults to `${project.build.directory}/generated-sources/`.
+`ejb3` and `jdk5` both default to `false`; `templatePath` selects custom templates.
+Generated DAO sources may require additional application dependencies before compilation.
+
+[[tooling-maven-transformhbm]]
+==== HBM XML transformation
+
+`transformHbm` converts legacy mappings without reverse engineering a database. It binds to
+`generate-resources` and uses the project's runtime classpath. With its defaults, it recursively
+finds files ending in `hbm.xml` beneath `src/main/resources`, writing a sibling
+`.mapping.xml` for a normal `.hbm.xml` filename.
+
+[[tooling-maven-transformhbm-params]]
+`inputFolder` changes the input directory; `format` defaults to `true` and controls XML formatting.
+Review the generated mappings and include them in the application configuration as needed.
+This conversion is separate from generating new mappings from JDBC metadata.

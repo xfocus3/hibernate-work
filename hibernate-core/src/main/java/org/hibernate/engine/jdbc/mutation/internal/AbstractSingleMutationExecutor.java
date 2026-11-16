@@ -1,0 +1,78 @@
+package org.hibernate.engine.jdbc.mutation.internal;
+
+import org.hibernate.engine.jdbc.mutation.JdbcValueBindings;
+import org.hibernate.engine.jdbc.mutation.ParameterUsage;
+import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
+import org.hibernate.engine.jdbc.mutation.spi.JdbcValueDescriptorAccess;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.sql.spi.mutation.jdbc.PreparableMutationOperation;
+import org.hibernate.sql.spi.mutation.jdbc.JdbcValueDescriptor;
+
+import java.util.Locale;
+import java.util.function.Consumer;
+
+/**
+ * @author Steve Ebersole
+ */
+public abstract class AbstractSingleMutationExecutor extends AbstractMutationExecutor implements JdbcValueDescriptorAccess {
+	private final PreparableMutationOperation mutationOperation;
+	private final JdbcValueBindings valueBindings;
+
+	public AbstractSingleMutationExecutor(
+			PreparableMutationOperation mutationOperation,
+			SharedSessionContractImplementor session) {
+		this.mutationOperation = mutationOperation;
+		this.valueBindings = new JdbcValueBindingsImpl(
+				mutationOperation.getMutationType(),
+				mutationOperation.getMutationTarget(),
+				this,
+				session
+		);
+	}
+
+	protected PreparableMutationOperation getMutationOperation() {
+		return mutationOperation;
+	}
+
+	protected abstract PreparedStatementGroupSingleTable getStatementGroup();
+
+	@Override
+	public PreparedStatementDetails getPreparedStatementDetails(String tableName) {
+		final PreparedStatementDetails statementDetails = getStatementGroup().getSingleStatementDetails();
+		assert statementDetails.getMutatingTableDetails().getTableName().equals( tableName );
+		return statementDetails;
+	}
+
+	@Override
+	public String resolvePhysicalTableName(String tableName) {
+		return mutationOperation.getTableDetails().getTableName();
+	}
+
+	@Override
+	public JdbcValueDescriptor resolveValueDescriptor(String tableName, String columnName, ParameterUsage usage) {
+		assert mutationOperation.getTableDetails().containsTableName( tableName )
+				: String.format( Locale.ROOT, "table names did not match : `%s` & `%s`", tableName, mutationOperation.getTableDetails().getTableName()  );
+		return mutationOperation.findValueDescriptor( columnName, usage );
+	}
+
+	@Override
+	public int forEachValueDescriptor(
+			String tableName,
+			String columnName,
+			ParameterUsage usage,
+			Consumer<JdbcValueDescriptor> consumer) {
+		assert mutationOperation.getTableDetails().containsTableName( tableName )
+				: String.format( Locale.ROOT, "table names did not match : `%s` & `%s`", tableName, mutationOperation.getTableDetails().getTableName() );
+		return mutationOperation.forEachValueDescriptor(
+				mutationOperation.getTableDetails().getTableName(),
+				columnName,
+				usage,
+				consumer
+		);
+	}
+
+	@Override
+	public JdbcValueBindings getJdbcValueBindings() {
+		return valueBindings;
+	}
+}

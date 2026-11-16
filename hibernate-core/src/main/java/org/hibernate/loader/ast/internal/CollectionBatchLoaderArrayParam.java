@@ -1,0 +1,230 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+
+import org.hibernate.LockOptions;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.engine.spi.SubselectFetch;
+import org.hibernate.internal.build.AllowReflection;
+import org.hibernate.loader.ast.spi.CollectionBatchLoader;
+import org.hibernate.loader.ast.spi.SqlArrayMultiKeyLoader;
+import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SqlTypedMapping;
+import org.hibernate.metamodel.mapping.internal.SqlTypedMappingImpl;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseManager;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingsImpl;
+import org.hibernate.sql.exec.internal.SqlTypedMappingJdbcParameter;
+import org.hibernate.sql.exec.spi.JdbcParameterBindings;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+import org.hibernate.sql.results.internal.RowTransformerStandardImpl;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+
+import static org.hibernate.loader.ast.internal.MultiKeyLoadHelper.hasSingleId;
+import static org.hibernate.loader.ast.internal.MultiKeyLoadHelper.trimIdBatch;
+import static org.hibernate.loader.ast.internal.MultiKeyLoadLogging.MULTI_KEY_LOAD_LOGGER;
+import static org.hibernate.pretty.MessageHelper.collectionInfoString;
+
+/**
+ * {@link CollectionBatchLoader} using a SQL {@code ARRAY} parameter to pass the key values.
+ *
+ * @author Steve Ebersole
+ */
+public class CollectionBatchLoaderArrayParam
+		extends AbstractCollectionBatchLoader
+		implements SqlArrayMultiKeyLoader {
+
+	private final SqlTypedMapping arraySqlTypedMapping;
+	private final JdbcParameter jdbcParameter;
+	private final SelectStatement sqlSelect;
+	private final JdbcSelect jdbcSelectOperation;
+
+	public CollectionBatchLoaderArrayParam(
+			int domainBatchSize,
+			@Nonnull LoadQueryInfluencers loadQueryInfluencers,
+			@Nonnull PluralAttributeMapping attributeMapping,
+			@Nonnull SessionFactoryImplementor sessionFactory) {
+		super( domainBatchSize, loadQueryInfluencers, attributeMapping, sessionFactory );
+
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.enabledCollectionArray(
+					attributeMapping.getNavigableRole().getFullPath(),
+					domainBatchSize
+			);
+		}
+
+		final var keyDescriptor = getLoadable().getKeyDescriptor();
+		final var selectable = keyDescriptor.getSelectable( 0 );
+		final var jdbcMapping = selectable.getJdbcMapping();
+		final var jdbcJavaTypeClass = jdbcMapping.getJdbcJavaType().getJavaTypeClass();
+
+		arraySqlTypedMapping = new SqlTypedMappingImpl(
+				selectable.getLength(),
+				selectable.getArrayLength(),
+				selectable.getPrecision(),
+				selectable.getScale(),
+				selectable.getTemporalPrecision(),
+				MultiKeyLoadHelper.resolveArrayJdbcMapping(
+						jdbcMapping,
+						jdbcJavaTypeClass,
+						getSessionFactory()
+				)
+		);
+
+		final var sqlAliasBaseGenerator = new SqlAliasBaseManager();
+
+		jdbcParameter = new SqlTypedMappingJdbcParameter( arraySqlTypedMapping );
+		sqlSelect = LoaderSelectBuilder.createSelectBySingleArrayParameter(
+				getLoadable(),
+				keyDescriptor.getKeyPart(),
+				getInfluencers(),
+				new LockOptions(),
+				jdbcParameter,
+				sqlAliasBaseGenerator,
+				getSessionFactory()
+		);
+
+		final var querySpec = sqlSelect.getQueryPart().getFirstQuerySpec();
+		final var tableGroup = querySpec.getFromClause().getRoots().get( 0 );
+		attributeMapping.applyAuxiliaryRestrictions(
+				tableGroup,
+				querySpec::applyPredicate,
+				getInfluencers(),
+				sqlAliasBaseGenerator
+		);
+
+		jdbcSelectOperation = getSessionFactory().getJdbcServices()
+				.getJdbcEnvironment()
+				.getSqlAstTranslatorFactory()
+				.buildTranslator( new SqlAstTranslationRequest.Select( getSessionFactory(), sqlSelect ) )
+				.translate( JdbcParameterBindings.NO_BINDINGS, QueryOptions.NONE );
+	}
+
+	@Nonnull
+	@Override
+	public PersistentCollection<?> load(@Nonnull Object keyBeingLoaded, @Nonnull SharedSessionContractImplementor session) {
+		final var keyDescriptor = getLoadable().getKeyDescriptor();
+		if ( keyDescriptor.isEmbedded()
+			|| keyDescriptor.getKeyPart().getSingleJdbcMapping().getValueConverter() != null ) {
+			assert keyDescriptor.getJdbcTypeCount() == 1;
+			return loadWithConversion( keyBeingLoaded, session, keyDescriptor );
+		}
+		else {
+			return super.load( keyBeingLoaded, session );
+		}
+	}
+
+	@Nonnull
+	@AllowReflection
+	private PersistentCollection<?> loadWithConversion(
+			@Nonnull Object keyBeingLoaded,
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull ForeignKeyDescriptor keyDescriptor) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.batchFetchingCollection(
+					collectionInfoString( getLoadable(), keyBeingLoaded ) );
+		}
+
+		final int length = getDomainBatchSize();
+		final Object[] keysToInitialize = new Object[length];
+		final Object[] domainKeys = new Object[length];
+		session.getPersistenceContextInternal().getBatchFetchQueue()
+				.collectBatchLoadableCollectionKeys(
+						length,
+						(index, key) ->
+								keyDescriptor.forEachJdbcValue(
+										key,
+										(i, value, jdbcMapping) -> {
+											keysToInitialize[index] = value;
+											domainKeys[index] = key;
+										},
+										session
+								)
+						,
+						keyBeingLoaded,
+						getLoadable()
+				);
+		// now trim down the array to the number of keys we found
+		final var keys = trimIdBatch( length, keysToInitialize );
+
+		if ( hasSingleId( keys ) ) {
+			return singleKeyLoader.load( keyBeingLoaded, session );
+		}
+
+		initializeKeys( keyBeingLoaded, keys, session );
+
+		for ( Object initializedKey : domainKeys ) {
+			if ( initializedKey != null ) {
+				finishInitializingKey( initializedKey, session );
+			}
+		}
+		return session.getPersistenceContext()
+				.getCollection( collectionKey( keyBeingLoaded, session ) );
+	}
+
+	@Nonnull
+	private CollectionKey collectionKey(@Nonnull Object keyBeingLoaded, @Nonnull SharedSessionContractImplementor session) {
+		return session.generateCollectionKey( getLoadable().getCollectionDescriptor(), keyBeingLoaded );
+	}
+
+	@Override
+	void initializeKeys(@Nonnull Object key, @Nonnull Object[] keysToInitialize, @Nonnull SharedSessionContractImplementor session) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.collectionKeysToInitialize(
+					collectionInfoString( getLoadable(), key ), keysToInitialize );
+		}
+
+		assert jdbcSelectOperation != null;
+		assert jdbcParameter != null;
+
+		final var jdbcParameterBindings = new JdbcParameterBindingsImpl( 1 );
+		jdbcParameterBindings.addBinding(
+				jdbcParameter,
+				new JdbcParameterBindingImpl( arraySqlTypedMapping.getJdbcMapping(), keysToInitialize )
+		);
+
+		session.getJdbcServices().getJdbcSelectExecutor().list(
+				jdbcSelectOperation,
+				jdbcParameterBindings,
+				new ExecutionContextWithSubselectFetchHandler(
+						session,
+						SubselectFetch.createRegistrationHandler(
+								session.getPersistenceContext().getBatchFetchQueue(),
+								sqlSelect,
+								JdbcParametersList.singleton( jdbcParameter ),
+								jdbcParameterBindings
+						)
+				),
+				RowTransformerStandardImpl.instance(),
+				ListResultsConsumer.UniqueSemantic.FILTER
+		);
+	}
+
+	@Override
+	void finishInitializingKeys(@Nonnull Object[] keys, @Nonnull SharedSessionContractImplementor session) {
+		for ( Object initializedKey : keys ) {
+			finishInitializingKey( initializedKey, session );
+		}
+	}
+
+	@Nonnull
+	@Override
+	Object[] resolveKeysToInitialize(@Nonnull Object keyBeingLoaded, @Nonnull SharedSessionContractImplementor session) {
+		assert !getLoadable().getKeyDescriptor().isEmbedded()
+			&& getLoadable().getKeyDescriptor().getKeyPart().getSingleJdbcMapping().getValueConverter() == null
+				: "Should use loadWithConversion() instead";
+		return super.resolveKeysToInitialize( keyBeingLoaded, session );
+	}
+}

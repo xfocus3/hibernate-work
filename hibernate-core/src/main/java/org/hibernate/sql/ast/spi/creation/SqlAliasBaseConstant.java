@@ -1,0 +1,29 @@
+package org.hibernate.sql.ast.spi.creation;
+
+/**
+ * A SqlAliasBase that always returns the same constant.
+ *
+ * @author Christian Beikov
+ */
+public class SqlAliasBaseConstant implements SqlAliasBase {
+	private final String constant;
+
+	public SqlAliasBaseConstant(String constant) {
+		this.constant = constant;
+	}
+
+	@Override
+	public String getAliasStem() {
+		return constant;
+	}
+
+	@Override
+	public String generateNewAlias() {
+		return constant;
+	}
+
+	@Override
+	public String toString() {
+		return "SqlAliasBase(" + constant + ")";
+	}
+}

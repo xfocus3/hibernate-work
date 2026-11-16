@@ -1,0 +1,26 @@
+package org.hibernate.boot.jaxb.mapping.spi;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * JAXB binding interface for commonality between entity and mapped-superclass mappings
+ *
+ * @author Steve Ebersole
+ */
+public interface JaxbEntityOrMappedSuperclass extends JaxbManagedType, JaxbLifecycleCallbackContainer {
+	@Nullable JaxbIdClassImpl getIdClass();
+
+	void setIdClass(@Nullable JaxbIdClassImpl value);
+
+	@Nullable JaxbEmptyTypeImpl getExcludeDefaultListeners();
+
+	void setExcludeDefaultListeners(@Nullable JaxbEmptyTypeImpl value);
+
+	@Nullable JaxbEmptyTypeImpl getExcludeSuperclassListeners();
+
+	void setExcludeSuperclassListeners(@Nullable JaxbEmptyTypeImpl value);
+
+	@Nullable JaxbEntityListenerContainerImpl getEntityListenerContainer();
+
+	void setEntityListenerContainer(@Nullable JaxbEntityListenerContainerImpl value);
+}

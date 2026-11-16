@@ -1,0 +1,17 @@
+plugins {
+	id "local.publishing-java-module"
+}
+
+description = 'Integrate support for Jandex into Hibernate O/RM'
+
+dependencies {
+	api project( ':hibernate-core' )
+	api libs.jakarta.jpa
+
+	implementation libs.jandex
+	implementation libs.hibernateModels
+
+	testImplementation project( ':hibernate-testing' )
+	testImplementation libs.test.shrinkwrap
+	testImplementation libs.jakarta.data
+}

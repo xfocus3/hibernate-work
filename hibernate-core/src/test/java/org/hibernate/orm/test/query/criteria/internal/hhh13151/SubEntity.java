@@ -1,0 +1,20 @@
+package org.hibernate.orm.test.query.criteria.internal.hhh13151;
+
+import jakarta.persistence.*;
+import jakarta.persistence.Entity;
+
+@Entity
+public class SubEntity extends SuperEntity {
+
+	@ManyToOne(fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+	public SideEntity getSubField() {
+		return subField;
+	}
+
+	public SubEntity setSubField(SideEntity subField) {
+		this.subField = subField;
+		return this;
+	}
+
+	private SideEntity subField;
+}

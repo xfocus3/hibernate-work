@@ -1,0 +1,128 @@
+package org.hibernate.internal;
+
+import java.io.Serializable;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.util.Objects;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.HibernateException;
+import org.hibernate.SessionEventListener;
+import org.hibernate.context.spi.TenantCredentialsMapper;
+import org.hibernate.context.spi.TenantDataSourceMapper;
+import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
+import org.hibernate.engine.jdbc.connections.spi.JdbcConnectionAccess;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+
+/**
+ * @author Steve Ebersole
+ */
+class NonContextualJdbcConnectionAccess implements JdbcConnectionAccess, Serializable {
+	private final boolean readOnly;
+	private final SessionEventListener listener;
+	private final ConnectionProvider connectionProvider;
+	private final SharedSessionContractImplementor session;
+
+	NonContextualJdbcConnectionAccess(
+			boolean readOnly,
+			SessionEventListener listener,
+			ConnectionProvider connectionProvider,
+			SharedSessionContractImplementor session) {
+		Objects.requireNonNull( listener );
+		Objects.requireNonNull( connectionProvider );
+		this.readOnly = readOnly;
+		this.listener = listener;
+		this.connectionProvider = connectionProvider;
+		this.session = session;
+	}
+
+	@Override
+	public Connection obtainConnection() throws SQLException {
+		final var eventMonitor = session.getEventMonitor();
+		final var connectionAcquisitionEvent = eventMonitor.beginJdbcConnectionAcquisitionEvent();
+		try {
+			listener.jdbcConnectionAcquisitionStart();
+			final Object tenantIdentifier = session.getTenantIdentifierValue();
+			if ( tenantIdentifier != null ) {
+				final var tenantDataSourceMapper = getTenantDataSourceMapper();
+				final var tenantCredentialsMapper = getTenantCredentialsMapper();
+				if ( tenantDataSourceMapper != null ) {
+					final String dataSourceName = tenantDataSourceMapper.dataSourceName( tenantIdentifier );
+					if ( dataSourceName == null ) {
+						throw new HibernateException( "Tenant data source name cannot be null" );
+					}
+					if ( tenantCredentialsMapper != null ) {
+						final String user = tenantCredentialsMapper.user( tenantIdentifier );
+						final String password = tenantCredentialsMapper.password( tenantIdentifier );
+						if ( user == null || password == null ) {
+							throw new HibernateException( "Tenant credentials cannot be null" );
+						}
+						return readOnly
+								? connectionProvider.getReadOnlyConnection( dataSourceName, user, password )
+								: connectionProvider.getConnection( dataSourceName, user, password );
+					}
+					return readOnly
+							? connectionProvider.getReadOnlyConnection( dataSourceName )
+							: connectionProvider.getConnection( dataSourceName );
+				}
+				if ( tenantCredentialsMapper != null ) {
+					if ( readOnly ) {
+						throw new HibernateException( "Credentials-based multitenancy not supported with read-only replicas" );
+					}
+					return connectionProvider.getConnection(
+							tenantCredentialsMapper.user( tenantIdentifier ),
+							tenantCredentialsMapper.password( tenantIdentifier )
+					);
+				}
+			}
+			return readOnly
+					? connectionProvider.getReadOnlyConnection()
+					: connectionProvider.getConnection();
+		}
+		finally {
+			eventMonitor.completeJdbcConnectionAcquisitionEvent(
+					connectionAcquisitionEvent, session,
+					session.getTenantIdentifierValue() );
+			listener.jdbcConnectionAcquisitionEnd();
+		}
+	}
+
+	@Nullable
+	private TenantDataSourceMapper<Object> getTenantDataSourceMapper() {
+		return session.getSessionFactory().getSessionFactoryOptions()
+				.getTenantDataSourceMapper();
+	}
+
+	@Nullable
+	private TenantCredentialsMapper<Object> getTenantCredentialsMapper() {
+		return session.getSessionFactory().getSessionFactoryOptions()
+				.getTenantCredentialsMapper();
+	}
+
+	@Override
+	public void releaseConnection(Connection connection) throws SQLException {
+		final var eventMonitor = session.getEventMonitor();
+		final var connectionReleaseEvent = eventMonitor.beginJdbcConnectionReleaseEvent();
+		try {
+			listener.jdbcConnectionReleaseStart();
+			if ( readOnly ) {
+				connectionProvider.closeReadOnlyConnection( connection );
+			}
+			else {
+				connectionProvider.closeConnection( connection );
+			}
+		}
+		finally {
+			eventMonitor.completeJdbcConnectionReleaseEvent(
+					connectionReleaseEvent, session,
+					session.getTenantIdentifierValue()
+			);
+			listener.jdbcConnectionReleaseEnd();
+		}
+	}
+
+	@Override
+	public boolean supportsAggressiveRelease() {
+		return connectionProvider.supportsAggressiveRelease();
+	}
+}

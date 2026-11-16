@@ -1,0 +1,14 @@
+updateStatement
+    : "UPDATE" "VERSIONED"? entityWithJoins setClause whereClause?
+
+entityWithJoins
+	: fromRoot (join | crossJoin | jpaCollectionJoin)*
+
+fromRoot
+	: entityName variable?
+
+setClause
+	: "SET" assignment ("," assignment)*
+
+assignment
+    : simplePath "=" expression

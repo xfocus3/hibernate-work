@@ -1,0 +1,127 @@
+[[tutorial_jpa]]
+== Tutorial using JPA-standard APIs
+
+.Objectives
+- [*] Configure Hibernate using `persistence.xml`
+- [*] Bootstrap a Jakarta Persistence `EntityManagerFactory`
+- [*] Use annotations to provide mapping information
+- [*] Use `EntityManager` to persist and query data
+
+
+****
+This tutorial is located within the download bundle under `entitymanager/`.
+****
+
+[[hibernate-gsg-tutorial-jpa-config]]
+=== persistence.xml
+
+JPA defines a different bootstrap process, along with a standard configuration file format named `persistence.xml`.
+In Java(TM) SE environments the persistence provider (Hibernate) is required to locate every JPA configuration file in the classpath at the path `META-INF/persistence.xml`.
+
+[[hibernate-gsg-tutorial-jpa-config-pu]]
+.Configuration via `persistence.xml`
+[source, xml]
+----
+<persistence xmlns="http://java.sun.com/xml/ns/persistence"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             xsi:schemaLocation="http://java.sun.com/xml/ns/persistence http://java.sun.com/xml/ns/persistence/persistence_2_0.xsd"
+             version="2.0">
+
+    <persistence-unit name="org.hibernate.tutorial.jpa">   <1>
+        <description>
+            Persistence unit for the Jakarta Persistence tutorial of the Hibernate Getting Started Guide
+        </description>
+
+        <class>org.hibernate.tutorial.em.Event</class>     <2>
+
+        <properties>    <3>
+            <!-- Database connection settings -->
+            <property name="jakarta.persistence.jdbc.url" value="jdbc:h2:mem:db1;DB_CLOSE_DELAY=-1" />
+            <property name="jakarta.persistence.jdbc.user" value="sa" />
+            <property name="jakarta.persistence.jdbc.password" value="" />
+
+            <!-- Automatically export the schema -->
+            <property name="jakarta.persistence.schema-generation.database.action" value="create" />
+
+            <!-- Echo all executed SQL to console -->
+            <property name="hibernate.show_sql" value="true" />
+            <property name="hibernate.format_sql" value="true" />
+            <property name="hibernate.highlight_sql" value="true" />
+       </properties>
+
+    </persistence-unit>
+
+</persistence>
+
+----
+<1> A `persistence.xml` file should provide a unique name for each _persistence unit_ it declares.
+Applications use this name to reference the configuration when obtaining an `EntityManagerFactory` as we will see shortly.
+<2> The `<class/>` element registers our annotated entity class.
+<3> The settings specified as `<properties/>` elements were already discussed in <<hibernate-gsg-tutorial-annotations-config>>.
+Here JPA-standard property names are used where possible.
+
+[NOTE]
+====
+Configuration properties prefixed with the legacy Java EE namespace `javax.persistence` are still
+recognized, but the Jakarta EE namespace `jakarta.persistence` should be preferred.
+====
+
+[[hibernate-gsg-tutorial-jpa-entity]]
+=== The annotated entity Java class
+
+The entity class is exactly the same as in <<hibernate-gsg-tutorial-annotations-entity>>.
+
+[[hibernate-gsg-tutorial-jpa-test]]
+=== Example code
+
+The previous tutorials used Hibernate native APIs.
+This tutorial uses the standard Jakarta Persistence APIs.
+
+[[hibernate-gsg-tutorial-jpa-test-setUp]]
+.Obtaining the JPA EntityManagerFactory
+[source, java]
+----
+protected void setUp() {
+    entityManagerFactory = Persistence.createEntityManagerFactory("org.hibernate.tutorial.jpa");   <1>
+}
+----
+<1> Notice again that the persistence unit name is `org.hibernate.tutorial.jpa`, which matches the name from our <<hibernate-gsg-tutorial-jpa-config-pu,persistence.xml>>.
+
+
+The code to persist and query entities is almost identical to <<hibernate-gsg-tutorial-basic-test-saving>>.
+Unfortunately, `EntityManagerFactory` doesn't have a nice `inTransaction()` method like `SessionFactory` does, so we had to write our own:
+
+.Managing transactions in JPA
+[source, java]
+----
+void inTransaction(Consumer<EntityManager> work) {
+    EntityManager entityManager = entityManagerFactory.createEntityManager();
+    EntityTransaction transaction = entityManager.getTransaction();
+    try {
+        transaction.begin();
+        work.accept(entityManager);
+        transaction.commit();
+    }
+    catch (Exception e) {
+        if (transaction.isActive()) {
+            transaction.rollback();
+        }
+        throw e;
+    }
+    finally {
+        entityManager.close();
+    }
+}
+----
+
+[TIP]
+If you use JPA in Java SE, you'll need to copy/paste this function into your project.  Alternatively you could unwrap the `EntityManagerFactory` as a `SessionFactory`.
+
+[[hibernate-gsg-tutorial-jpa-further]]
+=== Take it further!
+
+.Practice Exercises
+- [ ] Learn how to use CDI to inject a container-managed `EntityManager` in Quarkus.
+  See https://quarkus.io/guides/hibernate-orm[the Quarkus website] for instructions.
+
+// force the break

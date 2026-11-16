@@ -1,0 +1,10 @@
+package org.hibernate.query.named.internal;
+
+import org.hibernate.query.named.spi.NamedSelectionMemento;
+import org.hibernate.query.named.spi.NamedSqmQueryMemento;
+
+/// Union of `NamedSqmQueryMemento` and `NamedSelectionMemento`
+///
+/// @author Steve Ebersole
+public interface SqmSelectionMemento<T> extends NamedSqmQueryMemento<T>, NamedSelectionMemento<T> {
+}

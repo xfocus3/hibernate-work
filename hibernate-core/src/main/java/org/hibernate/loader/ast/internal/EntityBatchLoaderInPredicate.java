@@ -1,0 +1,198 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+import org.hibernate.LockOptions;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.engine.spi.SubselectFetch;
+import org.hibernate.loader.ast.spi.EntityBatchLoader;
+import org.hibernate.loader.ast.spi.SqlInPredicateMultiKeyLoader;
+import org.hibernate.metamodel.mapping.EntityIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseManager;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+
+import java.util.Locale;
+
+import static org.hibernate.loader.ast.internal.MultiKeyLoadLogging.MULTI_KEY_LOAD_LOGGER;
+import static org.hibernate.pretty.MessageHelper.infoString;
+import static org.hibernate.sql.exec.spi.JdbcParameterBindings.NO_BINDINGS;
+
+/**
+ * An {@link EntityBatchLoader} using one or more SQL queries, which each initialize up
+ * to {@linkplain #getSqlBatchSize()} entities using a SQL IN predicate restriction -
+ * e.g., {@code ... where id in (?,?,...)}.
+ * <p>
+ * The number of parameters rendered into the SQL is controlled by {@linkplain #getSqlBatchSize()}.
+ * Any unused parameter slots for a particular execution are set to {@code null}.
+ *
+ * @author Steve Ebersole
+ */
+public class EntityBatchLoaderInPredicate<T>
+		extends AbstractEntityBatchLoader<T>
+		implements SqlInPredicateMultiKeyLoader {
+	private final int domainBatchSize;
+	private final int sqlBatchSize;
+
+	private final JdbcParametersList jdbcParameters;
+	private final SelectStatement sqlAst;
+	private final JdbcSelect jdbcSelectOperation;
+
+	/**
+	 * @param domainBatchSize The maximum number of entities we will initialize for each load
+	 */
+	public EntityBatchLoaderInPredicate(
+			int domainBatchSize,
+			@Nonnull EntityMappingType entityDescriptor,
+			@Nonnull LoadQueryInfluencers loadQueryInfluencers) {
+		super( entityDescriptor, loadQueryInfluencers );
+		this.domainBatchSize = domainBatchSize;
+		final int idColumnCount =
+				entityDescriptor.getEntityPersister().getIdentifierType()
+						.getColumnSpan( sessionFactory .getRuntimeMetamodels());
+		sqlBatchSize =
+				sessionFactory.getJdbcServices().getDialect().getBatchLoadSizingStrategy()
+						.determineOptimalBatchLoadSize( idColumnCount, domainBatchSize, false );
+
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.enabledEntityInPredicate(
+					entityDescriptor.getEntityName(),
+					sqlBatchSize,
+					domainBatchSize
+			);
+		}
+
+		final var identifierMapping = getLoadable().getIdentifierMapping();
+		final int expectedNumberOfParameters = identifierMapping.getJdbcTypeCount() * sqlBatchSize;
+		final var builder = JdbcParametersList.newBuilder( expectedNumberOfParameters );
+		sqlAst = LoaderSelectBuilder.createSelect(
+				getLoadable(),
+				// null here means to select everything
+				null,
+				identifierMapping,
+				null,
+				sqlBatchSize,
+				loadQueryInfluencers,
+				new LockOptions(),
+				builder::add,
+				new SqlAliasBaseManager(),
+				sessionFactory
+		);
+		jdbcParameters = builder.build();
+		assert jdbcParameters.size() == expectedNumberOfParameters;
+
+		jdbcSelectOperation =
+				sessionFactory.getJdbcServices().getJdbcEnvironment().getSqlAstTranslatorFactory()
+						.buildTranslator( new SqlAstTranslationRequest.Select( sessionFactory, sqlAst ) )
+						.translate( NO_BINDINGS, QueryOptions.NONE );
+	}
+
+	@Override
+	public int getDomainBatchSize() {
+		return domainBatchSize;
+	}
+
+	public int getSqlBatchSize() {
+		return sqlBatchSize;
+	}
+
+	@Nullable
+	@Override
+	public final T load(@Nonnull Object pkValue, @Nonnull LockOptions lockOptions, @Nullable Boolean readOnly, @Nonnull SharedSessionContractImplementor session) {
+		return load( pkValue, null, lockOptions, readOnly, session );
+	}
+
+	@Nonnull
+	protected Object[] resolveIdsToInitialize(@Nonnull Object id, @Nonnull SharedSessionContractImplementor session) {
+		return session.getPersistenceContextInternal().getBatchFetchQueue()
+				.getBatchLoadableEntityIds( getLoadable(), id, domainBatchSize );
+	}
+
+	@Override
+	protected void initializeEntities(
+			@Nonnull Object[] idsToInitialize,
+			@Nonnull Object pkValue,
+			@Nullable Object entityInstance,
+			@Nonnull LockOptions lockOptions,
+			@Nullable Boolean readOnly,
+			@Nonnull SharedSessionContractImplementor session) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.entityIdsToInitialize(
+					infoString( getLoadable(), pkValue ), idsToInitialize );
+		}
+
+		final var batchFetchQueue = session.getPersistenceContextInternal().getBatchFetchQueue();
+		final var persister = getLoadable().getEntityPersister();
+		getChunker( getLoadable().getIdentifierMapping() )
+				.processChunks(
+						idsToInitialize,
+						sqlBatchSize,
+						(jdbcParameterBindings, session1) -> {
+							// Create a RegistrationHandler for handling any
+							// subselect fetches we encounter handling this chunk
+							return new SingleIdExecutionContext(
+									pkValue,
+									entityInstance,
+									getLoadable().getRootEntityDescriptor(),
+									readOnly,
+									lockOptions,
+									SubselectFetch.createRegistrationHandler(
+											batchFetchQueue,
+											sqlAst,
+											jdbcParameters,
+											jdbcParameterBindings
+									),
+									session
+							);
+						},
+						(key, relativePosition, absolutePosition) -> {
+							if ( key != null ) {
+								batchFetchQueue.removeBatchLoadableEntityKey( session.generateEntityKey( key, persister ) );
+							}
+						},
+						(startIndex) -> {
+							if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+								MULTI_KEY_LOAD_LOGGER.processingEntityBatchFetchChunk(
+										infoString( getLoadable(), pkValue ),
+										startIndex,
+										startIndex + ( sqlBatchSize - 1 )
+								);
+							}
+						},
+						(startIndex, nonNullElementCount) -> {
+						},
+						session
+				);
+	}
+
+	@Nonnull
+	private MultiKeyLoadChunker<Object> getChunker(@Nonnull EntityIdentifierMapping identifierMapping) {
+		return new MultiKeyLoadChunker<>(
+				sqlBatchSize,
+				identifierMapping.getJdbcTypeCount(),
+				identifierMapping,
+				jdbcParameters,
+				sqlAst,
+				jdbcSelectOperation
+		);
+	}
+
+	@Nonnull
+	@Override
+	public String toString() {
+		return String.format(
+				Locale.ROOT,
+				"EntityBatchLoaderInPredicate(%s [%s (%s)])",
+				getLoadable().getEntityName(),
+				domainBatchSize,
+				sqlBatchSize
+		);
+	}
+}

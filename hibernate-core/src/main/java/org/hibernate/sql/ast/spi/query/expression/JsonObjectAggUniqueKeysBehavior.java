@@ -1,0 +1,18 @@
+package org.hibernate.sql.ast.spi.query.expression;
+
+import org.hibernate.sql.ast.spi.SqlAstWalker;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+
+/**
+ * @since 7.0
+ */
+public enum JsonObjectAggUniqueKeysBehavior implements SqlAstNode {
+	WITH,
+	WITHOUT;
+
+	@Override
+	public void accept(SqlAstWalker sqlTreeWalker) {
+		throw new UnsupportedOperationException("JsonObjectAggUniqueKeysBehavior doesn't support walking");
+	}
+
+}

@@ -1,0 +1,41 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import java.time.temporal.Temporal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Expression;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SqmTemporalExpressionWrapper<T extends Temporal & Comparable<? super T>>
+		extends SqmComparableExpressionWrapper<T>
+		implements SqmTemporalExpressionImplementor<T> {
+	public SqmTemporalExpressionWrapper(@Nonnull SqmExpression<T> wrappedExpression) {
+		super( wrappedExpression );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> coalesce(@Nonnull Expression<? extends T> y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().coalesce( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> coalesce(@Nonnull T y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().coalesce( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> nullif(@Nonnull Expression<? extends T> y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().nullif( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> nullif(@Nonnull T y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().nullif( this, y ) );
+	}
+}

@@ -1,0 +1,72 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.annotations.ColumnTransformer;
+
+/**
+ * Mapping of a selectable (column/formula)
+ *
+ * @author Christian Beikov
+ */
+@Incubating(since = "5.4")
+public interface SelectableMapping extends SqlTypedMapping {
+	/**
+	 * The name of the table to which this selectable is mapped
+	 */
+	@Nonnull
+	String getContainingTableExpression();
+
+	/**
+	 * The selection's expression.  This is the column name or formula
+	 */
+	@Nonnull
+	String getSelectionExpression();
+	@Nonnull
+	default String getSelectableName() {
+		return getSelectionExpression();
+	}
+	@Nonnull
+	default SelectablePath getSelectablePath() {
+		return new SelectablePath( getSelectableName() );
+	}
+
+	/**
+	 * The selection's read expression accounting for formula treatment as well
+	 * as {@link ColumnTransformer#read()}
+	 */
+	@Nullable String getCustomReadExpression();
+
+	/**
+	 * The selection's write expression accounting {@link ColumnTransformer#write()}
+	 *
+	 * @apiNote Always null for formula mappings
+	 */
+	@Nullable String getCustomWriteExpression();
+
+	@Nullable
+	default String getWriteExpression() {
+		final String customWriteExpression = getCustomWriteExpression();
+		return customWriteExpression != null
+				? customWriteExpression
+				: "?";
+	}
+
+	/**
+	 * Is the mapping a formula instead of a physical column?
+	 */
+	boolean isFormula();
+
+	/**
+	 * Is the mapping considered nullable?
+	 */
+	boolean isNullable();
+
+	boolean isInsertable();
+
+	boolean isUpdateable();
+
+	boolean isPartitioned();
+}

@@ -1,0 +1,25 @@
+package org.hibernate.dialect.function.json;
+
+import org.hibernate.dialect.aggregate.internal.H2AggregateSupport;
+import org.hibernate.metamodel.mapping.JdbcMappingContainer;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ * H2 json_object function.
+ */
+public class H2JsonObjectFunction extends JsonObjectFunction {
+
+	public H2JsonObjectFunction(TypeConfiguration typeConfiguration) {
+		super( typeConfiguration, true );
+	}
+
+	@Override
+	protected void renderValue(SqlAppender sqlAppender, SqlAstNode value, SqlAstTranslator<?> walker) {
+		final JdbcMappingContainer expressionType = ( (Expression) value ).getExpressionType();
+		H2AggregateSupport.appendJsonWriteExpression( sqlAppender, () -> value.accept( walker ), expressionType.getSingleJdbcMapping() );
+	}
+}

@@ -1,0 +1,20 @@
+services:
+  spanner:
+    image: ${SPANNER_EMULATOR:-gcr.io/cloud-spanner-emulator/emulator:1.5.59@sha256:5f71fecd6330211789b75065ade9587d67b3a6b4678e7e5408e42c22f778c63e}
+    container_name: ${SPANNER_CONTAINER_NAME:-spanner}
+    ports:
+      - "${SPANNER_GRPC_PORT:-9011}:9010"
+      - "${SPANNER_REST_PORT:-9021}:9020"
+  spanner-healthcheck:
+    # Sidecar: spanner emulator image has no tools, so we use UBI to run the healthcheck:
+    image: registry.access.redhat.com/ubi9/ubi-minimal:latest@sha256:baafce2d34783a28b4a472779f304e97e00f9d35c99553bc53b068b14344d9a9
+    container_name: ${SPANNER_CONTAINER_NAME:-spanner}_healthcheck
+    depends_on:
+      spanner:
+        condition: service_started
+    entrypoint: [ "tail", "-f", "/dev/null" ]
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://spanner:9020/v1/projects/test-project/instanceConfigs || exit 1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 20

@@ -1,0 +1,1141 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.EntityGraph;
+import jakarta.persistence.FlushModeType;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.Parameter;
+import jakarta.persistence.QueryFlushMode;
+import jakarta.persistence.TemporalType;
+import jakarta.persistence.Timeout;
+import jakarta.persistence.metamodel.Type;
+import org.hibernate.CacheMode;
+import org.hibernate.FlushMode;
+import org.hibernate.Incubating;
+import org.hibernate.LockMode;
+import org.hibernate.Locking;
+import org.hibernate.NonUniqueResultException;
+import org.hibernate.ScrollMode;
+import org.hibernate.ScrollableResults;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.hibernate.SharedSessionContract;
+import org.hibernate.UnknownProfileException;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.graph.GraphSemantic;
+import org.hibernate.query.spi.QueryOptions;
+
+import java.time.Instant;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Stream;
+
+import static org.hibernate.jpa.internal.util.FlushModeTypeHelper.getFlushModeType;
+import static org.hibernate.jpa.internal.util.FlushModeTypeHelper.queryFlushModeFromFlushModeType;
+
+/**
+ * Within the context of an active {@linkplain org.hibernate.Session session},
+ * an instance of this type represents an executable query, either:
+ * <ul>
+ * <li>a query written in HQL or native SQL,
+ * <li>a named query written in HQL or native SQL, or
+ * <li>a {@linkplain jakarta.persistence.criteria.CriteriaBuilder criteria query}.
+ * </ul>
+ * <p>
+ * The subtype {@link NativeQuery} represents a query written in the native SQL
+ * dialect of the database.
+ * <p>
+ * This interface fills a very similar role to {@link jakarta.persistence.Query}
+ * in JPA, acting as a bridge to client code written for older versions of the
+ * query APIs in JPA and Hibernate. Older versions did not carefully distinguish
+ * {@linkplain SelectionQuery selection queries} from insert, update, and delete
+ * {@linkplain MutationQuery mutation statements}. Every instance of {@code Query}
+ * may logically be classified as one or the other.
+ * <p>
+ * Direct use of this interface to execute a query or statement is now discouraged.
+ * Instead, {@link SelectionQuery} should be used to execute a selection query,
+ * and {@link MutationQuery} should be used to execute a mutation statement.
+ * Therefore, operations of this interface which are only relevant to selection
+ * queries, or only relevant to mutation statements, are now marked as deprecated.
+ * <ul>
+ * <li>Selection queries are usually executed using {@link #getResultList()},
+ *     {@link #getSingleResult()}, or {@link #getSingleResultOrNull()}, with
+ *     the methods {@link #setMaxResults(int)} and {@link #setFirstResult(int)}
+ *     controlling limits and pagination. All these methods are marked as
+ *     deprecated, and should be called via an instance of {@link SelectionQuery}.
+ * <li>Mutation statements are usually executed using {@link #executeUpdate()},
+ *     which is marked as deprecated, or using {@link MutationQuery#execute()}.
+ * <li>The various overloads of {@link #setParameter(String, Object)} and
+ *     {@link #setParameter(int, Object)} allow arguments to be bound to named
+ *     and ordinal parameters defined by the query.
+ * </ul>
+ *
+ * @param <T> The {@linkplain SelectionQuery#getResultType result type} for
+ *            selection queries or the {@linkplain MutationQuery#getTargetType
+ *            target type} for mutation statements.
+ *
+ * @apiNote Like {@link jakarta.persistence.Query} in JPA 4, this interface is
+ *          now essentially redundant. Newly written code should always prefer
+ *          {@link SelectionQuery} or {@link MutationQuery}.
+ *
+ * @see jakarta.persistence.Query
+ * @see SelectionQuery
+ * @see MutationQuery
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ */
+@Incubating(since = "5.2")
+public interface Query<T> extends CommonQueryContract {
+
+	/**
+	 * The {@code Query<T>} as a string, or {@code null} in the case of a criteria query.
+	 */
+	@Nullable
+	String getQueryString();
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Options
+
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setQueryFlushMode(@Nonnull QueryFlushMode queryFlushMode);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setComment(@Nullable String comment);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> addQueryHint(@Nonnull String hint);
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @apiNote Since this is a legacy method of Hibernate, the timeout
+	 *          value is expressed in <em>seconds</em>.
+	 */
+	@Override
+	@Nonnull
+	Query<T> setTimeout(int timeout);
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @apiNote Since this method is inherited from JPA, the timeout
+	 *          is expressed in <em>milliseconds</em>.
+	 */
+	@Override
+	@Nonnull
+	Query<T> setTimeout(@Nullable Integer timeout);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setTimeout(@Nullable Timeout timeout);
+
+	/**
+	 * Whether the execution plan for this query is cached.
+	 *
+	 * @since 6.3
+	 */
+	boolean isQueryPlanCacheable();
+
+	/**
+	 * Enable or disable query plan caching for this query, if available.
+	 *
+	 * @see #isQueryPlanCacheable
+	 *
+	 * @since 6.3
+	 */
+	@Nonnull
+	Query<T> setQueryPlanCacheable(boolean queryPlanCacheable);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setHint(@Nonnull String hintName, @Nullable Object value);
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Parameter Handling
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameter(@Nonnull String parameter, @Nullable Object argument);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull String parameter, @Nullable P argument, @Nonnull Class<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull String parameter, @Nullable P argument, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameter(int parameter, @Nullable Object argument);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameters(@Nonnull Object... arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(int parameter, @Nullable P argument, @Nonnull Class<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(int parameter, @Nullable P argument, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P argument);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P argument, @Nonnull Class<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P argument, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameter(@Nonnull Parameter<P> parameter, @Nullable P argument);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setConvertedParameter(@Nonnull String name, @Nullable P value, @Nonnull Class<? extends AttributeConverter<P, ?>> converter);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setConvertedParameter(int position, @Nullable P value, @Nonnull Class<? extends AttributeConverter<P, ?>> converter);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setProperties(@Nonnull Object bean);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setProperties(@SuppressWarnings("rawtypes") @Nonnull Map bean);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameterList(@Nonnull String parameter, @SuppressWarnings("rawtypes") @Nonnull Collection arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull String parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull String parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameterList(@Nonnull String parameter, @Nonnull Object[] values);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull String parameter, @Nonnull P[] arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull String parameter, @Nonnull P[] arguments, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameterList(int parameter, @SuppressWarnings("rawtypes") @Nonnull Collection arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(int parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(int parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	Query<T> setParameterList(int parameter, @Nonnull Object[] arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(int parameter, @Nonnull P[] arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(int parameter, @Nonnull P[] arguments, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> arguments, @Nonnull Type<P> type);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] arguments);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] arguments, @Nonnull Class<P> javaType);
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nonnull
+	<P> Query<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] arguments, @Nonnull Type<P> type);
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Methods which inherently imply either selection or mutation queries
+
+	/**
+	 * Obtain the JDBC fetch size hint in effect for this query. This value is eventually passed along to the JDBC
+	 * query via {@link java.sql.Statement#setFetchSize(int)}. As defined by JDBC, this value is a hint to the
+	 * driver to indicate how many rows to fetch from the database when more rows are needed.
+	 *
+	 * @implNote JDBC expressly defines this value as a hint. Depending on the driver, it may or may not have any
+	 *           effect on the actual query execution and {@link java.sql.ResultSet} processing .
+	 *
+	 * @return The timeout <b>in seconds</b>
+	 *
+	 * @see java.sql.Statement#getFetchSize()
+	 * @see java.sql.Statement#setFetchSize(int)
+	 * @see org.hibernate.cfg.JdbcSettings#STATEMENT_FETCH_SIZE
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as fetch size is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nullable
+	Integer getFetchSize();
+
+	/**
+	 * Specify a {@linkplain java.sql.Statement#setFetchSize JDBC fetch size}
+	 * to use when executing this query.
+	 *
+	 * @param fetchSize the fetch size hint
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @see #getFetchSize()
+	 * @see org.hibernate.cfg.JdbcSettings#STATEMENT_FETCH_SIZE
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as fetch size is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setFetchSize(int fetchSize);
+
+	/**
+	 * Should entities and proxies loaded by this Query be put in read-only
+	 * mode? If the read-only/modifiable setting was not initialized, then
+	 * the default read-only/modifiable setting for the persistence context
+	 * is returned instead.
+	 * <p>
+	 * The read-only/modifiable setting has no impact on entities/proxies
+	 * returned by the query that existed in the session before the query
+	 * was executed.
+	 *
+	 * @see #setReadOnly(boolean)
+	 * @see org.hibernate.engine.spi.PersistenceContext#isDefaultReadOnly()
+	 *
+	 * @return {@code true} if the entities and proxies loaded by the query
+	 *         will be put in read-only mode; {@code false} otherwise
+	 *         (they will be modifiable)
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as read-only mode is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	boolean isReadOnly();
+
+	/**
+	 * Set the read-only/modifiable mode for entities and proxies loaded
+	 *  by this {@code Query}. This setting overrides the default setting
+	 * for the persistence context,
+	 * {@link org.hibernate.Session#isDefaultReadOnly()}.
+	 * <p>
+	 * To set the default read-only/modifiable setting used for entities
+	 * and proxies that are loaded into the session, use
+	 * {@link Session#setDefaultReadOnly(boolean)}.
+	 * <p>
+	 * Read-only entities are not dirty-checked and snapshots of persistent
+	 * state are not maintained. Read-only entities can be modified, but
+	 * changes are not persisted.
+	 * <p>
+	 * When a proxy is initialized, the loaded entity will have the same
+	 * read-only/modifiable setting as the uninitialized
+	 * proxy has, regardless of the session's current setting.
+	 * <p>
+	 * The read-only/modifiable setting has no impact on entities/proxies
+	 * returned by the query that existed in the session beforeQuery the
+	 * query was executed.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @param readOnly {@code true} indicates that entities and proxies
+	 *                 loaded by the query are to be put in read-only mode;
+	 *                 {@code false} indicates that entities and proxies
+	 *                 loaded by the query will be put in modifiable mode
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as read-only mode is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setReadOnly(boolean readOnly);
+
+	/**
+	 * Should the results of the query be stored in the second level cache?
+	 * <p>
+	 * This is different to second level caching of any returned entities and
+	 * collections, which is controlled by {@link #getCacheMode()}.
+	 * <p>
+	 * The query being "eligible" for caching does not necessarily mean its
+	 * results will be cached. Second-level query caching still has to be
+	 * enabled on the {@link SessionFactory} for this to happen. Usually that
+	 * is controlled by the configuration setting
+	 * {@value org.hibernate.cfg.AvailableSettings#USE_QUERY_CACHE}.
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	boolean isCacheable();
+
+	/**
+	 * Enable/disable second level query (result) caching for this query.
+	 *
+	 * @see #isCacheable
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setCacheable(boolean cacheable);
+
+	/**
+	 * Obtain the {@link CacheMode} in effect for this query. By default,
+	 * the query inherits the {@link CacheMode} of the session from which
+	 * it originates.
+	 * <p>
+	 * The {@link CacheMode} here affects the use of entity and collection
+	 * caches as the query result set is processed. For caching of the actual
+	 * query results, use {@link #isCacheable()} and {@link #getCacheRegion()}.
+	 * <p>
+	 * In order for this setting to have any affect, second-level caching
+	 * must be enabled and the entities and collections must be eligible
+	 * for storage in the second-level cache.
+	 *
+	 * @see Session#getCacheMode()
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	CacheMode getCacheMode();
+
+	/**
+	 * Set the current {@link CacheMode} in effect for this query.
+	 * <p>
+	 * Set it to {@code null} to indicate that the {@code CacheMode}
+	 * of the {@linkplain Session#getCacheMode() session} should be used.
+	 *
+	 * @see #getCacheMode()
+	 * @see Session#setCacheMode(CacheMode)
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setCacheMode(@Nullable CacheMode cacheMode);
+
+	/**
+	 * Obtain the name of the second level query cache region in which query
+	 * results will be stored (if they are cached, see the discussion on
+	 * {@link #isCacheable()} for more information). {@code null} indicates
+	 * that the default region should be used.
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nullable
+	String getCacheRegion();
+
+	/**
+	 * Set the name of the cache region where query results should be cached
+	 * (assuming {@link #isCacheable}). {@code null} indicates to use the
+	 * default region.
+	 *
+	 * @see #getCacheRegion()
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as caching is only relevant for
+	 * selection queries
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0", forRemoval = true)
+	Query<T> setCacheRegion(@Nullable String cacheRegion);
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as second-level cache
+	 * interaction is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	CacheStoreMode getCacheStoreMode();
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as second-level cache
+	 * interaction is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	Query<T> setCacheStoreMode(@Nonnull CacheStoreMode cacheStoreMode);
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as second-level cache
+	 * interaction is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	CacheRetrieveMode getCacheRetrieveMode();
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as second-level cache
+	 * interaction is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	Query<T> setCacheRetrieveMode(@Nonnull CacheRetrieveMode cacheRetrieveMode);
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as applying result limits
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	int getMaxResults();
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as applying result limits
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	Query<T> setMaxResults(int maxResults);
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as applying result limits
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	int getFirstResult();
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as applying result limits
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	Query<T> setFirstResult(int startPosition);
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as locking
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nullable
+	LockModeType getLockMode();
+
+	/**
+	 * @deprecated Use {@linkplain SelectionQuery} instead as locking
+	 * is only relevant for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0") @SuppressWarnings("removal")
+	@Nonnull
+	Query<T> setLockMode(@Nonnull LockModeType lockMode);
+
+	/**
+	 * Get the root {@link LockMode} for the query, expressed using Hibernate's
+	 * native {@linkplain LockMode} instead of JPA's {@linkplain LockModeType}.
+	 *
+	 * @see #getLockMode()
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as locking is
+	 * only relevant for queries which return results.
+	 */
+	@Deprecated(since = "8.0")
+	@Nonnull
+	LockMode getHibernateLockMode();
+
+	/**
+	 * Specify the root {@link LockMode} for the query using Hibernate's
+	 * native {@linkplain LockMode}.
+	 *
+	 * @see #setLockMode(LockModeType)
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as locking is
+	 * only relevant for queries which return results.
+	 */
+	@Deprecated(since = "8.0")
+	@Nonnull
+	Query<T> setHibernateLockMode(@Nonnull LockMode lockMode);
+
+	/**
+	 * Control how Hibernate should handle cases where it is determined
+	 * subsequent SQL queries would be needs to completely accomplish
+	 * locking as requested.
+	 *
+	 * @param strategy The strategy for follow-on locking.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead as locking is only
+	 * relevant for queries which return results.
+	 *
+	 * @since 7.1
+	 */
+	@Deprecated(since = "8.0")
+	@Nonnull
+	Query<T> setFollowOnStrategy(@Nonnull Locking.FollowOn strategy);
+
+	/**
+	 * Set a {@link TupleTransformer}.
+	 * @deprecated Use {@linkplain SelectionQuery} instead as tuple
+	 * transformation is only relevant for queries which return results.
+	 *
+	 * @since 6.0
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	<X> Query<X> setTupleTransformer(@Nonnull TupleTransformer<X> transformer);
+
+	/**
+	 * Set a {@link ResultListTransformer}.
+	 * @deprecated Use {@linkplain SelectionQuery} instead as result list
+	 * transformation is only relevant for queries which return results.
+	 *
+	 * @since 6.0
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setResultListTransformer(@Nonnull ResultListTransformer<T> transformer);
+
+	/**
+	 * Execute the {@code Query<T>} and return the {@code Query<T>} results as a {@link List}.
+	 * If the {@code Query<T>} contains multiple items in the selection list, then
+	 * by default each result in the list is packaged in an array of type
+	 * {@code Object[]}.
+	 *
+	 * @return the result list
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	List<T> list();
+
+	/**
+	 * Execute the {@code Query<T>} and return the {@code Query<T>} results as a {@link List}.
+	 * If the {@code Query<T>} contains multiple items in the selection list, then
+	 * by default each result in the list is packaged in an array of type
+	 * {@code Object[]}.
+	 *
+	 * @implNote Delegates to {@link #list()}
+	 *
+	 * @return the results as a list
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true) @SuppressWarnings("removal")
+	@Nonnull
+	default List<T> getResultList() {
+		return list();
+	}
+
+	/**
+	 * Execute the {@code Query<T>} and return the results in a
+	 * {@linkplain ScrollableResults scrollable form}.
+	 * <p>
+	 * This overload simply calls {@link #scroll(ScrollMode)} using
+	 * the {@linkplain Dialect#defaultScrollMode default scroll mode}
+	 * of the SQL dialect.
+	 *
+	 * @apiNote The exact behavior of this method depends somewhat
+	 *          on the level of JDBC driver support for scrollable
+	 *          {@link java.sql.ResultSet}s, and so is not very
+	 *          portable between databases.
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	ScrollableResults<T> scroll();
+
+	/**
+	 * Execute the {@code Query<T>} and return the results in a
+	 * {@linkplain ScrollableResults scrollable form}. The capabilities
+	 * of the returned {@link ScrollableResults} depend on the specified
+	 * {@link ScrollMode}.
+	 *
+	 * @apiNote Not every JDBC driver supports every {@link ScrollMode}.
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	ScrollableResults<T> scroll(@Nonnull ScrollMode scrollMode);
+
+	/**
+	 * Execute the {@code Query<T>} and return the {@code Query<T>} results as a {@link Stream}.
+	 * If the {@code Query<T>} contains multiple items in the selection list, then
+	 * by default each result in the stream is packaged in an array of
+	 * type {@code Object[]}.
+	 * <p>
+	 * The client should call {@link Stream#close()} after processing the
+	 * stream so that resources are freed as soon as possible.
+	 *
+	 * @implNote Delegates to {@link #stream()}, which in turn delegates
+	 *           to this method. Implementors should implement at least
+	 *           one of these methods.
+	 *
+	 * @return The results as a {@link Stream}
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true)
+	@SuppressWarnings("removal")
+	@Nonnull
+	default Stream<T> getResultStream() {
+		return stream();
+	}
+
+	/**
+	 * Execute the {@code Query<T>} and return the {@code Query<T>} results as a {@link Stream}.
+	 * If the {@code Query<T>} contains multiple items in the selection list, then
+	 * by default each result in the stream is packaged in an array of type
+	 * {@code Object[]}.
+	 * <p>
+	 * The client should call {@link Stream#close()} after processing the
+	 * stream so that resources are freed as soon as possible.
+	 *
+	 * @return The results as a {@link Stream}
+	 *
+	 * @since 5.2
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	default Stream<T> stream() {
+		return list().stream();
+	}
+
+	/**
+	 * Execute the {@code Query<T>} and return the single result of the query, or
+	 * {@code null} if the {@code Query<T>} returns no results.
+	 *
+	 * @return the single result or {@code null} if there is no result to return
+	 *
+	 * @throws NonUniqueResultException if there is more than one matching result
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nullable
+	T uniqueResult();
+
+	/**
+	 * Execute the {@code Query<T>} and return the single result of the query,
+	 * throwing an exception if the {@code Query<T>} returns no results.
+	 *
+	 * @return the single result, only if there is exactly one
+	 *
+	 * @throws jakarta.persistence.NonUniqueResultException if there is more than one matching result
+	 * @throws jakarta.persistence.NoResultException if there is no result to return
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true)
+	@SuppressWarnings("removal")
+	@Nullable
+	T getSingleResult();
+
+	/**
+	 * Execute the {@code Query<T>} and return the single result of the query
+	 * or {@code null} if the {@code Query<T>} returns no results, throwing
+	 * and exception if the {@code Query<T>} returns more than one result.
+	 *
+	 * @return the single result, if there is exactly one result,
+	 *         or {@code null} if there are no results to return
+	 *
+	 * @throws jakarta.persistence.NonUniqueResultException if there is more than one matching result
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true)
+	@SuppressWarnings("removal")
+	@Nullable
+	T getSingleResultOrNull();
+
+	/**
+	 * Execute the {@code Query<T>} and return the single result of the {@code Query<T>} as
+	 * an instance of {@link Optional}.
+	 *
+	 * @return the single result as an {@code Optional}
+	 *
+	 * @throws NonUniqueResultException if there is more than one matching result
+	 *
+	 * @deprecated Use {@linkplain SelectionQuery} instead for queries which return results.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Optional<T> uniqueResultOptional();
+
+	/**
+	 * Execute an insert, update, or delete statement, and return the
+	 * number of affected entities.
+	 * <p>
+	 * For use with instances of {@link MutationQuery} created using
+	 * {@link org.hibernate.SharedSessionContract#createMutationQuery(String)},
+	 * {@link org.hibernate.SharedSessionContract#createNamedMutationQuery(String)},
+	 * {@link org.hibernate.SharedSessionContract#createNativeMutationQuery(String)}, or
+	 * {@link org.hibernate.SharedSessionContract#createMutationQuery(jakarta.persistence.criteria.CriteriaStatement)}.
+	 *
+	 * @return the number of affected entity instances
+	 *         (may differ from the number of affected rows)
+	 *
+	 * @apiNote This method is needed because this interface extends
+	 *          {@link jakarta.persistence.Query}, which defines this method.
+	 *          See {@link MutationQuery} and {@link SelectionQuery}.
+	 *
+	 * @see jakarta.persistence.Query#executeUpdate()
+	 *
+	 * @deprecated Use {@linkplain MutationQuery} instead for queries which mutate data.
+	 */
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true)
+	@SuppressWarnings("removal")
+	int executeUpdate();
+
+	/**
+	 * Enable the {@linkplain org.hibernate.annotations.FetchProfile fetch
+	 * profile} with the given name during execution of this query. If the
+	 * requested fetch profile is already enabled, the call has no effect.
+	 * <p>
+	 * This is an alternative way to specify the associations which
+	 * should be fetched as part of the initial query.
+	 *
+	 * @param profileName the name of the fetch profile to be enabled
+	 *
+	 * @throws UnknownProfileException Indicates that the given name does not
+	 *                                 match any known fetch profile names
+	 *
+	 * @see org.hibernate.annotations.FetchProfile
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> enableFetchProfile(@Nonnull String profileName);
+
+	/**
+	 * Disable the {@linkplain org.hibernate.annotations.FetchProfile fetch
+	 * profile} with the given name in this session. If the fetch profile is
+	 * not currently enabled, the call has no effect.
+	 *
+	 * @param profileName the name of the fetch profile to be disabled
+	 *
+	 * @throws UnknownProfileException Indicates that the given name does not
+	 *                                 match any known fetch profile names
+	 *
+	 * @see org.hibernate.annotations.FetchProfile
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> disableFetchProfile(@Nonnull String profileName);
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Deprecated methods
+
+	/**
+	 * The JPA {@link FlushModeType} in effect for this query. By default, the
+	 * {@code Query<T>} inherits the {@link FlushMode} of the {@link Session} from which
+	 * it originates.
+	 *
+	 * @apiNote Inherited from Jakarta Persistence. Prefer {@linkplain #getQueryFlushMode()}
+	 * @see #getQueryFlushMode()
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	default FlushModeType getFlushMode() {
+		return getFlushModeType( getQueryFlushMode() );
+	}
+
+	/**
+	 * Set the {@link FlushModeType} to use for this query.
+	 * <p>
+	 * Setting this to {@code null} ultimately indicates to use the
+	 * {@link FlushMode} of the session. Use {@link #setQueryFlushMode}
+	 * passing {@link QueryFlushMode#NO_FLUSH} instead to indicate that no automatic
+	 * flushing should occur.
+	 *
+	 * @apiNote Inherited from Jakarta Persistence.  Prefer {@linkplain #setQueryFlushMode(QueryFlushMode)}
+	 * @see #getQueryFlushMode()
+	 * @see #setQueryFlushMode(QueryFlushMode)
+	 * @see Session#getHibernateFlushMode()
+	 *
+	 * @deprecated Use {@linkplain #setQueryFlushMode(QueryFlushMode)} instead.
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	default Query<T> setFlushMode(@Nullable FlushModeType flushMode) {
+		setQueryFlushMode( queryFlushModeFromFlushModeType( flushMode ) );
+		return this;
+	}
+
+	/**
+	 * Apply an {@link EntityGraph} to the query.
+	 * <p>
+	 * This is an alternative way to specify the associations which
+	 * should be fetched as part of the initial query.
+	 *
+	 * @since 6.3
+	 *
+	 * @see SharedSessionContract#createSelectionQuery(String, EntityGraph)
+	 * @see MutationOrSelectionQuery#asSelectionQuery(EntityGraph)
+	 * @see MutationOrSelectionQuery#asSelectionQuery(EntityGraph, GraphSemantic)
+	 * @see jakarta.persistence.StatementOrTypedQuery#withEntityGraph(EntityGraph)
+	 *
+	 * @deprecated Prefer passing the entity-graph while creating the query -
+	 * {@linkplain SharedSessionContract#createSelectionQuery(String, EntityGraph)}
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	Query<T> setEntityGraph(@Nonnull EntityGraph<? super T> graph, @Nonnull GraphSemantic semantic);
+
+	/**
+	 * Get the execution options for this {@code Query}. Many of the setters
+	 * of this object update the state of the returned {@link QueryOptions}.
+	 * This is useful because it gives access to a primitive value in its
+	 * (nullable) wrapper form, rather than the primitive form as required
+	 * by JPA. This allows us to distinguish whether a value has been
+	 * explicitly set by the client.
+	 *
+	 * @deprecated The various {@code Query<T>} subtypes already expose all
+	 * relevant options; furthermore, this operation is a layer-breaker,
+	 * exposing the {@link QueryOptions} SPI type via an API.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	@Nonnull
+	QueryOptions getQueryOptions();
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Deprecated TemporalType Parameter Handling
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(@Nonnull Parameter<Calendar> parameter, @Nullable Calendar argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(@Nonnull Parameter<Date> parameter, @Nullable Date argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * Bind an {@link Instant} value to the named {@code Query<T>} parameter using
+	 * just the portion indicated by the given {@link TemporalType}.
+	 */
+	@Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(@Nonnull String parameter, @Nullable Instant argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(@Nonnull String parameter, @Nullable Calendar argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(@Nonnull String parameter, @Nullable Date argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * Bind an {@link Instant} value to the ordinal {@code Query<T>} parameter using
+	 * just the portion indicated by the given {@link TemporalType}.
+	 */
+	@Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(int parameter, @Nullable Instant argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(int parameter, @Nullable Date argument, @Nonnull TemporalType temporalType);
+
+	/**
+	 * {@link jakarta.persistence.Query} override
+	 */
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	Query<T> setParameter(int parameter, @Nullable Calendar argument, @Nonnull TemporalType temporalType);
+}

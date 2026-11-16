@@ -1,0 +1,172 @@
+package org.hibernate.dialect.function;
+
+import jakarta.annotation.Nullable;
+
+import java.util.List;
+
+import org.hibernate.metamodel.model.domain.ReturnableType;
+import org.hibernate.query.spi.QueryEngine;
+import org.hibernate.query.sqm.function.AbstractSqmFunctionDescriptor;
+import org.hibernate.query.sqm.function.FunctionRenderer;
+import org.hibernate.query.sqm.function.SelfRenderingSqmFunction;
+import org.hibernate.query.sqm.produce.function.ArgumentTypesValidator;
+import org.hibernate.query.sqm.produce.function.StandardArgumentsValidators;
+import org.hibernate.query.sqm.produce.function.StandardFunctionArgumentTypeResolvers;
+import org.hibernate.query.sqm.produce.function.StandardFunctionReturnTypeResolvers;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+
+import static org.hibernate.query.sqm.produce.function.FunctionParameterType.INTEGER;
+import static org.hibernate.query.sqm.produce.function.FunctionParameterType.NUMERIC;
+
+/**
+ * PostgreSQL only supports the two-argument {@code trunc} and {@code round} functions
+ * with the following signatures:
+ * <ul>
+ *     <li>{@code trunc(numeric, integer)}</li>
+ *     <li>{@code round(numeric, integer)}</li>
+ * </ul>
+ * <p>
+ * This custom function falls back to using {@code floor} as a workaround only when necessary,
+ * e.g. when there are 2 arguments to the function and either:
+ * <ul>
+ *     <li>The first argument is not of type {@code numeric}, or</li>
+ *     <li>The dialect doesn't support the two-argument {@code trunc} function</li>
+ * </ul>
+ *
+ * @author Marco Belladelli
+ * @see <a href="https://www.postgresql.org/docs/current/functions-math.html">PostgreSQL documentation</a>
+ */
+public class PostgreSQLTruncRoundFunction extends AbstractSqmFunctionDescriptor implements FunctionRenderer {
+	private final boolean requiresArgumentCasts;
+	private final boolean supportsTwoArguments;
+
+	public PostgreSQLTruncRoundFunction(String name, boolean supportsTwoArguments) {
+		this( name, false, supportsTwoArguments );
+	}
+
+	public PostgreSQLTruncRoundFunction(String name, boolean requiresArgumentCasts, boolean supportsTwoArguments) {
+		super(
+				name,
+				new ArgumentTypesValidator( StandardArgumentsValidators.between( 1, 2 ), NUMERIC, INTEGER ),
+				StandardFunctionReturnTypeResolvers.useArgType( 1 ),
+				StandardFunctionArgumentTypeResolvers.invariant( NUMERIC, INTEGER )
+		);
+		this.requiresArgumentCasts = requiresArgumentCasts;
+		this.supportsTwoArguments = supportsTwoArguments;
+	}
+
+	@Override
+	public void render(
+			SqlAppender sqlAppender,
+			List<? extends SqlAstNode> arguments,
+			ReturnableType<?> returnType,
+			SqlAstTranslator<?> walker) {
+		final int numberOfArguments = arguments.size();
+		final Expression firstArg = (Expression) arguments.get( 0 );
+		final JdbcType jdbcType = firstArg.getExpressionType().getSingleJdbcMapping().getJdbcType();
+		if ( numberOfArguments == 1 || supportsTwoArguments && jdbcType.isDecimal() ) {
+			// use native two-argument function
+			sqlAppender.appendSql( getName() );
+			sqlAppender.appendSql( "(" );
+			firstArg.accept( walker );
+			if ( numberOfArguments > 1 ) {
+				sqlAppender.appendSql( ", " );
+				arguments.get( 1 ).accept( walker );
+			}
+			sqlAppender.appendSql( ")" );
+		}
+		else {
+			// workaround using floor
+			sqlAppender.appendSql( '(' );
+			final SqlAstNode secondArg = arguments.get( 1 );
+			if ( getName().equals( "trunc" ) ) {
+				sqlAppender.appendSql( "sign(" );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( "cast(" );
+				}
+				firstArg.accept( walker );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( " as numeric)" );
+				}
+				sqlAppender.appendSql( ")*floor(abs(" );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( "cast(" );
+				}
+				firstArg.accept( walker );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( " as numeric)" );
+				}
+				sqlAppender.appendSql( ")*" );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( "cast(" );
+				}
+				sqlAppender.appendSql( "power(10," );
+				secondArg.accept( walker );
+				sqlAppender.appendSql( ')' );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( " as numeric)" );
+				}
+				sqlAppender.appendSql( ')' );
+			}
+			else {
+				sqlAppender.appendSql( "floor(" );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( "cast(" );
+				}
+				firstArg.accept( walker );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( " as numeric)" );
+				}
+				sqlAppender.appendSql( "*" );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( "cast(" );
+				}
+				sqlAppender.appendSql( "power(10," );
+				secondArg.accept( walker );
+				sqlAppender.appendSql( ')' );
+				if ( requiresArgumentCasts ) {
+					sqlAppender.appendSql( " as numeric)" );
+				}
+				sqlAppender.appendSql( "+0.5)" );
+			}
+			sqlAppender.appendSql( '/' );
+			if ( requiresArgumentCasts ) {
+				sqlAppender.appendSql( "cast(" );
+			}
+			sqlAppender.appendSql( "power(10," );
+			secondArg.accept( walker );
+			sqlAppender.appendSql( ')' );
+			if ( requiresArgumentCasts ) {
+				sqlAppender.appendSql( " as numeric)" );
+			}
+			sqlAppender.appendSql( ')' );
+		}
+	}
+
+	@Override
+	public String getArgumentListSignature() {
+		return "(NUMERIC number[, INTEGER places])";
+	}
+
+	@Override
+	protected <T> SelfRenderingSqmFunction<T> generateSqmFunctionExpression(
+			List<? extends SqmTypedNode<?>> arguments,
+			@Nullable ReturnableType<T> impliedResultType,
+			QueryEngine queryEngine) {
+		return new SelfRenderingSqmFunction<>(
+				this,
+				this,
+				arguments,
+				impliedResultType,
+				getArgumentsValidator(),
+				getReturnTypeResolver(),
+				queryEngine.getCriteriaBuilder(),
+				getName()
+		);
+	}
+}

@@ -1,0 +1,92 @@
+package org.hibernate.sql.results.graph;
+
+import org.hibernate.Incubating;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.graph.spi.GraphImplementor;
+
+/**
+ * State used as part of applying entity graphs to
+ * Hibernate {@link DomainResult} / {@link Fetch} load graphs.
+ *
+ * @author Nathan Xu
+ */
+@Incubating(since = "6.0", group = "result-processing")
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface EntityGraphTraversalState {
+
+	/**
+	 * Details of a particular traversal within the entity graph
+	 */
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	class TraversalResult {
+		private final GraphImplementor<?> previousContext;
+		private final FetchStrategy fetchStrategy;
+		private final org.hibernate.engine.spi.FetchOptions fetchOptions;
+
+		/// Creates traversal state which uses the default fetch options.
+		@org.hibernate.SPI(org.hibernate.SPI.Role.IMPLEMENT)
+		public TraversalResult(GraphImplementor<?> previousContext, FetchStrategy fetchStrategy) {
+			this( previousContext, fetchStrategy, org.hibernate.engine.spi.FetchOptions.NONE );
+		}
+
+		/// Creates traversal state with explicit fetch options.
+		@org.hibernate.SPI(org.hibernate.SPI.Role.IMPLEMENT)
+		public TraversalResult(
+				GraphImplementor<?> previousContext,
+				FetchStrategy fetchStrategy,
+				org.hibernate.engine.spi.FetchOptions fetchOptions) {
+			this.previousContext = previousContext;
+			this.fetchStrategy = fetchStrategy;
+			this.fetchOptions = fetchOptions;
+		}
+
+		public GraphImplementor<?> getGraph() {
+			return previousContext;
+		}
+
+		public FetchStrategy getFetchStrategy() {
+			return fetchStrategy;
+		}
+
+		public org.hibernate.engine.spi.FetchOptions getFetchOptions() {
+			return fetchOptions;
+		}
+	}
+
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	class FetchStrategy {
+		private final FetchTiming fetchTiming;
+		private final boolean joined;
+
+		/// Creates the fetch timing and join decision for one traversal.
+		@org.hibernate.SPI(org.hibernate.SPI.Role.IMPLEMENT)
+		public FetchStrategy(FetchTiming fetchTiming, boolean joined) {
+			assert fetchTiming != null;
+			this.fetchTiming = fetchTiming;
+			this.joined = joined;
+		}
+
+		public FetchTiming getFetchTiming() {
+			return fetchTiming;
+		}
+
+		public boolean isJoined() {
+			return joined;
+		}
+	}
+
+	/**
+	 * Traverses to the next part of the Jakarta Persistence entity graph relating to
+	 * the given {@link Fetchable}.
+	 */
+	TraversalResult traverse(FetchParent parent, Fetchable fetchable, boolean exploreKeySubgraph);
+
+	/**
+	 * Backtrack to previous entity graph status before last traversal.
+	 * Mainly reset the current context entity graph node to the passed method parameter.
+	 *
+	 * @param previousContext The previous entity graph context node; should not be null
+	 * @see #traverse(FetchParent, Fetchable, boolean)
+	 */
+	void backtrack(TraversalResult previousContext);
+}

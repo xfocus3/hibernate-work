@@ -1,0 +1,408 @@
+package org.hibernate.type.descriptor.java;
+
+import java.io.Serializable;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+import java.util.Comparator;
+import java.util.Objects;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.Incubating;
+import org.hibernate.SPI;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.engine.jdbc.Size;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.util.CharSequenceHelper;
+import org.hibernate.internal.util.ReflectHelper;
+import org.hibernate.internal.util.compare.ComparableComparator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.converter.spi.BasicValueConverter;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.descriptor.jdbc.JdbcTypeIndicators;
+import org.hibernate.type.spi.TypeConfiguration;
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+import static org.hibernate.SPI.Role.SUPPLY;
+import static org.hibernate.SPI.Role.USE;
+
+/// Describes the Java side of a value mapping. A `JavaType` is coupled with a
+/// [JdbcType] and defines the represented Java type, equality and ordering,
+/// wrapping and unwrapping, mutability, and the recommended JDBC descriptor.
+///
+/// Providers may implement this contract and contribute a stable descriptor
+/// through [org.hibernate.boot.model.TypeContributions] or
+/// [org.hibernate.type.descriptor.java.spi.JavaTypeRegistry]. Prefer
+/// [AbstractJavaType] or [AbstractClassJavaType] when their defaults match the
+/// provider value semantics. A mapping may select the descriptor using
+/// [org.hibernate.annotations.JavaType].
+///
+/// @param <T> the represented Java value type
+///
+/// @see JdbcType
+/// @see org.hibernate.boot.model.TypeContributions#contributeJavaType(JavaType)
+/// @see org.hibernate.type.descriptor.java.spi.JavaTypeRegistry#addDescriptor(JavaType)
+/// @see org.hibernate.type.descriptor.java.spi.JavaTypeRegistry#resolveDescriptor(Class, java.util.function.Supplier)
+/// @see org.hibernate.type.descriptor.java.spi.JavaTypeRegistry#resolveDescriptor(JavaType)
+/// @see #createJavaType(ParameterizedType, TypeConfiguration)
+///
+/// @author Steve Ebersole
+@SPI({ USE, IMPLEMENT, SUPPLY })
+public interface JavaType<T> extends Serializable {
+	/**
+	 * Get the Java type (a {@link Type} object) described by this {@code JavaType}.
+	 *
+	 * @see #getJavaTypeClass
+	 */
+	default Type getJavaType() {
+		// default on this side since #getJavaTypeClass is the currently implemented method
+		return getJavaTypeClass();
+	}
+
+	/**
+	 * Get the Java type (the {@link Class} object) described by this {@code JavaType}.
+	 *
+	 * @see #getJavaType
+	 */
+	default Class<T> getJavaTypeClass() {
+		return ReflectHelper.getClass( getJavaType() );
+	}
+
+	/**
+	 * Get the name of the Java type.
+	 */
+	default String getTypeName() {
+		return getJavaType().getTypeName();
+	}
+
+	/**
+	 * Is the given value an instance of the described type?
+	 * <p>
+	 * Usually just {@link #getJavaTypeClass() getJavaTypeClass().}{@link Class#isInstance isInstance(value)},
+	 * but some descriptors need specialized semantics, for example, the descriptors for
+	 * {@link JdbcDateJavaType java.sql.Date}, {@link JdbcTimeJavaType java.sql.Time}, and
+	 * {@link JdbcTimestampJavaType java.sql.Timestamp}.
+	 * <p>
+	 * For {@link org.hibernate.type.descriptor.java.spi.EntityJavaType}, this method
+	 * handles proxies in a semantically correct way, by checking the entity instance
+	 * underlying the proxy object.
+	 */
+	default boolean isInstance(Object value) {
+		return getJavaTypeClass().isInstance( value );
+	}
+
+	/**
+	 * Apply a simple type cast to the given value, without attempting any sort of
+	 * {@linkplain #coerce(Object) coercion} or {@linkplain #wrap wrapping}. This
+	 * method is provided as a convenient way to avoid an unchecked cast to a type
+	 * variable. Use {@code javaType.cast(value)} instead of {@code (T) value}
+	 * wherever possible.
+	 * <p>
+	 * Usually just {@link #getJavaTypeClass() getJavaTypeClass().}{@link Class#cast cast(value)},
+	 * but overridden in some cases as an "optimization". This optimization is
+	 * almost certainly unnecessary, and might even indeed be harmful, since
+	 * {@code Class.cast()} is an intrinsic.
+	 */
+	default T cast(Object value) {
+		return getJavaTypeClass().cast( value );
+	}
+
+	/**
+	 * Retrieve the {@linkplain MutabilityPlan mutability plan} for this Java type.
+	 * @see MutabilityPlan
+	 */
+	@SPI(SUPPLY)
+	default MutabilityPlan<T> getMutabilityPlan() {
+		return ImmutableMutabilityPlan.instance();
+	}
+
+	default T getReplacement(T original, T target, SharedSessionContractImplementor session) {
+		final var mutabilityPlan = getMutabilityPlan();
+		return !mutabilityPlan.isMutable()
+			|| target != null && areEqual( original, target )
+				? original
+				: mutabilityPlan.deepCopy( original );
+	}
+
+	/**
+	 * Get this Java type's default value.
+	 *
+	 * @return The default value.
+	 */
+	default T getDefaultValue() {
+		return null;
+	}
+
+	/**
+	 * Obtain the "recommended" {@linkplain JdbcType SQL type descriptor}
+	 * for this Java type. Often, but not always, the source of this
+	 * recommendation is the JDBC specification.
+	 *
+	 * @param context Contextual information
+	 *
+	 * @return The recommended SQL type descriptor
+	 * @see JdbcType
+	 */
+	@SPI(SUPPLY)
+	JdbcType getRecommendedJdbcType(JdbcTypeIndicators context);
+
+	/**
+	 * The default column length when this Java type is mapped
+	 * to a SQL data type which is parametrized by length, for
+	 * example {@link java.sql.Types#VARCHAR}.
+	 *
+	 * @return {@link Size#DEFAULT_LENGTH} unless overridden
+	 */
+	default long getDefaultSqlLength(Dialect dialect, JdbcType jdbcType) {
+		return Size.DEFAULT_LENGTH;
+	}
+
+	/**
+	 * The default column length when this Java type is mapped
+	 * to a column of type {@link java.sql.Types#LONGVARCHAR}
+	 * or {@link java.sql.Types#LONGVARBINARY}.
+	 *
+	 * @return {@link Size#LONG_LENGTH} unless overridden
+	 */
+	default long getLongSqlLength() {
+		return Size.LONG_LENGTH;
+	}
+
+	/**
+	 * The default column precision when this Java type is mapped
+	 * to a SQL data type which is parametrized by precision, for
+	 * example {@link java.sql.Types#DECIMAL}.
+	 *
+	 * @return {@link Size#DEFAULT_PRECISION} unless overridden
+	 */
+	default int getDefaultSqlPrecision(Dialect dialect, JdbcType jdbcType) {
+		return Size.DEFAULT_PRECISION;
+	}
+
+	/**
+	 * The default column scale when this Java type is mapped to a
+	 * SQL data type which is parametrized by scale, for example
+	 * {@link java.sql.Types#DECIMAL}.
+	 *
+	 * @return {@link Size#DEFAULT_SCALE} unless overridden
+	 */
+	default int getDefaultSqlScale(Dialect dialect, JdbcType jdbcType) {
+		return Size.DEFAULT_SCALE;
+	}
+
+	/**
+	 * Retrieve the natural comparator for this type.
+	 */
+	default Comparator<T> getComparator() {
+		//noinspection unchecked
+		return Comparable.class.isAssignableFrom( getJavaTypeClass() )
+				? ComparableComparator.INSTANCE
+				: null;
+	}
+
+	/**
+	 * Extract a proper hash code for the given value.
+	 *
+	 * @param value The value for which to extract a hash code.
+	 *
+	 * @return The extracted hash code.
+	 */
+	default int extractHashCode(T value) {
+		if ( value == null ) {
+			throw new IllegalArgumentException( "Value to extract hashCode from cannot be null" );
+		}
+		return value.hashCode();
+	}
+
+	/**
+	 * Determine if two instances are equal
+	 *
+	 * @param one One instance
+	 * @param another The other instance
+	 *
+	 * @return True if the two are considered equal; false otherwise.
+	 */
+	default boolean areEqual(T one, T another) {
+		return Objects.deepEquals( one, another );
+	}
+
+	/**
+	 * Whether to use {@link Object#equals(Object)} and {@link Object#hashCode()}
+	 * or {@link #areEqual(Object, Object)} and {@link #extractHashCode(Object)}
+	 * for objects of this java type.
+	 * This is useful to avoid mega-morphic callsites.
+	 */
+	default boolean useObjectEqualsHashCode() {
+		return false;
+	}
+
+	/**
+	 * Extract a loggable representation of the given value.
+	 *
+	 * @param value The value for which to extract a loggable representation.
+	 *
+	 * @return The loggable representation
+	 */
+	default String extractLoggableRepresentation(@Nullable T value) {
+		return value == null ? "null" : toString( value );
+	}
+
+	default String toString(T value) {
+		return value.toString();
+	}
+
+	T fromString(CharSequence string);
+
+	/**
+	 * Appends the value to the SqlAppender in an encoded format that can be decoded again by {@link #fromEncodedString(CharSequence, int, int)}.
+	 * Implementers do not need to care about escaping. This is similar to {@link #toString(Object)},
+	 * with the difference that the aim of this method is encoding to the appender.
+	 * @since 6.2
+	 */
+	default void appendEncodedString(SqlAppender sb, T value) {
+		sb.append( toString( value ) );
+	}
+
+	/**
+	 * Reads the encoded value from the char sequence start index until the end index and returns the decoded value.
+	 * Implementers do not need to care about escaping. This is similar to {@link #fromString(CharSequence)},
+	 * with the difference that the aim of this method is decoding from a range within an existing char sequence.
+	 * @since 6.2
+	 */
+	default T fromEncodedString(CharSequence charSequence, int start, int end) {
+		return fromString( CharSequenceHelper.subSequence( charSequence, start, end ) );
+	}
+
+	default T fromEncodedString(CharSequence charSequence) {
+		return fromEncodedString( charSequence, 0, charSequence.length()  );
+	}
+
+	/**
+	 * Unwrap an instance of our handled Java type into the requested type.
+	 * <p>
+	 * As an example, if this is a {@code JavaType<Integer>} and we are asked to
+	 * unwrap the {@code Integer value} as a {@code Long}, we would return something
+	 * like <code>Long.valueOf( value.longValue() )</code>.
+	 * <p>
+	 * Intended use is during {@link java.sql.PreparedStatement} binding.
+	 *
+	 * @param value The value to unwrap
+	 * @param type The type as which to unwrap
+	 * @param options The options
+	 * @param <X> The conversion type.
+	 *
+	 * @return The unwrapped value.
+	 */
+	<X> X unwrap(T value, Class<X> type, WrapperOptions options);
+
+	/**
+	 * Wrap a value as our handled Java type.
+	 * <p>
+	 * Intended use is during {@link java.sql.ResultSet} extraction.
+	 *
+	 * @param value The value to wrap.
+	 * @param options The options
+	 * @param <X> The conversion type.
+	 *
+	 * @return The wrapped value.
+	 */
+	<X> T wrap(X value, WrapperOptions options);
+
+	/**
+	 * Determines if this Java type is wider than the given Java type,
+	 * that is, if the given type can be safely widened to this type.
+	 */
+	default boolean isWider(JavaType<?> javaType) {
+		return false;
+	}
+
+	/**
+	 * Coerce the given value to this type, if possible.
+	 * <p>
+	 * This method differs from {@link #wrap wrap()} in that it allows
+	 * simple, basic, implicit type conversions, and does not require
+	 * {@link WrapperOptions}. The {@code wrap()} method may be thought
+	 * of as offering explicitly requested type conversions driven by a
+	 * choice of {@link JdbcType}.
+	 * <p>
+	 * An implementation of this method reports failure in one of two
+	 * ways, by:
+	 * <ul>
+	 * <li>throwing {@link CoercionException}, or
+	 * <li>simply returning the given uncoerced value.
+	 * </ul>
+	 * <p>
+	 * Therefore, this method is declared to return {@link Object}.
+	 * In case immediate coercion is required, the following idiom
+	 * may be used:
+	 * <pre>javaType.cast(javaType.coerce(value))</pre>
+	 *
+	 * @param value The value to coerce
+	 * @return The coerced value, or the given value if no coercion was
+	 *         possible
+	 * @throws CoercionException if coercion fails
+	 */
+	@Incubating(since = "7.2")
+	default @Nullable Object coerce(@Nullable Object value) {
+		return value;
+	}
+
+	/**
+	 * Like {@link #coerce(Object)} but returns {@code null} instead of throwing an exception
+	 * when coercion fails.
+	 *
+	 * @param value The value to coerce
+	 * @return The coerced value, or the given value if no coercion was
+	 *         possible
+	 * @since 8.0
+	 */
+	@Incubating(since = "8.0")
+	default @Nullable Object coerceOrNull(@Nonnull Object value) {
+		try {
+			return coerce( value );
+		}
+		catch ( CoercionException ex ) {
+			return null;
+		}
+	}
+
+	/**
+	 * Creates the {@link JavaType} for the given {@link ParameterizedType}
+	 * based on this {@link JavaType} registered for the raw type.
+	 *
+	 * @since 6.1
+	 */
+	/// @see JavaType
+	@Incubating(since = "6.1")
+	@SPI(SUPPLY)
+	default JavaType<T> createJavaType(ParameterizedType parameterizedType, TypeConfiguration typeConfiguration) {
+		return this;
+	}
+
+	/**
+	 * Return true if the implementation is an instance of {@link  TemporalJavaType}
+	 *
+	 * @return true if it is an instance of {@link  TemporalJavaType}; false otherwise
+	 */
+	default boolean isTemporalType() {
+		return false;
+	}
+
+	/**
+	 * The check constraint that should be added to the column
+	 * definition in generated DDL.
+	 *
+	 * @param columnName the name of the column
+	 * @param jdbcType   the {@link JdbcType} of the mapped column
+	 * @param converter  the converter, if any, or null
+	 * @param dialect    the SQL {@link Dialect}
+	 * @return a check constraint condition or null
+	 * @since 6.2
+	 */
+	@Incubating(since = "6.3")
+	default String getCheckCondition(String columnName, JdbcType jdbcType, BasicValueConverter<T, ?> converter, Dialect dialect) {
+		return null;
+	}
+}

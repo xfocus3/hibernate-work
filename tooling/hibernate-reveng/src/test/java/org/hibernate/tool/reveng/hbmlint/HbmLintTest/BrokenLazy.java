@@ -1,0 +1,10 @@
+package org.hibernate.tool.reveng.hbmlint.HbmLintTest;
+
+public class BrokenLazy {
+
+	long id;
+
+	public BrokenLazy(long id) {
+		this.id = id;
+	}
+}

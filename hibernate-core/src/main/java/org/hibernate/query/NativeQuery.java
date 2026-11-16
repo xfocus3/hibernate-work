@@ -1,0 +1,1073 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.AttributeConverter;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.FlushModeType;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.Parameter;
+import jakarta.persistence.PessimisticLockScope;
+import jakarta.persistence.QueryFlushMode;
+import jakarta.persistence.Statement;
+import jakarta.persistence.StatementOrTypedQuery;
+import jakarta.persistence.TemporalType;
+import jakarta.persistence.Timeout;
+import jakarta.persistence.TypedQuery;
+import jakarta.persistence.metamodel.SingularAttribute;
+import jakarta.persistence.metamodel.Type;
+import org.hibernate.CacheMode;
+import org.hibernate.LockMode;
+import org.hibernate.MappingException;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.model.domain.BasicDomainType;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.results.graph.Fetchable;
+import org.hibernate.type.BasicTypeReference;
+
+import java.time.Instant;
+import java.util.Calendar;
+import java.util.Collection;
+import java.util.Date;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Within the context of an active {@linkplain org.hibernate.Session session},
+ * an instance of this type represents an executable query written in the
+ * native SQL dialect of the underlying database. Since Hibernate does not
+ * actually understand SQL, it often requires some help in interpreting the
+ * semantics of a native SQL query.
+ * <p>
+ * Along with the operations inherited from {@link Query}, this interface
+ * provides control over:
+ * <ul>
+ * <li>mapping the result set of the native SQL query, and
+ * <li>synchronization of the database with state held in memory before
+ *     execution of the query, via automatic flushing of the session.
+ * </ul>
+ * <p>
+ * A {@code NativeQuery} may be obtained from the {@link org.hibernate.Session}
+ * by calling:
+ * <ul>
+ * <li>{@link org.hibernate.SharedSessionContract#createNativeQuery(String, Class)}, passing
+ *     native SQL as a string, or
+ * <li>{@link org.hibernate.SharedSessionContract#createNativeQuery(String, String, Class)}
+ *     passing the native SQL string and the name of a result set mapping
+ *     defined using {@link jakarta.persistence.SqlResultSetMapping}.
+ * </ul>
+ * <p>
+ * A result set mapping may be specified by:
+ * <ul>
+ * <li>a named {@link jakarta.persistence.SqlResultSetMapping} passed to
+ *     {@link org.hibernate.SharedSessionContract#createNativeQuery(String, String, Class)},
+ * <li>a named  {@link jakarta.persistence.SqlResultSetMapping} specified
+ *     using {@link jakarta.persistence.NamedNativeQuery#resultSetMapping}
+ *     for a named query, or
+ * <li>by calling the various {@link #addEntity}, {@link #addRoot},
+ *     {@link #addJoin}, {@link #addFetch} and {@link #addScalar} methods
+ *     of this object.
+ * </ul>
+ * <p>
+ * The third option is a legacy of much older versions of Hibernate and is
+ * currently disfavored.
+ * <p>
+ * To determine if an automatic {@linkplain org.hibernate.Session#flush flush}
+ * is required before execution of the query, Hibernate must know which tables
+ * affect the query result set. JPA provides no standard way to do this.
+ * Instead, this information may be provided via:
+ * <ul>
+ * <li>{@link org.hibernate.annotations.NamedNativeQuery#querySpaces} for
+ *     a named query, or
+ * <li>by calling {@link #addSynchronizedEntityClass},
+ *     {@link #addSynchronizedEntityName}, or
+ *     {@link #addSynchronizedQuerySpace}.
+ * </ul>
+ * <p>
+ * When the affected tables are not known to Hibernate, the behavior depends
+ * on whether Hibernate is operating in fully JPA-compliant mode.
+ * <ul>
+ * <li>In JPA-compliant mode, {@link FlushModeType#AUTO} specifies that the
+ *     session should be flushed before execution of a native query when the
+ *     affected tables are not known.
+ * <li>Otherwise, when Hibernate is not operating in JPA-compliant mode,
+ *     {@code AUTO} specifies that the session is <em>not</em> flushed before
+ *     execution of a native query, unless the affected tables are known and
+ *     Hibernate determines that a flush is required.
+ * </ul>
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ *
+ * @see Query
+ * @see SynchronizeableQuery
+ * @see org.hibernate.SharedSessionContract
+ */
+public interface NativeQuery<T>
+		extends SelectionQuery<T>, MutationQuery, SynchronizeableQuery, StatementOrTypedQuery {
+
+	@Override
+	@Nonnull
+	NativeQuery<T> addOption(@Nonnull TypedQuery.Option option);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> addOption(@Nonnull Statement.Option option);
+
+	@Override
+	@SuppressWarnings({"rawtypes", "unchecked"})
+	@Nonnull
+	Set getOptions();
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// covariant overrides - SynchronizeableQuery
+	@Override
+	@Nonnull
+	NativeQuery<T> addSynchronizedQuerySpace(@Nonnull String querySpace);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> addSynchronizedEntityName(@Nonnull String entityName) throws MappingException;
+
+	@Override
+	@Nonnull
+	NativeQuery<T> addSynchronizedEntityClass(@Nonnull @SuppressWarnings("rawtypes") Class entityClass) throws MappingException;
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// covariant overrides - SelectionQuery & MutationQuery
+
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setTimeout(@Nullable Integer timeout);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setQueryPlanCacheable(boolean queryPlanCacheable);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setQueryFlushMode(@Nonnull QueryFlushMode queryFlushMode);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setFlushMode(@Nullable FlushModeType flushMode);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setCacheMode(@Nullable CacheMode cacheMode);
+
+	@Override @SuppressWarnings("removal")
+	@Nonnull
+	NativeQuery<T> setCacheStoreMode(@Nonnull CacheStoreMode cacheStoreMode);
+
+	@Override @SuppressWarnings("removal")
+	@Nonnull
+	NativeQuery<T> setCacheRetrieveMode(@Nonnull CacheRetrieveMode cacheRetrieveMode);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setCacheable(boolean cacheable);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setCacheRegion(@Nullable String cacheRegion);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setTimeout(int timeout);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setFetchSize(int fetchSize);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setReadOnly(boolean readOnly);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setComment(@Nullable String comment);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> addQueryHint(@Nonnull String hint);
+
+	@Override @SuppressWarnings("removal")
+	@Nonnull
+	NativeQuery<T> setMaxResults(int maxResults);
+
+	@Override @SuppressWarnings("removal")
+	@Nonnull
+	NativeQuery<T> setFirstResult(int startPosition);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setHint(@Nonnull String hintName, @Nullable Object value);
+
+	/**
+	 * Not applicable to native SQL queries, due to an unfortunate
+	 * requirement of the JPA specification.
+	 * <p>
+	 * Use {@link #getHibernateLockMode()} to obtain the lock mode.
+	 *
+	 * @throws IllegalStateException as required by JPA
+	 */
+	@SuppressWarnings("removal")
+	@Override
+	@Nullable
+	LockModeType getLockMode();
+
+	/**
+	 * {@inheritDoc}
+	 * <p>
+	 * This operation is supported even for native queries.
+	 * Note that specifying an explicit lock mode might
+	 * result in changes to the native SQL query that is
+	 * actually executed.
+	 */
+	@Override
+	@Nonnull
+	LockMode getHibernateLockMode();
+
+	/**
+	 * Not applicable to native SQL queries, due to an unfortunate
+	 * requirement of the JPA specification.
+	 * <p>
+	 * Use {@link #setHibernateLockMode(LockMode)} or the hint named
+	 * {@value org.hibernate.jpa.HibernateHints#HINT_NATIVE_LOCK_MODE}
+	 * to set the lock mode.
+	 *
+	 * @throws IllegalStateException as required by JPA
+	 */
+	@Override @SuppressWarnings("removal")
+	@Nonnull
+	NativeQuery<T> setLockMode(@Nonnull LockModeType lockMode);
+
+	/**
+	 * {@inheritDoc}
+	 * <p>
+	 * This operation is supported even for native queries.
+	 * Note that specifying an explicit lock mode might
+	 * result in changes to the native SQL query that is
+	 * actually executed.
+	 */
+	@Override
+	@Nonnull
+	NativeQuery<T> setHibernateLockMode(@Nonnull LockMode lockMode);
+
+	/**
+	 * Apply a timeout to the corresponding database query.
+	 *
+	 * @param timeout The timeout to apply
+	 *
+	 * @return {@code this}, for method chaining
+	 */
+	@Nonnull
+	NativeQuery<T> setTimeout(@Nullable Timeout timeout);
+
+	/**
+	 * Apply a scope to any pessimistic locking applied to the query.
+	 *
+	 * @param lockScope The lock scope to apply
+	 *
+	 * @return {@code this}, for method chaining
+	 */
+	@Nonnull
+	NativeQuery<T> setLockScope(@Nonnull PessimisticLockScope lockScope);
+
+	@Override
+	@Nonnull
+	<X> SelectionQuery<X> setTupleTransformer(@Nonnull TupleTransformer<X> transformer);
+
+	@Override
+	@Nonnull
+	SelectionQuery<T> setResultListTransformer(@Nonnull ResultListTransformer<T> transformer);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull String name, @Nullable Object value);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull String name, @Nullable P val, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull String name, @Nullable P val, @Nonnull Type<P> type);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull String name, @Nullable Instant value, @Nonnull TemporalType temporalType);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull String name, @Nullable Calendar value, @Nonnull TemporalType temporalType);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull String name, @Nullable Date value, @Nonnull TemporalType temporalType);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameter(int position, @Nullable Object value);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameters(@Nonnull Object... arguments);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(int position, @Nullable P val, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(int position, @Nullable P val, @Nonnull Type<P> type);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(int position, @Nullable Instant value, @Nonnull TemporalType temporalType);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(int position, @Nullable Calendar value, @Nonnull TemporalType temporalType);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(int position, @Nullable Date value, @Nonnull TemporalType temporalType);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P val);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P val, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull QueryParameter<P> parameter, @Nullable P val, @Nonnull Type<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameter(@Nonnull Parameter<P> param, @Nullable P value);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull Parameter<Calendar> param, @Nullable Calendar value, @Nonnull TemporalType temporalType);
+
+	@Override @Deprecated(since = "7")
+	@Nonnull
+	NativeQuery<T> setParameter(@Nonnull Parameter<Date> param, @Nullable Date value, @Nonnull TemporalType temporalType);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setProperties(@Nonnull Object bean);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setProperties(@SuppressWarnings("rawtypes") @Nonnull Map bean);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setConvertedParameter(@Nonnull String name, @Nullable P value, @Nonnull Class<? extends AttributeConverter<P, ?>> converter);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setConvertedParameter(int position, @Nullable P value, @Nonnull Class<? extends AttributeConverter<P, ?>> converter);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameterList(@Nonnull String name, @SuppressWarnings("rawtypes") @Nonnull Collection values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull String name, @Nonnull Collection<? extends P> values, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull String name, @Nonnull Collection<? extends P> values, @Nonnull Type<P> type);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameterList(@Nonnull String name, @Nonnull Object[] values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull String name, @Nonnull P[] values, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull String name, @Nonnull P[] values, @Nonnull Type<P> type);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameterList(int position, @SuppressWarnings("rawtypes") @Nonnull Collection values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(int position, @Nonnull Collection<? extends P> values, @Nonnull Class<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(int position, @Nonnull Collection<? extends P> values, @Nonnull Type<P> javaType);
+
+	@Override
+	@Nonnull
+	NativeQuery<T> setParameterList(int position, @Nonnull Object[] values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(int position, @Nonnull P[] values, @Nonnull Class<P> javaType);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(int position, @Nonnull P[] values, @Nonnull Type<P> javaType);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> values, @Nonnull Class<P> javaType);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull Collection<? extends P> values, @Nonnull Type<P> type);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] values);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] values, @Nonnull Class<P> javaType);
+
+	@Override
+	@Nonnull
+	<P> NativeQuery<T> setParameterList(@Nonnull QueryParameter<P> parameter, @Nonnull P[] values, @Nonnull Type<P> type);
+
+
+	/**
+	 * Declare a scalar query result. Hibernate will attempt to automatically
+	 * detect the underlying type.
+	 * <p>
+	 * Functions like {@code <return-scalar/>} in {@code hbm.xml} or
+	 * {@link jakarta.persistence.ColumnResult} in annotations
+	 *
+	 * @param columnAlias The column alias in the result set to be
+	 *                    processed as a scalar result
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addScalar(@Nonnull String columnAlias);
+
+	/**
+	 * Declare a scalar query result.
+	 * <p>
+	 * Functions like {@code <return-scalar/>} in {@code hbm.xml} or
+	 * {@link jakarta.persistence.ColumnResult} in annotations.
+	 *
+	 * @param columnAlias The column alias in the result set to be
+	 *                    processed as a scalar result
+	 * @param type The Hibernate type as which to treat the value.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull @SuppressWarnings("rawtypes") BasicTypeReference type);
+
+	/**
+	 * Declare a scalar query result.
+	 * <p>
+	 * Functions like {@code <return-scalar/>} in {@code hbm.xml} or
+	 * {@link jakarta.persistence.ColumnResult} in annotations.
+	 *
+	 * @param columnAlias The column alias in the result set to be
+	 *                    processed as a scalar result
+	 * @param type The Hibernate type as which to treat the value.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull @SuppressWarnings("rawtypes") BasicDomainType type);
+
+	/**
+	 * Declare a scalar query result using the specified result type.
+	 * <p>
+	 * Hibernate will implicitly determine an appropriate conversion,
+	 * if it can. Otherwise, an exception will be thrown.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull @SuppressWarnings("rawtypes") Class javaType);
+
+	/**
+	 * Declare a scalar query result with an explicit conversion.
+	 *
+	 * @param relationalJavaType The Java type expected by the converter as its
+	 *                           "relational" type.
+	 * @param converter The conversion to apply. Consumes the JDBC value based
+	 *                  on {@code relationalJavaType}.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	<C> NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull Class<C> relationalJavaType, @Nonnull AttributeConverter<?,C> converter);
+
+	/**
+	 * Declare a scalar query result with an explicit conversion.
+	 *
+	 * @param jdbcJavaType The Java type expected by the converter as its
+	 *                     "relational model" type.
+	 * @param domainJavaType The Java type expected by the converter as its
+	 *                       "object model" type.
+	 * @param converter The conversion to apply. Consumes the JDBC value based
+	 *                  on {@code relationalJavaType}.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	<O,R> NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull Class<O> domainJavaType, @Nonnull Class<R> jdbcJavaType, @Nonnull AttributeConverter<O,R> converter);
+
+	/**
+	 * Declare a scalar query result with an explicit conversion.
+	 *
+	 * @param relationalJavaType The Java type expected by the converter as its
+	 *                           "relational" type.
+	 * @param converter The conversion to apply. Consumes the JDBC value based
+	 *                  on {@code relationalJavaType}.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	<C> NativeQuery<T> addScalar(@Nonnull String columnAlias, @Nonnull Class<C> relationalJavaType, @Nonnull Class<? extends AttributeConverter<?,C>> converter);
+
+	/**
+	 * Declare a scalar query result with an explicit conversion.
+	 *
+	 * @param jdbcJavaType The Java type expected by the converter as its
+	 *                     "relational model" type.
+	 * @param domainJavaType The Java type expected by the converter as its
+	 *                       "object model" type.
+	 * @param converter The conversion to apply.  Consumes the JDBC value
+	 *                  based on {@code relationalJavaType}.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	<O,R> NativeQuery<T> addScalar(
+			@Nonnull String columnAlias,
+			@Nonnull Class<O> domainJavaType,
+			@Nonnull Class<R> jdbcJavaType,
+			@Nonnull Class<? extends AttributeConverter<O,R>> converter);
+
+	/**
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	<J> InstantiationResultNode<J> addInstantiation(@Nonnull Class<J> targetJavaType);
+
+	/**
+	 * Defines a result based on a specified attribute. Differs from adding
+	 * a scalar in that any conversions or other semantics defined on the
+	 * attribute are automatically applied to the mapping.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addAttributeResult(@Nonnull String columnAlias, @Nonnull @SuppressWarnings("rawtypes") Class entityJavaType, @Nonnull String attributePath);
+
+	/**
+	 * Defines a result based on a specified attribute.  Differs from adding
+	 * a scalar in that any conversions or other semantics defined on the
+	 * attribute are automatically applied to the mapping.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addAttributeResult(@Nonnull String columnAlias, @Nonnull String entityName, @Nonnull String attributePath);
+
+	/**
+	 * Defines a result based on a specified attribute. Differs from adding a
+	 * scalar in that any conversions or other semantics defined on the attribute
+	 * are automatically applied to the mapping.
+	 * <p>
+	 * This form accepts the JPA Attribute mapping describing the attribute
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 6.0
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addAttributeResult(@Nonnull String columnAlias, @Nonnull @SuppressWarnings("rawtypes") SingularAttribute attribute);
+
+	/**
+	 * Add a new root return mapping, returning a {@link RootReturn} to allow
+	 * further definition.
+	 *
+	 * @param tableAlias The SQL table alias to map to this entity
+	 * @param entityName The name of the entity
+	 *
+	 * @return The return config object for further control.
+	 *
+	 * @since 3.6
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	RootReturn addRoot(@Nonnull String tableAlias, @Nonnull String entityName);
+
+	/**
+	 * Add a new root return mapping, returning a {@link RootReturn} to allow
+	 * further definition.
+	 *
+	 * @param tableAlias The SQL table alias to map to this entity
+	 * @param entityType The java type of the entity
+	 *
+	 * @return The return config object for further control.
+	 *
+	 * @since 3.6
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	RootReturn addRoot(@Nonnull String tableAlias, @Nonnull @SuppressWarnings("rawtypes") Class entityType);
+
+	/**
+	 * Declare a "root" entity, without specifying an alias. The expectation
+	 * here is that the table alias is the same as the unqualified entity name.
+	 * <p>
+	 * Use {@link #addRoot} if you need further control of the mapping
+	 *
+	 * @param entityName The entity name that is the root return of the query
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull String entityName);
+
+	/**
+	 * Declare a "root" entity.
+	 *
+	 * @param tableAlias The SQL table alias
+	 * @param entityName The entity name
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull String tableAlias, @Nonnull String entityName);
+
+	/**
+	 * Declare a "root" entity, specifying a lock mode.
+	 *
+	 * @param tableAlias The SQL table alias
+	 * @param entityName The entity name
+	 * @param lockMode The lock mode for this return.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull String tableAlias, @Nonnull String entityName, @Nullable LockMode lockMode);
+
+	/**
+	 * Declare a "root" entity, without specifying an alias. The expectation here
+	 * is that the table alias is the same as the unqualified entity name.
+	 *
+	 * @param entityType The java type of the entity to add as a root
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull @SuppressWarnings("rawtypes") Class entityType);
+
+	/**
+	 * Declare a "root" entity.
+	 *
+	 * @param tableAlias The SQL table alias
+	 * @param entityType The java type of the entity to add as a root
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull String tableAlias, @Nonnull @SuppressWarnings("rawtypes") Class entityType);
+
+	/**
+	 * Declare a "root" entity, specifying a lock mode.
+	 *
+	 * @param tableAlias The SQL table alias
+	 * @param entityClass The entity {@link Class}
+	 * @param lockMode The lock mode for this return
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addEntity(@Nonnull String tableAlias, @Nonnull @SuppressWarnings("rawtypes") Class entityClass, @Nullable LockMode lockMode);
+
+	/**
+	 * Declare a join fetch result.
+	 *
+	 * @param tableAlias The SQL table alias for the data to be mapped to this fetch.
+	 * @param ownerTableAlias Identify the table alias of the owner of this association.
+	 *                        Should match the alias of a previously added root or fetch.
+	 * @param joinPropertyName The name of the property being join fetched.
+	 *
+	 * @return The return config object for further control.
+	 *
+	 * @since 3.6
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	FetchReturn addFetch(@Nonnull String tableAlias, @Nonnull String ownerTableAlias, @Nonnull String joinPropertyName);
+
+	/**
+	 * Declare a join fetch result.
+	 *
+	 * @param tableAlias The SQL table alias for the data to be mapped to this fetch.
+	 * @param path The association path of form {@code [owner-alias].[property-name]}.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addJoin(@Nonnull String tableAlias, @Nonnull String path);
+
+	/**
+	 * Declare a join fetch result.
+	 *
+	 * @param tableAlias The SQL table alias for the data to be mapped to this fetch
+	 * @param ownerTableAlias Identify the table alias of the owner of this association.
+	 *                        Should match the alias of a previously added root or fetch.
+	 * @param joinPropertyName The name of the property being join fetched.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @since 3.6
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addJoin(@Nonnull String tableAlias, @Nonnull String ownerTableAlias, @Nonnull String joinPropertyName);
+
+	/**
+	 * Declare a join fetch result, specifying a lock mode.
+	 *
+	 * @param tableAlias The SQL table alias for the data to be mapped to this fetch
+	 * @param path The association path of form {@code [owner-alias].[property-name]}.
+	 * @param lockMode The lock mode for this return.
+	 *
+	 * @return {@code this}, for method chaining
+	 *
+	 * @deprecated Use {@linkplain jakarta.persistence.sql.ResultSetMapping}, or
+	 * similar approach pending the outcome of
+	 * <a href="https://github.com/jakartaee/persistence/issues/887">this Jakarta Persistence request</a>.
+	 */
+	@Nonnull
+	@Deprecated(since = "8.0")
+	NativeQuery<T> addJoin(@Nonnull String tableAlias, @Nonnull String path, @Nullable LockMode lockMode);
+
+	/**
+	 * Simple unification interface for all returns from the various {@code addXYZ()}
+	 * methods. Allows control over the "shape" of that particular part of the fetch
+	 * graph.
+	 * <p>
+	 * Some nodes can be query results, while others simply describe a part of one of
+	 * the results.
+	 */
+	interface ResultNode {
+	}
+
+	/**
+	 * A {@link ResultNode} which can be a query result.
+	 */
+	interface ReturnableResultNode extends ResultNode {
+	}
+
+	interface InstantiationResultNode<J> extends ReturnableResultNode {
+		@Nonnull
+		default InstantiationResultNode<J> addBasicArgument(@Nonnull String columnAlias) {
+			return addBasicArgument( columnAlias, null );
+		}
+
+		@Nonnull
+		InstantiationResultNode<J> addBasicArgument(@Nonnull String columnAlias, @Nullable String argumentAlias);
+	}
+
+	/**
+	 * Allows access to further control how properties within a root or join
+	 * fetch are mapped back from the result set. Generally used in composite
+	 * value scenarios.
+	 */
+	interface ReturnProperty extends ResultNode {
+		/**
+		 * Add a column alias to this property mapping.
+		 *
+		 * @param columnAlias The column alias.
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		ReturnProperty addColumnAlias(@Nonnull String columnAlias);
+	}
+
+	/**
+	 * Allows access to further control how root returns are mapped back from
+	 * result sets.
+	 */
+	interface RootReturn extends ReturnableResultNode {
+
+		@Nonnull
+		String getTableAlias();
+
+		@Nullable
+		String getDiscriminatorAlias();
+
+		@Nonnull
+		@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+		EntityMappingType getEntityMapping();
+
+		@Nonnull
+		NavigablePath getNavigablePath();
+
+		@Nullable
+		LockMode getLockMode();
+
+		/**
+		 * Set the lock mode for this return.
+		 *
+		 * @param lockMode The new lock mode.
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		RootReturn setLockMode(@Nullable LockMode lockMode);
+
+		@Nonnull
+		RootReturn addIdColumnAliases(@Nonnull String... aliases);
+
+		/**
+		 * Name the column alias that identifies the entity's discriminator.
+		 *
+		 * @param columnAlias The discriminator column alias
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		RootReturn setDiscriminatorAlias(@Nullable String columnAlias);
+
+		/**
+		 * Add a simple property-to-one-column mapping.
+		 *
+		 * @param propertyName The name of the property.
+		 * @param columnAlias The name of the column
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		RootReturn addProperty(@Nonnull String propertyName, @Nonnull String columnAlias);
+
+		/**
+		 * Add a property, presumably with more than one column.
+		 *
+		 * @param propertyName The name of the property.
+		 *
+		 * @return The config object for further control.
+		 */
+		@Nonnull
+		ReturnProperty addProperty(@Nonnull String propertyName);
+	}
+
+	/**
+	 * Allows access to further control how collection returns are mapped back
+	 * from result sets.
+	 */
+	interface CollectionReturn extends ReturnableResultNode {
+
+		@Nonnull
+		String getTableAlias();
+
+		@Nonnull
+		@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+		PluralAttributeMapping getPluralAttribute();
+
+		@Nonnull
+		NavigablePath getNavigablePath();
+	}
+
+	/**
+	 * Allows access to further control how join fetch returns are mapped back
+	 * from result sets.
+	 */
+	interface FetchReturn extends ResultNode {
+
+		@Nonnull
+		String getTableAlias();
+
+		@Nonnull
+		String getOwnerAlias();
+
+		@Nonnull
+		@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+		Fetchable getFetchable();
+
+		@Nonnull
+		String getFetchableName();
+
+		/**
+		 * Set the lock mode for this return.
+		 *
+		 * @param lockMode The new lock mode.
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		FetchReturn setLockMode(@Nullable LockMode lockMode);
+
+		/**
+		 * Add a simple property-to-one-column mapping.
+		 *
+		 * @param propertyName The name of the property.
+		 * @param columnAlias The name of the column
+		 *
+		 * @return {@code this}, for method chaining
+		 */
+		@Nonnull
+		FetchReturn addProperty(@Nonnull String propertyName, @Nonnull String columnAlias);
+
+		/**
+		 * Add a property, presumably with more than one column.
+		 *
+		 * @param propertyName The name of the property.
+		 *
+		 * @return The config object for further control.
+		 */
+		@Nonnull
+		ReturnProperty addProperty(@Nonnull String propertyName);
+	}
+}

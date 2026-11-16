@@ -1,0 +1,202 @@
+package org.hibernate.type.descriptor.java;
+
+import java.sql.Timestamp;
+import java.sql.Types;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.GregorianCalendar;
+
+import jakarta.persistence.TemporalType;
+
+import org.hibernate.dialect.Dialect;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.descriptor.jdbc.JdbcTypeIndicators;
+import org.hibernate.type.internal.DirectJavaTimeJdbcTypeResolver;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ * Java type descriptor for the {@link LocalDateTime} type.
+ *
+ * @author Steve Ebersole
+ */
+public class LocalDateTimeJavaType extends AbstractTemporalJavaType<LocalDateTime>
+		implements VersionJavaType<LocalDateTime> {
+	/**
+	 * Singleton access
+	 */
+	public static final LocalDateTimeJavaType INSTANCE = new LocalDateTimeJavaType();
+
+	public LocalDateTimeJavaType() {
+		super( LocalDateTime.class, ImmutableMutabilityPlan.instance() );
+	}
+
+	@Override
+	public boolean isInstance(Object value) {
+		return value instanceof LocalDateTime;
+	}
+
+	@Override
+	public LocalDateTime cast(Object value) {
+		return (LocalDateTime) value;
+	}
+
+	@Override @SuppressWarnings("deprecation")
+	public TemporalType getPrecision() {
+		return TemporalType.TIMESTAMP;
+	}
+
+	@Override
+	public JdbcType getRecommendedJdbcType(JdbcTypeIndicators context) {
+		final Integer directJdbcTypeCode = DirectJavaTimeJdbcTypeResolver.resolve(
+				LocalDateTime.class,
+				context
+		);
+		return context.getJdbcType( directJdbcTypeCode == null ? Types.TIMESTAMP : directJdbcTypeCode );
+	}
+
+	@Override
+	protected TemporalJavaType<LocalDateTime> forTimestampPrecision(TypeConfiguration typeConfiguration) {
+		return this;
+	}
+
+	@Override
+	public boolean useObjectEqualsHashCode() {
+		return true;
+	}
+
+	@Override
+	public String toString(LocalDateTime value) {
+		return DateTimeFormatter.ISO_DATE_TIME.format( value );
+	}
+
+	@Override
+	public LocalDateTime fromString(CharSequence string) {
+		return LocalDateTime.from( DateTimeFormatter.ISO_DATE_TIME.parse( string ) );
+	}
+
+	@Override
+	public <X> X unwrap(LocalDateTime value, Class<X> type, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+
+		if ( LocalDateTime.class.isAssignableFrom( type ) ) {
+			return type.cast( value );
+		}
+
+		if ( Timestamp.class.isAssignableFrom( type ) ) {
+			// Workaround for HHH-13266 (JDK-8061577).
+			// We used to do Timestamp.from( value.atZone( ZoneId.systemDefault() ).toInstant() ),
+			// but on top of being more complex than the line below, it won't always work.
+			// Timestamp.from() assumes the number of milliseconds since the epoch means the
+			// same thing in Timestamp and Instant, but it doesn't, in particular before 1900.
+			return type.cast( Timestamp.valueOf( value ) );
+		}
+
+		if ( java.sql.Date.class.isAssignableFrom( type ) ) {
+			final var instant = value.atZone( ZoneId.systemDefault() ).toInstant();
+			return type.cast( new java.sql.Date( instant.toEpochMilli() ) );
+		}
+
+		if ( java.sql.Time.class.isAssignableFrom( type ) ) {
+			final var instant = value.atZone( ZoneId.systemDefault() ).toInstant();
+			return type.cast( new java.sql.Time( instant.toEpochMilli() ) );
+		}
+
+		if ( Date.class.isAssignableFrom( type ) ) {
+			final var instant = value.atZone( ZoneId.systemDefault() ).toInstant();
+			return type.cast( Date.from( instant ) );
+		}
+
+		if ( Calendar.class.isAssignableFrom( type ) ) {
+			return type.cast( GregorianCalendar.from( value.atZone( ZoneId.systemDefault() ) ) );
+		}
+
+		if ( Long.class.isAssignableFrom( type ) ) {
+			final var instant = value.atZone( ZoneId.systemDefault() ).toInstant();
+			return type.cast( instant.toEpochMilli() );
+		}
+
+		throw unknownUnwrap( type );
+	}
+
+	@Override
+	public <X> LocalDateTime wrap(X value, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+
+		if (value instanceof LocalDateTime localDateTime) {
+			return localDateTime;
+		}
+
+		if (value instanceof Timestamp timestamp) {
+			// Workaround for HHH-13266 (JDK-8061577).
+			// We used to do LocalDateTime.ofInstant( ts.toInstant(), ZoneId.systemDefault() ),
+			// but on top of being more complex than the line below, it won't always work.
+			// ts.toInstant() assumes the number of milliseconds since the epoch means the
+			// same thing in Timestamp and Instant, but it doesn't, in particular before 1900.
+			return timestamp.toLocalDateTime();
+		}
+
+		if (value instanceof Long longValue) {
+			final var instant = Instant.ofEpochMilli( longValue );
+			return LocalDateTime.ofInstant( instant, ZoneId.systemDefault() );
+		}
+
+		if (value instanceof Calendar calendar) {
+			return LocalDateTime.ofInstant( calendar.toInstant(), calendar.getTimeZone().toZoneId() );
+		}
+
+		if (value instanceof Date timestamp) {
+			final var instant = timestamp.toInstant();
+			return LocalDateTime.ofInstant( instant, ZoneId.systemDefault() );
+		}
+
+		throw unknownWrap( value.getClass() );
+	}
+
+	@Override
+	public boolean isWider(JavaType<?> javaType) {
+		return switch ( javaType.getTypeName() ) {
+			case "java.sql.Date", "java.sql.Timestamp", "java.util.Date", "java.util.Calendar" -> true;
+			default -> false;
+		};
+	}
+
+	@Override
+	public int getDefaultSqlPrecision(Dialect dialect, JdbcType jdbcType) {
+		return dialect.getTypeSizingProfile().defaultTimestampPrecision();
+	}
+
+	@Override
+	public LocalDateTime seed(Long length, Integer precision, Integer scale, SharedSessionContractImplementor session) {
+		return LocalDateTime.now( ClockHelper.forPrecision( precision, session ) );
+	}
+
+	@Override
+	public LocalDateTime next(
+			LocalDateTime current,
+			Long length,
+			Integer precision,
+			Integer scale,
+			SharedSessionContractImplementor session) {
+		return seed( length, precision, scale, session );
+	}
+
+	@Override
+	public LocalDateTime seed(Long length, Integer precision, Integer scale, WrapperOptions options) {
+		return LocalDateTime.now( ClockHelper.forPrecision( precision, options.getSessionFactory() ) );
+	}
+
+	@Override
+	public LocalDateTime next(LocalDateTime current, Long length, Integer precision, Integer scale, WrapperOptions options) {
+		return seed( length, precision, scale, options );
+	}
+}

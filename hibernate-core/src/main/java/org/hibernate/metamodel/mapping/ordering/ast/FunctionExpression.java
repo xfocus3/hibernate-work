@@ -1,0 +1,126 @@
+package org.hibernate.metamodel.mapping.ordering.ast;
+
+import jakarta.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import jakarta.persistence.criteria.Nulls;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.internal.AbstractDomainPath;
+import org.hibernate.metamodel.model.domain.ReturnableType;
+import org.hibernate.query.SortDirection;
+import org.hibernate.query.sqm.function.FunctionRenderer;
+import org.hibernate.query.sqm.function.SelfRenderingFunctionSqlAstExpression;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.ast.spi.query.select.SortSpecification;
+
+/**
+ * Represents a function used in an order-by fragment
+ *
+ * @author Steve Ebersole
+ */
+public class FunctionExpression implements OrderingExpression, FunctionRenderer {
+	private final String name;
+	private final List<OrderingExpression> arguments;
+
+	public FunctionExpression(String name, int numberOfArguments) {
+		this.name = name;
+		this.arguments = numberOfArguments == 0
+				? Collections.emptyList()
+				: new ArrayList<>( numberOfArguments );
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public List<OrderingExpression> getArguments() {
+		return arguments;
+	}
+
+	public void addArgument(OrderingExpression argument) {
+		arguments.add( argument );
+	}
+
+	@Override
+	public SelfRenderingFunctionSqlAstExpression<?> resolve(
+			QuerySpec ast,
+			TableGroup tableGroup,
+			@Nullable String modelPartName,
+			SqlAstCreationState creationState) {
+
+		final int size = arguments.size();
+		final List<SqlAstNode> args = new ArrayList<>( size );
+		for ( int i = 0; i < size; i++ ) {
+			final OrderingExpression orderingExpression = arguments.get( i );
+			final String subModelPartName;
+			if ( orderingExpression instanceof DomainPath domainPath ) {
+				final String partName = domainPath.getNavigablePath().getLocalName();
+				subModelPartName =
+						CollectionPart.Nature.ELEMENT.getName().equals( partName )
+								? AbstractDomainPath.ELEMENT_TOKEN
+								: partName;
+			}
+			else {
+				subModelPartName = null;
+			}
+			args.add( orderingExpression.resolve( ast, tableGroup, subModelPartName, creationState ) );
+		}
+
+		return new SelfRenderingFunctionSqlAstExpression<>(
+				name,
+				this,
+				args,
+				null,
+				modelPartName == null ? null : tableGroup.getModelPart().findSubPart( modelPartName, null )
+		);
+	}
+
+	@Override
+	public void apply(
+			QuerySpec ast,
+			TableGroup tableGroup,
+			@Nullable String collation,
+			String modelPartName,
+			SortDirection sortOrder,
+			Nulls nullPrecedence,
+			SqlAstCreationState creationState) {
+		final Expression sortExpression = OrderingExpression.applyCollation(
+				resolve( ast, tableGroup, modelPartName, creationState ),
+				collation,
+				creationState
+		);
+		ast.addSortSpecification( new SortSpecification( sortExpression, sortOrder, nullPrecedence ) );
+	}
+
+	@Override
+	public void render(
+			SqlAppender sqlAppender,
+			List<? extends SqlAstNode> sqlAstArguments,
+			ReturnableType<?> returnType,
+			SqlAstTranslator<?> walker) {
+		sqlAppender.appendSql( name );
+		sqlAppender.appendSql( '(' );
+		if ( !sqlAstArguments.isEmpty() ) {
+			sqlAstArguments.get( 0 ).accept( walker );
+			for ( int i = 1; i < sqlAstArguments.size(); i++ ) {
+				sqlAppender.appendSql( ", " );
+				sqlAstArguments.get( i ).accept( walker );
+			}
+		}
+		sqlAppender.appendSql( ')' );
+	}
+
+	@Override
+	public String toDescriptiveText() {
+		return "function (" + name + ")";
+	}
+}

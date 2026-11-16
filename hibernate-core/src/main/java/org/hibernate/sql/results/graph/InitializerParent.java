@@ -1,0 +1,12 @@
+package org.hibernate.sql.results.graph;
+
+/**
+ * Provides access to information about the owner/parent of a fetch
+ * in relation to the current "row" being processed.
+ *
+ * @author Steve Ebersole
+ */
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface InitializerParent<Data extends InitializerData> extends Initializer<Data> {
+
+}

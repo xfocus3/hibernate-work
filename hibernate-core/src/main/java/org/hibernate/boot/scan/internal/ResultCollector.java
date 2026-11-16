@@ -1,0 +1,53 @@
+package org.hibernate.boot.scan.internal;
+
+import org.hibernate.boot.scan.spi.ScanningResult;
+import org.hibernate.internal.util.StringHelper;
+
+import java.net.URI;
+import java.util.HashSet;
+import java.util.Set;
+
+/// In-flight collection of [scan results][ScanningResult].
+///
+/// @author Steve Ebersole
+public class ResultCollector {
+	private final Set<String> discoveredModules = new HashSet<>();
+	private final Set<String> discoveredPackages = new HashSet<>();
+	private final Set<String> discoveredClasses = new HashSet<>();
+	private final Set<URI> discoveredMappings = new HashSet<>();
+
+	public void addModule(String moduleName) {
+		discoveredModules.add( moduleName );
+	}
+
+	public void addPackage(String packageName) {
+		discoveredPackages.add( packageName );
+	}
+
+	public void addClass(String className) {
+		if ( className.equals( "package-info" ) || className.endsWith( ".package-info" ) ) {
+			addPackage( StringHelper.qualifier( className ) );
+		}
+		else if ( className.equals( "module-info" ) ) {
+			// module-info is indexed by Jandex as a ClassInfo but represents a module;
+			// module discovery is handled separately via addModule
+		}
+		else {
+			discoveredClasses.add( className );
+		}
+	}
+
+	public void addMapping(URI mappingUri) {
+		discoveredMappings.add(mappingUri);
+	}
+
+
+	public ScanningResult toResult() {
+		return new ScanningResultImpl(
+				discoveredModules,
+				discoveredPackages,
+				discoveredClasses,
+				discoveredMappings
+		);
+	}
+}

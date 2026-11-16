@@ -1,0 +1,25 @@
+<build>
+    <plugins>
+        [...]
+        <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>...</version>
+            <configuration>
+                <annotationProcessorPaths>
+                    <path>
+                        <groupId>org.hibernate.orm</groupId>
+                        <artifactId>hibernate-processor</artifactId>
+                        <version>{fullVersion}</version>
+                    </path>
+                </annotationProcessorPaths>
+                <!-- This setting is required for the hibernate-processor dependencies to
+                     also be managed by <dependencyManagement> rules, if any.
+                     More information is available in Maven compiler plugin documentation:
+                     https://maven.apache.org/plugins/maven-compiler-plugin/compile-mojo.html#annotationProcessorPathsUseDepMgmt -->
+                <annotationProcessorPathsUseDepMgmt>true</annotationProcessorPathsUseDepMgmt>
+            </configuration>
+        </plugin>
+        [...]
+    </plugins>
+</build>

@@ -1,0 +1,111 @@
+[[naming]]
+==== Naming strategies
+:example-dir-naming: {core-project-dir}/src/test/java/org/hibernate/orm/test/naming
+
+Part of the mapping of an object model to the relational database is
+mapping names from the object model to the corresponding database names.
+Hibernate resolves names in two stages:
+
+* The first stage is determining a proper logical name from the domain model mapping.  A
+	logical name can be either explicitly specified by the user (e.g., using `@Column` or
+	`@Table`) or it can be implicitly determined by Hibernate through an
+	<<ImplicitNamingStrategy>> contract.
+* The second stage resolves the logical name to a physical name, as defined
+	by the <<PhysicalNamingStrategy>> contract.
+
+At the core, the idea behind each naming strategy is to minimize the amount of
+repetitive information a developer must provide for mapping a domain model.
+
+
+[NOTE]
+.Jakarta Persistence Compatibility
+====
+Jakarta Persistence defines rules for implicit names.
+Use `ImplicitNamingStrategyJpaCompliantImpl`, the default, to follow these rules and preserve provider portability.
+
+Also, Jakarta Persistence defines no separation between logical and physical name.  Following the Jakarta Persistence
+specification, the logical name *is* the physical name.  If Jakarta Persistence provider portability
+is important, applications should prefer not to specify a PhysicalNamingStrategy.
+====
+
+
+[[ImplicitNamingStrategy]]
+===== ImplicitNamingStrategy
+
+When a mapping omits a table or column name,
+`org.hibernate.boot.model.naming.ImplicitNamingStrategy` determines the implicit logical name.
+
+image::images/domain/naming/implicit_naming_strategy_diagram.svg[Implicit Naming Strategy Diagram,align="center"]
+
+Hibernate defines multiple ImplicitNamingStrategy implementations out-of-the-box.  Applications
+are also free to plug in custom implementations.
+
+There are multiple ways to specify the ImplicitNamingStrategy to use.  First, applications can specify
+the implementation using the `hibernate.implicit_naming_strategy` configuration setting which accepts:
+
+* pre-defined "short names" for the out-of-the-box implementations
++
+`default`:: for `org.hibernate.boot.model.naming.ImplicitNamingStrategyJpaCompliantImpl` - an alias for `jpa`
+`jpa`:: for `org.hibernate.boot.model.naming.ImplicitNamingStrategyJpaCompliantImpl` - the Jakarta Persistence compliant naming strategy
+`legacy-hbm`:: for `org.hibernate.boot.model.naming.ImplicitNamingStrategyLegacyHbmImpl` - compliant with the original Hibernate NamingStrategy
+`legacy-jpa`:: for `org.hibernate.boot.model.naming.ImplicitNamingStrategyLegacyJpaImpl` - compliant with the legacy NamingStrategy developed for Java Persistence 1.0, which was unfortunately unclear in many respects regarding implicit naming rules
+`component-path`:: for `org.hibernate.boot.model.naming.ImplicitNamingStrategyComponentPathImpl` - mostly follows `ImplicitNamingStrategyJpaCompliantImpl` rules, except that it uses the full composite paths, as opposed to just the ending property part
++
+* reference to a Class that implements the `org.hibernate.boot.model.naming.ImplicitNamingStrategy` contract
+* FQN of a class that implements the `org.hibernate.boot.model.naming.ImplicitNamingStrategy` contract
+
+Secondly, applications and integrations can use `org.hibernate.boot.MetadataBuilder#applyImplicitNamingStrategy`
+to specify the ImplicitNamingStrategy to use.  See
+<<chapters/bootstrap/Bootstrap.adoc#bootstrap,Bootstrap>> for additional details on bootstrapping.
+
+
+[NOTE]
+.@EmbeddedColumnNaming
+====
+A related topic is the use of `@EmbeddedColumnNaming` to help with the implicit naming of columns associated with mapping an embeddable.
+See <<embeddable-column-naming,the discussion of @EmbeddedColumnNaming>>.
+====
+
+[[PhysicalNamingStrategy]]
+===== PhysicalNamingStrategy
+
+Many organizations define rules around the naming of database objects (tables, columns, foreign keys, etc).
+The idea of a PhysicalNamingStrategy is to help implement such naming rules without having to hard-code them
+into the mapping via explicit names.
+
+While the purpose of an ImplicitNamingStrategy is to determine that an attribute named `accountNumber` maps to
+a logical column name of `accountNumber` when not explicitly specified, the purpose of a PhysicalNamingStrategy
+would be, for example, to say that the physical column name should instead be abbreviated to `acct_num`.
+
+[NOTE]
+====
+It is true that the resolution to `acct_num` could have been handled using an `ImplicitNamingStrategy` in this case.
+
+The `PhysicalNamingStrategy` applies to both explicit and implicit logical names.
+The `ImplicitNamingStrategy` applies only when a mapping omits the name.
+====
+
+The default implementation uses the logical name as the physical name.  However
+applications and integrations can define custom implementations of this PhysicalNamingStrategy
+contract.  Here is an example PhysicalNamingStrategy for a fictitious company named Acme Corp
+whose naming standards are to:
+
+* prefer underscore-delimited words rather than camel casing
+* replace certain words with standard abbreviations
+
+.Example PhysicalNamingStrategy implementation
+====
+[source,java]
+----
+include::{example-dir-naming}/AcmeCorpPhysicalNamingStrategy.java[]
+----
+====
+
+There are multiple ways to specify the PhysicalNamingStrategy to use.  First, applications can specify
+the implementation using the `hibernate.physical_naming_strategy` configuration setting which accepts:
+
+* reference to a Class that implements the `org.hibernate.boot.model.naming.PhysicalNamingStrategy` contract
+* FQN of a class that implements the `org.hibernate.boot.model.naming.PhysicalNamingStrategy` contract
+
+Secondly, applications and integrations can use `org.hibernate.boot.MetadataBuilder#applyPhysicalNamingStrategy`.
+See <<chapters/bootstrap/Bootstrap.adoc#bootstrap,Bootstrap>> for additional details on bootstrapping.

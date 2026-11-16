@@ -1,0 +1,17 @@
+public class Foo {
+
+    private Bar bar;
+
+    Bar getBar() {
+        return bar;
+    }
+
+    public void setBar(Bar b) {
+        bar = b;
+    }
+
+    public void writeFoo(String value) {
+        bar.foo = value;
+    }
+
+}

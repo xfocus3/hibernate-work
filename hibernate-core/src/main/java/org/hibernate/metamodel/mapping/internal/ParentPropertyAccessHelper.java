@@ -1,0 +1,65 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nullable;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
+import org.hibernate.annotations.Parent;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.property.access.internal.PropertyAccessStrategyBasicImpl;
+import org.hibernate.property.access.internal.PropertyAccessStrategyFieldImpl;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.property.access.spi.PropertyAccessorService;
+
+import static org.hibernate.internal.util.ReflectHelper.getterMethodOrNull;
+import static org.hibernate.property.access.internal.AccessStrategyHelper.fieldOrNull;
+
+final class ParentPropertyAccessHelper {
+
+	private ParentPropertyAccessHelper() {
+	}
+
+	@Nullable
+	static PropertyAccess parentPropertyAccess(
+			PropertyAccessorService propertyAccessorService,
+			@Nullable String parentInjectionAttributeName,
+			EmbeddableMappingType embeddableMappingType) {
+		if ( parentInjectionAttributeName == null ) {
+			return null;
+		}
+
+		final var embeddableJavaType = embeddableMappingType.getMappedJavaType().getJavaTypeClass();
+		// For @Parent, the annotated member defines how the owner reference must be injected.
+		// Falling back to generic mixed access would incorrectly prefer a field for getter-based mappings.
+		if ( hasParentAnnotation( fieldOrNull( embeddableJavaType, parentInjectionAttributeName ) ) ) {
+			return PropertyAccessStrategyFieldImpl.INSTANCE.buildPropertyAccess(
+					propertyAccessorService,
+					embeddableJavaType,
+					parentInjectionAttributeName,
+					true );
+		}
+		else if ( hasParentAnnotation( getterMethodOrNull( embeddableJavaType, parentInjectionAttributeName ) ) ) {
+			return PropertyAccessStrategyBasicImpl.INSTANCE.buildPropertyAccess(
+					propertyAccessorService,
+					embeddableJavaType,
+					parentInjectionAttributeName,
+					true );
+		}
+		else {
+			return PropertyAccessStrategyBasicImpl.INSTANCE.buildPropertyAccess(
+					propertyAccessorService,
+					embeddableJavaType,
+					parentInjectionAttributeName,
+					true );
+		}
+	}
+
+	private static boolean hasParentAnnotation(@Nullable Field field) {
+		return field != null && field.isAnnotationPresent( Parent.class );
+	}
+
+	private static boolean hasParentAnnotation(@Nullable Method getterMethod) {
+		return getterMethod != null && getterMethod.isAnnotationPresent( Parent.class );
+	}
+}

@@ -1,0 +1,1491 @@
+package org.hibernate.action.queue.internal.decompose.collection;
+
+import org.hibernate.action.queue.spi.decompose.collection.CollectionJdbcOperations;
+import org.hibernate.action.queue.spi.decompose.collection.CollectionMutationPlanContributor;
+import org.hibernate.action.queue.spi.decompose.collection.OneToManyDecomposer;
+
+import org.hibernate.action.queue.internal.PreparedCollectionMutation;
+import org.hibernate.action.queue.spi.MutationKind;
+import org.hibernate.action.queue.spi.bind.BindPlan;
+import org.hibernate.action.queue.spi.bind.JdbcValueBindings;
+import org.hibernate.action.queue.spi.decompose.DecompositionContext;
+import org.hibernate.action.queue.spi.meta.TableDescriptor;
+import org.hibernate.action.queue.spi.meta.TableDescriptorAsTableMapping;
+import org.hibernate.action.queue.spi.plan.FlushOperation;
+import org.hibernate.collection.spi.CollectionChangeSet;
+import org.hibernate.collection.spi.CollectionMutationInterpretation;
+import org.hibernate.collection.spi.PhysicalCollectionMutation;
+import org.hibernate.jdbc.Expectation;
+import org.hibernate.sql.spi.mutation.MutationOperation;
+import org.hibernate.sql.ast.spi.model.ColumnValueBinding;
+import org.hibernate.sql.ast.spi.model.ColumnValueParameterList;
+import org.hibernate.sql.ast.spi.model.ColumnWriteFragment;
+import org.hibernate.sql.ast.spi.model.MutatingTableReference;
+import org.hibernate.sql.ast.internal.model.builder.CollectionRowDeleteByUpdateSetNullBuilder;
+import org.hibernate.sql.ast.spi.model.builder.TableUpdateBuilderStandard;
+import org.hibernate.sql.ast.spi.model.TableUpdateCustomSql;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.jdbc.mutation.ParameterUsage;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
+import org.hibernate.persister.collection.mutation.CollectionTableMapping;
+import org.hibernate.persister.collection.OneToManyPersister;
+import org.hibernate.sql.exec.spi.JdbcParameterBinder;
+import org.hibernate.sql.spi.mutation.jdbc.JdbcMutationOperation;
+import org.hibernate.sql.spi.mutation.jdbc.JdbcValueDescriptor;
+
+import java.util.ArrayList;
+import java.util.AbstractMap.SimpleImmutableEntry;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Consumer;
+
+import static org.hibernate.action.queue.internal.decompose.collection.CollectionOrdinalSupport.Slot;
+import static org.hibernate.action.queue.internal.decompose.collection.CollectionOrdinalSupport.calculateOrdinal;
+import static org.hibernate.sql.model.ModelMutationLogging.MODEL_MUTATION_LOGGER;
+import static org.hibernate.sql.ast.spi.model.builder.TableMutationBuilder.NULL;
+
+/// @author Steve Ebersole
+public abstract class AbstractOneToManyDecomposer implements OneToManyDecomposer {
+	protected final OneToManyPersister persister;
+	protected final SessionFactoryImplementor factory;
+	protected final CollectionMutationPlanContributor mutationPlanContributor;
+
+	public AbstractOneToManyDecomposer(
+			OneToManyPersister persister,
+			SessionFactoryImplementor factory,
+			CollectionMutationPlanContributor mutationPlanContributor) {
+		this.persister = persister;
+		this.factory = factory;
+		this.mutationPlanContributor = mutationPlanContributor;
+	}
+
+
+	protected abstract CollectionJdbcOperations selectJdbcOperations(Object entry, SharedSessionContractImplementor session);
+
+	@Override
+	public void decomposeRecreate(
+			PreparedCollectionMutation action,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			DecompositionContext decompositionContext,
+			Consumer<FlushOperation> operationConsumer) {
+		var collection = action.getCollection();
+		var key = action.getKey();
+		final var interpretation = validInterpretation( action, collection );
+
+		var attribute = persister.getAttributeMapping();
+
+		// Always fire PRE event, even if no SQL operations will be needed
+		collection.preInsert( persister );
+
+		// Create post-execution callback to handle post-execution work (afterAction, cache, events, stats)
+		var postRecreateHandling = new PostCollectionRecreateHandling(
+				persister,
+				collection,
+				action.getAffectedOwner(),
+				action.getAffectedOwnerId(),
+				DecompositionSupport.generateCacheKey( action, session )
+		);
+		final var postExecutionCallback = postRecreateHandling;
+
+		final List<FlushOperation> operations = new ArrayList<>();
+
+		final var insertOrdinal = calculateOrdinal( ordinalBase, Slot.INSERT );
+		final var writeIndexOrdinal = calculateOrdinal( ordinalBase, Slot.WRITEINDEX );
+
+		if ( interpretation == null ) {
+			final var entries = collection.entries( persister );
+			int entryCount = 0;
+			while ( entries.hasNext() ) {
+				planRecreateEntry(
+						entries.next(),
+						entryCount++,
+						false,
+						collection,
+						key,
+						attribute,
+						insertOrdinal,
+						writeIndexOrdinal,
+						ordinalBase,
+						session,
+						operations
+				);
+			}
+		}
+		else if ( interpretation.physicalMutation() instanceof PhysicalCollectionMutation.CreateAll createAll ) {
+			createAll.currentRows().forEach( (entry, position) -> planRecreateEntry(
+					entry,
+					position,
+					true,
+					collection,
+					key,
+					attribute,
+					insertOrdinal,
+					writeIndexOrdinal,
+					ordinalBase,
+					session,
+					operations
+			) );
+		}
+		else {
+			throw new IllegalStateException(
+					"CREATE interpretation selected "
+							+ interpretation.physicalMutation().getClass().getSimpleName()
+			);
+		}
+
+		if ( !operations.isEmpty() ) {
+			contributeCollectionChange( collection, key, ordinalBase, session, operations::add );
+			DecompositionSupport.attachExecutionMonitor(
+					operations,
+					CollectionExecutionMonitor.Kind.CREATE,
+					key,
+					persister.getRole()
+			);
+			// Attach it to the last operation
+			operations.get( operations.size() - 1 ).setPostExecutionCallback( postExecutionCallback );
+			operations.forEach( operationConsumer );
+		}
+		else {
+			// Operations unexpectedly empty - create no-op to defer POST callback
+			operationConsumer.accept( DecompositionSupport.createNoOpCallbackCarrier(
+					persister.getCollectionTableDescriptor(),
+					calculateOrdinal( ordinalBase, Slot.INSERT ),
+					postExecutionCallback
+			) );
+		}
+	}
+
+	private void planRecreateEntry(
+			Object entry,
+			int entryPosition,
+			boolean inclusionAlreadyTested,
+			PersistentCollection<?> collection,
+			Object key,
+			org.hibernate.metamodel.mapping.PluralAttributeMapping attribute,
+			int insertOrdinal,
+			int writeIndexOrdinal,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			List<FlushOperation> operations) {
+		final var jdbcOperations = selectJdbcOperations( entry, session );
+		final var insertRowPlan = jdbcOperations.insertRowPlan();
+		if ( insertRowPlan != null
+				&& ( inclusionAlreadyTested
+						|| collection.includeInRecreate( entry, entryPosition, collection, attribute ) ) ) {
+			operations.add( new FlushOperation(
+					jdbcOperations.tableDescriptor(),
+					MutationKind.UPDATE,
+					insertRowPlan.jdbcOperation(),
+					new SingleRowInsertBindPlan(
+							persister,
+							insertRowPlan.values(),
+							collection,
+							key,
+							entry,
+							entryPosition
+					),
+					insertOrdinal,
+					"InsertRow[" + entryPosition + "](" + persister.getRolePath() + ")"
+			) );
+			contributeAdditionalInsert(
+					jdbcOperations,
+					collection,
+					key,
+					entry,
+					entryPosition,
+					ordinalBase,
+					session,
+					operations::add
+			);
+		}
+
+		if ( jdbcOperations.updateIndexPlan() != null ) {
+			operations.add( new FlushOperation(
+					jdbcOperations.tableDescriptor(),
+					MutationKind.UPDATE_ORDER,
+					jdbcOperations.updateIndexPlan().jdbcOperation(),
+					new SingleRowUpdateBindPlan(
+							persister,
+							collection,
+							key,
+							entry,
+							entryPosition,
+							jdbcOperations.updateIndexPlan().values(),
+							jdbcOperations.updateIndexPlan().restrictions()
+					),
+					writeIndexOrdinal,
+					"WriteIndex[" + entryPosition + "](" + persister.getRolePath() + ")"
+			) );
+		}
+	}
+
+	@Override
+	public final void decomposeUpdate(
+			PreparedCollectionMutation action,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			DecompositionContext decompositionContext,
+			Consumer<FlushOperation> operationConsumer) {
+		final var collection = action.getCollection();
+		final var key = action.getKey();
+		final var interpretation = validInterpretation( action, collection );
+
+		// Always fire PRE event, even if collection is not initialized
+		// Create callback to handle post-execution work (afterAction, cache, events, stats)
+		var postUpdateHandling = new PostCollectionUpdateHandling(
+				persister,
+				collection,
+				key,
+				action.getAffectedOwner(),
+				action.getAffectedOwnerId(),
+				DecompositionSupport.generateCacheKey( action, session )
+		);
+		final var postExecutionCallback = postUpdateHandling;
+
+		final List<FlushOperation> operations = new ArrayList<>();
+
+		if ( interpretation != null ) {
+			applyInterpretation(
+					interpretation,
+					collection,
+					key,
+					ordinalBase,
+					session,
+					operations::add
+			);
+		}
+		else if ( !collection.wasInitialized() ) {
+			// If the collection wasn't initialized, we cannot access entries/deletes
+			// The collection should still be marked dirty for queued operations
+			// We only need to notify the cache via the post-execution callback
+		}
+		else if ( !persister.isAffectedByEnabledFilters( session ) && collection.empty() ) {
+			if ( !action.isEmptySnapshot() ) {
+				final var removeOperation = buildRemoveOperation( persister.getCollectionTableDescriptor() );
+				if ( removeOperation != null ) {
+					operations.add( new FlushOperation(
+							persister.getCollectionTableDescriptor(),
+							MutationKind.UPDATE,
+							removeOperation,
+							new RemoveBindPlan( key, persister, mutationPlanContributor ),
+							calculateOrdinal( ordinalBase, Slot.DELETE ),
+							"RemoveAllRows(" + persister.getRolePath() + ")"
+					) );
+				}
+			}
+		}
+		else {
+			final var changeSet = collection.getChangeSet( persister );
+			if ( changeSet != null && !changeSet.isEmpty() && persister.hasIndex() && hasNumericChangeSetIndexes( changeSet ) ) {
+				applyIndexedChangeSet( changeSet, collection, key, ordinalBase, session, operations::add );
+			}
+			else {
+				applyFallbackUpdate( collection, key, ordinalBase, session, operations::add );
+			}
+		}
+
+		if ( !operations.isEmpty() ) {
+			contributeCollectionChange( collection, key, ordinalBase, session, operations::add );
+			DecompositionSupport.attachExecutionMonitor(
+					operations,
+					CollectionExecutionMonitor.Kind.UPDATE,
+					key,
+					persister.getRole()
+			);
+			// Attach post-execution callback to the last operation
+			operations.get( operations.size() - 1 ).setPostExecutionCallback( postExecutionCallback );
+			operations.forEach( operationConsumer );
+		}
+		else {
+			// Operations empty (e.g., uninitialized dirty collection) - create no-op to defer POST callback
+			operationConsumer.accept( DecompositionSupport.createNoOpCallbackCarrier(
+					persister.getCollectionTableDescriptor(),
+					calculateOrdinal( ordinalBase, Slot.UPDATE ),
+					postExecutionCallback
+			) );
+		}
+	}
+
+	private void applyInterpretation(
+			CollectionMutationInterpretation interpretation,
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		final var physicalMutation = interpretation.physicalMutation();
+		if ( physicalMutation instanceof PhysicalCollectionMutation.NoWork ) {
+			return;
+		}
+		if ( physicalMutation instanceof PhysicalCollectionMutation.RemoveAll removeAll ) {
+			if ( removeAll.removalMode() == PhysicalCollectionMutation.RemovalMode.EXECUTE ) {
+				planRemoveAll( key, ordinalBase, operationConsumer );
+			}
+			return;
+		}
+		if ( physicalMutation instanceof PhysicalCollectionMutation.RowChanges rowChanges ) {
+			applyFrozenChangeSet(
+					rowChanges.changes(),
+					collection,
+					key,
+					ordinalBase,
+					session,
+					operationConsumer
+			);
+			return;
+		}
+		if ( physicalMutation instanceof PhysicalCollectionMutation.RemoveAllAndCreateAll replaceAll ) {
+			if ( replaceAll.removalMode() == PhysicalCollectionMutation.RemovalMode.EXECUTE ) {
+				planRemoveAll( key, ordinalBase, operationConsumer );
+			}
+			collection.preInsert( persister );
+			replaceAll.currentRows().forEach( (entry, position) -> planInsert(
+					entry,
+					position,
+					collection,
+					key,
+					ordinalBase,
+					session,
+					operationConsumer
+			) );
+			return;
+		}
+		throw new IllegalStateException(
+				"UPDATE interpretation selected " + physicalMutation.getClass().getSimpleName()
+		);
+	}
+
+	private void planRemoveAll(
+			Object key,
+			int ordinalBase,
+			Consumer<FlushOperation> operationConsumer) {
+		final var removeOperation = buildRemoveOperation( persister.getCollectionTableDescriptor() );
+		if ( removeOperation != null ) {
+			operationConsumer.accept( new FlushOperation(
+					persister.getCollectionTableDescriptor(),
+					MutationKind.UPDATE,
+					removeOperation,
+					new RemoveBindPlan( key, persister, mutationPlanContributor ),
+					calculateOrdinal( ordinalBase, Slot.DELETE ),
+					"RemoveAllRows(" + persister.getRolePath() + ")"
+			) );
+		}
+	}
+
+	private void applyFrozenChangeSet(
+			CollectionChangeSet changeSet,
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		if ( changeSet.isEmpty() ) {
+			return;
+		}
+		if ( persister.hasIndex() && hasNumericChangeSetIndexes( changeSet ) ) {
+			applyIndexedChangeSet( changeSet, collection, key, ordinalBase, session, operationConsumer );
+			return;
+		}
+
+		final int deleteOrdinal = calculateOrdinal( ordinalBase, Slot.DELETE );
+		for ( var removal : changeSet.removals() ) {
+			final var jdbcOperations = selectJdbcOperations( removal.element(), session );
+			final var deleteRowPlan = jdbcOperations.deleteRowPlan();
+			if ( deleteRowPlan != null ) {
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						MutationKind.UPDATE,
+						deleteRowPlan.jdbcOperation(),
+						new SingleRowDeleteBindPlan(
+								persister,
+								collection,
+								key,
+								removal.element(),
+								deleteRowPlan.restrictions()
+						),
+						deleteOrdinal,
+						"DeleteRow(" + persister.getRolePath() + ")"
+				) );
+			}
+		}
+		final boolean map = persister.getCollectionSemantics().getCollectionClassification().isMap();
+		for ( var addition : changeSet.additions() ) {
+			final Object rowValue = map
+					? new SimpleImmutableEntry<>( addition.index(), addition.element() )
+					: addition.element();
+			final int rowPosition = addition.index() instanceof Number number ? number.intValue() : -1;
+			planInsert(
+					rowValue,
+					rowPosition,
+					collection,
+					key,
+					ordinalBase,
+					session,
+					operationConsumer
+			);
+			if ( map ) {
+				final var jdbcOperations = selectJdbcOperations( rowValue, session );
+				if ( jdbcOperations.insertRowPlan() == null && jdbcOperations.updateIndexPlan() != null ) {
+					planWriteIndex(
+							collection,
+							key,
+							rowValue,
+							rowPosition,
+							jdbcOperations.tableDescriptor(),
+							jdbcOperations.updateIndexPlan(),
+							calculateOrdinal( ordinalBase, Slot.WRITEINDEX ),
+							"WriteIndex[" + addition.index() + "](" + persister.getRolePath() + ")",
+							operationConsumer
+					);
+				}
+			}
+		}
+	}
+
+	private void planInsert(
+			Object entry,
+			int position,
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		final var jdbcOperations = selectJdbcOperations( entry, session );
+		final var insertRowPlan = jdbcOperations.insertRowPlan();
+		if ( insertRowPlan == null ) {
+			return;
+		}
+		operationConsumer.accept( new FlushOperation(
+				jdbcOperations.tableDescriptor(),
+				MutationKind.UPDATE,
+				insertRowPlan.jdbcOperation(),
+				new SingleRowInsertBindPlan(
+						persister,
+						insertRowPlan.values(),
+						collection,
+						key,
+						entry,
+						position
+				),
+				calculateOrdinal( ordinalBase, Slot.INSERT ),
+				"InsertRow[" + position + "](" + persister.getRolePath() + ")"
+		) );
+		contributeAdditionalInsert(
+				jdbcOperations,
+				collection,
+				key,
+				entry,
+				position,
+				ordinalBase,
+				session,
+				operationConsumer
+		);
+	}
+
+	private static CollectionMutationInterpretation validInterpretation(
+			PreparedCollectionMutation action,
+			PersistentCollection<?> collection) {
+		final var interpretation = action.getCollectionMutationInterpretation();
+		if ( interpretation != null && !interpretation.isValid( collection ) ) {
+			throw new IllegalStateException( "Collection changed after its mutation interpretation was frozen" );
+		}
+		return interpretation;
+	}
+
+
+	void applyFallbackUpdate(
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		applyUpdateRemovals( collection, key, ordinalBase, session, operationConsumer );
+		applyUpdateChanges( collection, key, ordinalBase, session, operationConsumer );
+		applyUpdateAdditions( collection, key, ordinalBase, session, operationConsumer );
+	}
+
+	private boolean hasNumericChangeSetIndexes(CollectionChangeSet changeSet) {
+		for ( var removal : changeSet.removals() ) {
+			if ( !( removal.snapshotIndex() instanceof Number ) ) {
+				return false;
+			}
+		}
+		for ( var addition : changeSet.additions() ) {
+			if ( !( addition.index() instanceof Number ) ) {
+				return false;
+			}
+		}
+		for ( var shift : changeSet.shifts() ) {
+			if ( !( shift.snapshotIndex() instanceof Number ) || !( shift.currentIndex() instanceof Number ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private void contributeCollectionChange(
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		mutationPlanContributor.contributeCollectionChange(
+				new CollectionMutationPlanContributor.CollectionChangeContext(
+						persister,
+						persister.getCollectionTableDescriptor(),
+						session.getFactory(),
+						null,
+						collection,
+						key,
+						ordinalBase
+				),
+				operationConsumer
+		);
+	}
+
+	private void contributeAdditionalInsert(
+			CollectionJdbcOperations jdbcOperations,
+			PersistentCollection<?> collection,
+			Object key,
+			Object rowValue,
+			int rowPosition,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		mutationPlanContributor.contributeAdditionalInsert(
+				new CollectionMutationPlanContributor.RowInsertContext(
+						persister,
+						jdbcOperations.tableDescriptor(),
+						session.getFactory(),
+						jdbcOperations,
+						collection,
+						key,
+						rowValue,
+						rowPosition,
+						ordinalBase
+				),
+				operationConsumer
+		);
+	}
+
+	private void applyIndexedChangeSet(
+			CollectionChangeSet changeSet,
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		final int deleteOrdinal = calculateOrdinal( ordinalBase, Slot.DELETE );
+		for ( var removal : changeSet.removals() ) {
+			final var jdbcOperations = selectJdbcOperations( removal.element(), session );
+			assert jdbcOperations != null;
+			final var deleteRowPlan = jdbcOperations.deleteRowPlan();
+			if ( deleteRowPlan != null ) {
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						// technically an UPDATE
+						MutationKind.UPDATE,
+						deleteRowPlan.jdbcOperation(),
+						new SingleRowDeleteBindPlan(
+								persister,
+								collection,
+								key,
+								removal.element(),
+								deleteRowPlan.restrictions()
+						),
+						deleteOrdinal,
+						"DeleteRow[" + removal.snapshotIndex() + "](" + persister.getRolePath() + ")"
+				) );
+			}
+		}
+
+		applyShiftChanges( changeSet, collection, key, ordinalBase, session, operationConsumer );
+	}
+
+	private void applyShiftChanges(
+			CollectionChangeSet changeSet,
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		final int deleteOrdinal = calculateOrdinal( ordinalBase, Slot.DELETE );
+		final int tempOrderOrdinal = calculateOrdinal( ordinalBase, Slot.UPDATE );
+		final int writeIndexOrdinal = calculateOrdinal( ordinalBase, Slot.WRITEINDEX );
+		final int finalOrderOrdinal = writeIndexOrdinal + 1;
+		final int tempOffset = Integer.MAX_VALUE / 2;
+		final List<FlushOperation> finalOrderOperations = new ArrayList<>();
+
+		for ( var shift : changeSet.shifts() ) {
+			final var jdbcOperations = selectJdbcOperations( shift.element(), session );
+			assert jdbcOperations != null;
+			final var deleteRowPlan = jdbcOperations.deleteRowPlan();
+			if ( deleteRowPlan != null ) {
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						// technically an UPDATE
+						MutationKind.UPDATE,
+						wrapShiftOperation(
+								deleteRowPlan.jdbcOperation(),
+								true
+						),
+						new SingleRowDeleteBindPlan(
+								persister,
+								collection,
+								key,
+								shift.element(),
+								deleteRowPlan.restrictions()
+						),
+						deleteOrdinal,
+						"DeleteShift[" + shift.snapshotIndex() + "](" + persister.getRolePath() + ")"
+				) );
+			}
+			else if ( jdbcOperations.updateIndexPlan() != null ) {
+				final int tempPosition = tempOffset + ( (Number) shift.currentIndex() ).intValue();
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						MutationKind.UPDATE_ORDER,
+						jdbcOperations.updateIndexPlan().jdbcOperation(),
+						new OrderOnlyUpdateBindPlan(
+								persister,
+								collection,
+								key,
+								shift.element(),
+								( (Number) shift.snapshotIndex() ).intValue(),
+								tempPosition,
+								jdbcOperations.updateIndexPlan().values(),
+								jdbcOperations.updateIndexPlan().restrictions()
+						),
+						tempOrderOrdinal,
+						"UpdateShiftTemp[" + shift.snapshotIndex() + "->" + tempPosition + "](" + persister.getRolePath() + ")"
+				) );
+
+				finalOrderOperations.add( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						MutationKind.UPDATE_ORDER,
+						jdbcOperations.updateIndexPlan().jdbcOperation(),
+						new OrderOnlyUpdateBindPlan(
+								persister,
+								collection,
+								key,
+								shift.element(),
+								tempPosition,
+								( (Number) shift.currentIndex() ).intValue(),
+								jdbcOperations.updateIndexPlan().values(),
+								jdbcOperations.updateIndexPlan().restrictions()
+						),
+						finalOrderOrdinal,
+						"UpdateShiftFinal[" + tempPosition + "->" + shift.currentIndex() + "](" + persister.getRolePath() + ")"
+				) );
+			}
+		}
+
+		final int insertOrdinal = calculateOrdinal( ordinalBase, Slot.INSERT );
+		for ( var shift : changeSet.shifts() ) {
+			final var jdbcOperations = selectJdbcOperations( shift.element(), session );
+			assert jdbcOperations != null;
+			final var insertRowPlan = jdbcOperations.insertRowPlan();
+			if ( insertRowPlan != null ) {
+				final var insertOperation = wrapShiftOperation(
+						insertRowPlan.jdbcOperation(),
+						false
+				);
+				final var insertBindPlan = new SingleRowInsertBindPlan(
+						persister,
+						insertRowPlan.values(),
+						collection,
+						key,
+						shift.element(),
+						( (Number) shift.currentIndex() ).intValue()
+				);
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						// technically an UPDATE
+						MutationKind.UPDATE,
+						insertOperation,
+						insertBindPlan,
+						insertOrdinal,
+						"InsertShift[" + shift.currentIndex() + "](" + persister.getRolePath() + ")"
+				) );
+			}
+		}
+
+		for ( var addition : changeSet.additions() ) {
+			final var jdbcOperations = selectJdbcOperations( addition.element(), session );
+			assert jdbcOperations != null;
+			final var insertRowPlan = jdbcOperations.insertRowPlan();
+			if ( insertRowPlan != null ) {
+				operationConsumer.accept( new FlushOperation(
+						jdbcOperations.tableDescriptor(),
+						// technically an UPDATE
+						MutationKind.UPDATE,
+						insertRowPlan.jdbcOperation(),
+						new SingleRowInsertBindPlan(
+								persister,
+								insertRowPlan.values(),
+								collection,
+								key,
+								addition.element(),
+								( (Number) addition.index() ).intValue()
+						),
+						insertOrdinal,
+						"InsertRow[" + addition.index() + "](" + persister.getRolePath() + ")"
+				) );
+				contributeAdditionalInsert(
+						jdbcOperations,
+						collection,
+						key,
+						addition.element(),
+						( (Number) addition.index() ).intValue(),
+						ordinalBase,
+						session,
+						operationConsumer
+				);
+			}
+			else {
+				planWriteIndex(
+						collection,
+						key,
+						addition.element(),
+						( (Number) addition.index() ).intValue(),
+						jdbcOperations.tableDescriptor(),
+						jdbcOperations.updateIndexPlan(),
+						writeIndexOrdinal,
+						"WriteIndex[" + addition.index() + "](" + persister.getRolePath() + ")",
+						operationConsumer
+				);
+			}
+		}
+
+		finalOrderOperations.forEach( operationConsumer );
+	}
+
+	@Override
+	public void decomposeQueuedOperations(
+			PreparedCollectionMutation action,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		final var collection = action.getCollection();
+		final var key = action.getKey();
+		final List<FlushOperation> operations = new ArrayList<>();
+
+		final int writeIndexOrdinal = calculateOrdinal( ordinalBase, Slot.WRITEINDEX );
+		final List<QueuedIndexWrite> queuedIndexWrites = new ArrayList<>();
+		final var queuedAdditions = collection.queuedAdditionIterator();
+		int queuedPosition = 0;
+		while ( queuedAdditions.hasNext() ) {
+			final Object entry = queuedAdditions.next();
+			if ( entry != null ) {
+				final var jdbcOperations = selectJdbcOperations( entry, session );
+				assert jdbcOperations != null;
+				if ( jdbcOperations.updateIndexPlan() != null ) {
+					queuedIndexWrites.add( new QueuedIndexWrite(
+							entry,
+							queuedPosition,
+							jdbcOperations.tableDescriptor(),
+							jdbcOperations.updateIndexPlan()
+					) );
+				}
+			}
+			// a null element writes no index of its own, but still occupies its position
+			queuedPosition++;
+		}
+
+		if ( !queuedIndexWrites.isEmpty() ) {
+			final int firstPosition = persister.getSize( key, session );
+			for ( var queuedIndexWrite : queuedIndexWrites ) {
+				final int entryPosition = firstPosition + queuedIndexWrite.queuedPosition();
+				if ( collection.entryExists( queuedIndexWrite.entry(), entryPosition ) ) {
+					planWriteIndex(
+							collection,
+							key,
+							queuedIndexWrite.entry(),
+							entryPosition,
+							queuedIndexWrite.tableDescriptor(),
+							queuedIndexWrite.updateIndexPlan(),
+							writeIndexOrdinal,
+							"WriteQueuedIndex[" + entryPosition + "](" + persister.getRolePath() + ")",
+							operations::add
+					);
+				}
+			}
+		}
+
+		operations.forEach( operationConsumer );
+	}
+
+	private record QueuedIndexWrite(
+			Object entry,
+			int queuedPosition,
+			TableDescriptor tableDescriptor,
+			CollectionJdbcOperations.UpdateRowPlan updateIndexPlan) {
+	}
+
+	@SuppressWarnings("removal")
+	private MutationOperation wrapShiftOperation(MutationOperation operation, boolean ignoreRowCount) {
+		if ( operation instanceof JdbcMutationOperation jdbcOperation ) {
+			return new JdbcMutationOperation() {
+				@Override
+				public String getSqlString() {
+					return jdbcOperation.getSqlString();
+				}
+
+				@Override
+				public Set<String> getAffectedTableNames() {
+					return jdbcOperation.getAffectedTableNames();
+				}
+
+				@Override
+				public List<? extends JdbcParameterBinder> getParameterBinders() {
+					return jdbcOperation.getParameterBinders();
+				}
+
+				@Override
+				public boolean isCallable() {
+					return jdbcOperation.isCallable();
+				}
+
+				@Override
+				public Expectation getExpectation() {
+					return ignoreRowCount ? Expectation.None.INSTANCE : jdbcOperation.getExpectation();
+				}
+
+				@Override
+				public org.hibernate.sql.spi.mutation.MutationType getMutationType() {
+					return jdbcOperation.getMutationType();
+				}
+
+				@Override
+				public org.hibernate.sql.spi.mutation.MutationTarget getMutationTarget() {
+					return jdbcOperation.getMutationTarget();
+				}
+
+				@Override
+				public org.hibernate.sql.spi.mutation.TableMapping getTableDetails() {
+					return jdbcOperation.getTableDetails();
+				}
+
+				@Override
+				public JdbcValueDescriptor findValueDescriptor(String columnName, ParameterUsage usage) {
+					return jdbcOperation.findValueDescriptor( columnName, usage );
+				}
+
+				@Override
+				public JdbcValueDescriptor resolveValueDescriptor(String tableName, String columnName, ParameterUsage usage) {
+					return jdbcOperation.resolveValueDescriptor( tableName, columnName, usage );
+				}
+			};
+		}
+		else {
+			return operation;
+		}
+	}
+
+	protected void applyUpdateRemovals(
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		if ( persister.needsRemove() ) {
+			final var deletes = collection.getDeletes( persister, true );
+			if ( deletes.hasNext() ) {
+				final var deleteOrdinal = calculateOrdinal( ordinalBase, Slot.DELETE );
+				int deletionCount = 0;
+				while ( deletes.hasNext() ) {
+					final var removal = deletes.next();
+					final var jdbcOperations = selectJdbcOperations( removal, session );
+					assert jdbcOperations != null;
+					final var deleteRowPlan = jdbcOperations.deleteRowPlan();
+					final var plannedOp = new FlushOperation(
+							jdbcOperations.tableDescriptor(),
+							// technically an UPDATE
+							MutationKind.UPDATE,
+							deleteRowPlan.jdbcOperation(),
+							new SingleRowDeleteBindPlan(
+									persister,
+									collection,
+									key,
+									removal,
+									deleteRowPlan.restrictions()
+							),
+							deleteOrdinal,
+							"DeleteRow[" + deletionCount + "](" + persister.getRole() + ")"
+					);
+
+					operationConsumer.accept( plannedOp );
+					deletionCount++;
+				}
+			}
+			else {
+				MODEL_MUTATION_LOGGER.noRowsToDelete();
+			}
+		}
+	}
+
+	protected void applyUpdateChanges(
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		if ( persister.isDoWriteEvenWhenInverse() ) {
+			final var entries = collection.entries( persister );
+			final var updateOrdinal = calculateOrdinal( ordinalBase, Slot.UPDATE );
+			int entryCount = 0;
+			while ( entries.hasNext() ) {
+				final Object entry = entries.next();
+				final var jdbcOperations = selectJdbcOperations( entry, session );
+				assert jdbcOperations != null;
+				final var updateIndexPlan = jdbcOperations.updateIndexPlan();
+				if ( updateIndexPlan != null
+						&& ( persister.hasIndex() || collection.needsUpdating( entry, entryCount, persister.getAttributeMapping() ) ) ) {
+					final var plannedOp = new FlushOperation(
+							jdbcOperations.tableDescriptor(),
+							MutationKind.UPDATE_ORDER,
+							updateIndexPlan.jdbcOperation(),
+							new SingleRowUpdateBindPlan(
+									persister,
+									collection,
+									key,
+									entry,
+									entryCount,
+									updateIndexPlan.values(),
+									updateIndexPlan.restrictions()
+							),
+							updateOrdinal,
+							"UpdateRow[" + entryCount + "](" + persister.getRolePath() + ")"
+					);
+
+					operationConsumer.accept( plannedOp );
+				}
+				entryCount++;
+			}
+		}
+	}
+
+	protected void applyUpdateAdditions(
+			PersistentCollection<?> collection,
+			Object key,
+			int ordinalBase,
+			SharedSessionContractImplementor session,
+			Consumer<FlushOperation> operationConsumer) {
+		// todo (ActionQueue2) : where should this come from?
+		var allowInserts = true;
+		if ( allowInserts ) {
+			final var entries = collection.entries( persister );
+			if ( entries.hasNext() ) {
+				collection.preInsert( persister );
+
+				final var insertOrdinal = calculateOrdinal( ordinalBase, Slot.INSERT );
+				final var writeIndexOrdinal = calculateOrdinal( ordinalBase, Slot.WRITEINDEX );
+
+				int entryCount = 0;
+				while ( entries.hasNext() ) {
+					final Object entry = entries.next();
+					if ( collection.includeInInsert( entry, entryCount, collection,
+							persister.getAttributeMapping() ) ) {
+						final var jdbcOperations = selectJdbcOperations( entry, session );
+						assert jdbcOperations != null;
+						final var insertRowPlan = jdbcOperations.insertRowPlan();
+						// For inverse one-to-many collections, insertRowPlan will be null
+						// (inserts are managed by the owning side)
+						if ( insertRowPlan != null ) {
+							// For one-to-many collections, the "insert" is actually an UPDATE that sets the FK
+							// Use MutationKind.UPDATE so it's ordered AFTER entity INSERTs via FK edges
+							final var plannedOp = new FlushOperation(
+									jdbcOperations.tableDescriptor(),
+									// technically an UPDATE
+									MutationKind.UPDATE,
+									insertRowPlan.jdbcOperation(),
+									new SingleRowInsertBindPlan(
+											persister,
+											insertRowPlan.values(),
+											collection,
+											key,
+											entry,
+											entryCount
+									),
+									insertOrdinal,
+									"InsertRow[" + entryCount + "](" + persister.getRolePath() + ")"
+							);
+
+							operationConsumer.accept( plannedOp );
+							contributeAdditionalInsert(
+									jdbcOperations,
+									collection,
+									key,
+									entry,
+									entryCount,
+									ordinalBase,
+									session,
+									operationConsumer
+							);
+						}
+						else {
+							planWriteIndex(
+									collection,
+									key,
+									entry,
+									entryCount,
+									jdbcOperations.tableDescriptor(),
+									jdbcOperations.updateIndexPlan(),
+									writeIndexOrdinal,
+									"WriteIndex[" + entryCount + "](" + persister.getRolePath() + ")",
+									operationConsumer
+							);
+						}
+					}
+
+					entryCount++;
+				}
+				MODEL_MUTATION_LOGGER.doneInsertingCollectionRows( entryCount, persister.getRolePath() );
+			}
+			else {
+				MODEL_MUTATION_LOGGER.noCollectionRowsToInsert( persister.getRolePath(), key );
+			}
+		}
+	}
+
+	private void planWriteIndex(
+			PersistentCollection<?> collection,
+			Object key,
+			Object entry,
+			int entryPosition,
+			TableDescriptor tableDescriptor,
+			CollectionJdbcOperations.UpdateRowPlan updateIndexPlan,
+			int ordinal,
+			String description,
+			Consumer<FlushOperation> operationConsumer) {
+		if ( updateIndexPlan != null ) {
+			operationConsumer.accept( new FlushOperation(
+					tableDescriptor,
+					MutationKind.UPDATE_ORDER,
+					updateIndexPlan.jdbcOperation(),
+					new SingleRowUpdateBindPlan(
+							persister,
+							collection,
+							key,
+							entry,
+							entryPosition,
+							updateIndexPlan.values(),
+							updateIndexPlan.restrictions()
+					),
+					ordinal,
+					description
+			) );
+		}
+	}
+
+
+	protected static class RemoveBindPlan implements BindPlan {
+		private final Object key;
+		private final OneToManyPersister mutationTarget;
+		private final CollectionMutationPlanContributor mutationPlanContributor;
+
+		public RemoveBindPlan(
+				Object key,
+				OneToManyPersister mutationTarget,
+				CollectionMutationPlanContributor mutationPlanContributor) {
+			this.key = key;
+			this.mutationTarget = mutationTarget;
+			this.mutationPlanContributor = mutationPlanContributor;
+		}
+
+		@Override
+		public void bindValues(
+				JdbcValueBindings valueBindings,
+				FlushOperation flushOperation,
+				SharedSessionContractImplementor session) {
+			mutationPlanContributor.bindRemoveValues(
+					new CollectionMutationPlanContributor.RemoveBindContext(
+							mutationTarget,
+							key,
+							session
+					),
+					valueBindings
+			);
+		}
+	}
+
+
+	protected CollectionJdbcOperations buildJdbcOperations(TableDescriptor tableDescriptor) {
+		return new CollectionJdbcOperations(
+				persister,
+				tableDescriptor,
+				buildInsertRowPlan( tableDescriptor ),
+				null, // one-to-many doesn't update element values, only FK/ORDER
+				buildUpdateIndexPlan( tableDescriptor ),  // ORDER column updates for inverse @OrderColumn collections
+				buildDeleteRowPlan( tableDescriptor ),
+				buildRemoveOperation( tableDescriptor )
+		);
+	}
+
+	/// Generates operation to perform "insert" SQL in the form -
+	///
+	/// ```sql
+	/// update orders set customer_fk = ?, order_number = ? where id = ?
+	/// ```
+	///
+	/// Which, in the case of a unidirectional one-to-many, actually "adds the collection row"
+	private CollectionJdbcOperations.InsertRowPlan buildInsertRowPlan(TableDescriptor tableDescriptor) {
+		if ( persister.isInverse() || !persister.isRowInsertEnabled() ) {
+			return null;
+		}
+		else {
+			final var tableMapping = new TableDescriptorAsTableMapping(
+					tableDescriptor,
+					0, // relativePosition
+					false, // isIdentifierTable
+					false // isInverse
+			);
+			final var updateBuilder = new TableUpdateBuilderStandard<>(
+					persister,
+					new MutatingTableReference( tableMapping ),
+					factory,
+					persister.getSqlWhereString()
+			);
+
+			final var attributeMapping = persister.getAttributeMapping();
+			attributeMapping.getKeyDescriptor().getKeyPart().forEachUpdatable( (index, selectableMapping) -> {
+				updateBuilder.addColumnAssignment( selectableMapping );
+			} );
+
+			final var indexDescriptor = attributeMapping.getIndexDescriptor();
+			if ( indexDescriptor != null ) {
+				indexDescriptor.forEachUpdatable( (index, selectableMapping) -> {
+					updateBuilder.addColumnAssignment( selectableMapping );
+				} );
+			}
+
+			final var elementDescriptor = (EntityCollectionPart) attributeMapping.getElementDescriptor();
+			final var elementType = elementDescriptor.getAssociatedEntityMappingType();
+			elementType.getIdentifierMapping().forEachColumn( (index, selectableMapping) -> {
+				updateBuilder.addKeyRestriction( selectableMapping );
+			} );
+
+			return new CollectionJdbcOperations.InsertRowPlan(
+					updateBuilder.buildMutation().createMutationOperation( null, factory ),
+					this::applyInsertRowValues
+			);
+		}
+	}
+
+	private void applyInsertRowValues(
+			PersistentCollection<?> collection,
+			Object keyValue,
+			Object rowValue,
+			int rowPosition,
+			SharedSessionContractImplementor session,
+			JdbcValueBindings jdbcValueBindings) {
+		final var attributeMapping = persister.getAttributeMapping();
+		attributeMapping.getKeyDescriptor().getKeyPart().decompose(
+				keyValue,
+				jdbcValueBindings::bindAssignment,
+				session
+		);
+		final var indexDescriptor = attributeMapping.getIndexDescriptor();
+		if ( indexDescriptor != null ) {
+			indexDescriptor.decompose(
+					persister.incrementIndexByBase( collection.getIndex( rowValue, rowPosition, persister ) ),
+					(valueIndex, jdbcValue, jdbcValueMapping) -> {
+						if ( jdbcValueMapping.isUpdateable() ) {
+							jdbcValueBindings.bindAssignment( valueIndex, jdbcValue, jdbcValueMapping );
+						}
+					},
+					session
+			);
+		}
+
+		final Object elementValue = collection.getElement( rowValue );
+		final var elementDescriptor = (EntityCollectionPart) attributeMapping.getElementDescriptor();
+		final var identifierMapping = elementDescriptor.getAssociatedEntityMappingType().getIdentifierMapping();
+		identifierMapping.decompose(
+				identifierMapping.getIdentifier( elementValue ),
+				jdbcValueBindings::bindRestriction,
+				session
+		);
+	}
+
+	private CollectionJdbcOperations.UpdateRowPlan buildUpdateIndexPlan(TableDescriptor tableDescriptor) {
+		if ( !persister.isDoWriteEvenWhenInverse() ) {
+			return null;
+		}
+		else {
+			final var tableMapping = new TableDescriptorAsTableMapping(
+					tableDescriptor,
+					0, // relativePosition
+					false, // isIdentifierTable
+					false // isInverse
+			);
+			final var updateBuilder = new TableUpdateBuilderStandard<>(
+					persister,
+					new MutatingTableReference( tableMapping ),
+					factory,
+					persister.getSqlWhereString()
+			);
+
+			final var attributeMapping = persister.getAttributeMapping();
+
+			attributeMapping.getIndexDescriptor().forEachUpdatable( (index, selectableMapping) -> {
+				updateBuilder.addColumnAssignment( selectableMapping );
+			} );
+
+			// Add element identifier restrictions (WHERE clause for element's PK)
+			final var elementDescriptor = (EntityCollectionPart) attributeMapping.getElementDescriptor();
+			final var elementType = elementDescriptor.getAssociatedEntityMappingType();
+			elementType.getIdentifierMapping().forEachColumn( (index, selectableMapping) -> {
+				updateBuilder.addKeyRestriction( selectableMapping );
+			} );
+
+			return new CollectionJdbcOperations.UpdateRowPlan(
+					updateBuilder.buildMutation().createMutationOperation( null, factory ),
+					this::applyWriteIndexValues,
+					this::applyWriteIndexRestrictions
+			);
+		}
+	}
+
+	private void applyWriteIndexValues(
+			PersistentCollection<?> collection,
+			Object key,
+			Object entry,
+			int entryPosition,
+			SharedSessionContractImplementor session,
+			JdbcValueBindings jdbcValueBindings) {
+		persister.getAttributeMapping().getIndexDescriptor().decompose(
+				persister.incrementIndexByBase( collection.getIndex( entry, entryPosition, persister ) ),
+				(valueIndex, jdbcValue, jdbcValueMapping) -> {
+					if ( jdbcValueMapping.isUpdateable() ) {
+						jdbcValueBindings.bindValue(
+								jdbcValue,
+								jdbcValueMapping.getSelectionExpression(),
+								ParameterUsage.SET
+						);
+					}
+				},
+				session
+		);
+	}
+
+	private void applyWriteIndexRestrictions(
+			PersistentCollection<?> collection,
+			Object key,
+			Object entry,
+			int entryPosition,
+			SharedSessionContractImplementor session,
+			JdbcValueBindings jdbcValueBindings) {
+		final var attributeMapping = persister.getAttributeMapping();
+		final var elementDescriptor = (EntityCollectionPart) attributeMapping.getElementDescriptor();
+		final var associatedType = elementDescriptor.getAssociatedEntityMappingType();
+		final Object element = collection.getElement( entry );
+		final var identifierMapping = associatedType.getIdentifierMapping();
+		identifierMapping.decompose(
+				identifierMapping.getIdentifier( element ),
+				jdbcValueBindings::bindRestriction,
+				session
+		);
+	}
+
+	/// Generates operation to perform "delete" SQL in the form -
+	///
+	/// ```sql
+	/// update orders set customer_fk = null, order_number = null where id = ?
+	/// ```
+	///
+	/// Which, in the case of a unidirectional one-to-many, actually "removes the collection row"
+	private CollectionJdbcOperations.DeleteRowPlan buildDeleteRowPlan(TableDescriptor collectionTableDescriptor) {
+		if ( persister.needsRemove() ) {
+			return mutationPlanContributor.buildDeleteRowPlan(
+					new CollectionMutationPlanContributor.DeleteRowPlanContext(
+							persister,
+							collectionTableDescriptor,
+							persister.getSqlWhereString(),
+							factory
+					),
+					() -> buildStandardDeleteRowPlan( collectionTableDescriptor )
+			);
+		}
+		else {
+			return null;
+		}
+	}
+
+	private CollectionJdbcOperations.DeleteRowPlan buildStandardDeleteRowPlan(TableDescriptor collectionTableDescriptor) {
+		final var tableMapping = new CollectionTableMapping(
+				persister.getCollectionTableMapping(),
+				collectionTableDescriptor.name()
+		);
+		final var tableReference = new MutatingTableReference( tableMapping );
+		final var updateBuilder = new CollectionRowDeleteByUpdateSetNullBuilder<>(
+				persister,
+				tableReference,
+				factory,
+				persister.getSqlWhereString()
+		);
+
+		final var foreignKeyDescriptor = persister.getAttributeMapping().getKeyDescriptor();
+		foreignKeyDescriptor.getKeyPart().forEachUpdatable( (index, selectableMapping) -> {
+			// set null
+			updateBuilder.addColumnAssignment( selectableMapping, NULL );
+			updateBuilder.addKeyRestrictionLeniently( selectableMapping );
+		} );
+
+		// set the value for each index column to null
+		if ( persister.hasPhysicalIndexColumn() ) {
+			final var indexDescriptor = persister.getAttributeMapping().getIndexDescriptor();
+			assert indexDescriptor != null;
+			indexDescriptor.forEachUpdatable( (index, selectableMapping) -> {
+				updateBuilder.addColumnAssignment( selectableMapping, NULL );
+			} );
+		}
+
+		// for one-to-many, we know the element is an entity and need to restrict the update
+		// based on the element's id
+		final var entityPart = (EntityCollectionPart) persister.getAttributeMapping().getElementDescriptor();
+		entityPart.getAssociatedEntityMappingType().getIdentifierMapping().forEachColumn(  (index, selectableMapping) -> {
+			updateBuilder.addKeyRestriction( selectableMapping );
+		} );
+
+		return new CollectionJdbcOperations.DeleteRowPlan(
+				updateBuilder.buildMutation().createMutationOperation(null, factory),
+				this::applyDeleteRowRestrictions
+		);
+	}
+
+	private void applyDeleteRowRestrictions(
+			PersistentCollection<?> collection,
+			Object keyValue,
+			Object rowValue,
+			int rowPosition,
+			SharedSessionContractImplementor session,
+			JdbcValueBindings jdbcValueBindings) {
+		final var foreignKeyDescriptor = persister.getAttributeMapping().getKeyDescriptor();
+		foreignKeyDescriptor.getKeyPart().decompose(
+				keyValue,
+				(valueIndex, jdbcValue, jdbcValueMapping) -> {
+					if ( !jdbcValueMapping.isFormula() ) {
+						jdbcValueBindings.bindValue(
+								jdbcValue,
+								jdbcValueMapping.getSelectionExpression(),
+								ParameterUsage.RESTRICT
+						);
+					}
+				},
+				session
+		);
+
+		final var entityPart = (EntityCollectionPart) persister.getAttributeMapping().getElementDescriptor();
+		final var identifierMapping = entityPart.getAssociatedEntityMappingType().getIdentifierMapping();
+		// Extract the ID from the actual element entity (rowValue), not the owner's FK (keyValue)
+		final Object elementId = identifierMapping.getIdentifier( rowValue );
+		identifierMapping.decompose(
+				elementId,
+				(index, val, jdbcMapping) -> jdbcValueBindings.bindValue(
+						val,
+						( jdbcMapping.getSelectionExpression() ),
+						ParameterUsage.RESTRICT
+				),
+				session
+		);
+	}
+
+	private MutationOperation buildRemoveOperation(TableDescriptor tableDescriptor) {
+		if ( persister.needsRemove() ) {
+			return mutationPlanContributor.buildRemoveOperation(
+					new CollectionMutationPlanContributor.RemoveOperationContext(
+							persister,
+							tableDescriptor,
+							persister.getSqlWhereString(),
+							factory
+					),
+					() -> buildStandardRemoveOperation( tableDescriptor )
+			);
+		}
+		else {
+			return null;
+		}
+	}
+
+	private MutationOperation buildStandardRemoveOperation(TableDescriptor tableDescriptor) {
+		final var collectionTableMapping = persister.getCollectionTableMapping();
+		final var tableReference = new MutatingTableReference( collectionTableMapping );
+		if ( collectionTableMapping.getDeleteDetails().getCustomSql() != null ) {
+			return buildCustomDeleteAllOperation( tableReference, collectionTableMapping );
+		}
+
+		final var tableMapping = new TableDescriptorAsTableMapping(
+				tableDescriptor,
+				0, // relativePosition
+				false, // isIdentifierTable
+				false // isInverse
+		);
+		final var builder = new TableUpdateBuilderStandard<>(
+				persister,
+				new MutatingTableReference(tableMapping),
+				factory,
+				persister.getSqlWhereString()
+		);
+
+		final var attributeMapping = persister.getAttributeMapping();
+		assert attributeMapping != null;
+
+		final var foreignKeyDescriptor = attributeMapping.getKeyDescriptor();
+		assert foreignKeyDescriptor != null;
+
+		foreignKeyDescriptor.getKeyPart().forEachSelectable( (selectionIndex, selectableMapping) -> {
+			builder.addColumnAssignment( selectableMapping, NULL );
+			builder.addKeyRestrictionLeniently( selectableMapping );
+		} );
+
+		if ( persister.hasPhysicalIndexColumn() ) {
+			attributeMapping.getIndexDescriptor().forEachColumn( (selectionIndex, selectableMapping) -> {
+				if ( selectableMapping.isUpdateable() ) {
+					builder.addColumnAssignment( selectableMapping, NULL );
+				}
+			} );
+		}
+
+		return builder.buildMutation().createMutationOperation(null, factory);
+	}
+
+	private MutationOperation buildCustomDeleteAllOperation(
+			MutatingTableReference tableReference,
+			CollectionTableMapping collectionTableMapping) {
+		final var foreignKeyDescriptor = persister.getAttributeMapping().getKeyDescriptor();
+		final var parameterBinders = new ColumnValueParameterList(
+				tableReference,
+				ParameterUsage.RESTRICT,
+				foreignKeyDescriptor.getJdbcTypeCount()
+		);
+		final List<ColumnValueBinding> keyRestrictionBindings = new ArrayList<>( foreignKeyDescriptor.getJdbcTypeCount() );
+		foreignKeyDescriptor.getKeyPart().forEachSelectable( (selectionIndex, selectableMapping) -> {
+			if ( !selectableMapping.isFormula() ) {
+				final var parameter = parameterBinders.addColumValueParameter( selectableMapping );
+				keyRestrictionBindings.add(
+						new ColumnValueBinding(
+								parameter.getColumnReference(),
+								new ColumnWriteFragment( "?", parameter, selectableMapping )
+						)
+				);
+			}
+		} );
+
+		return wrapShiftOperation( new TableUpdateCustomSql(
+				tableReference,
+				persister,
+				collectionTableMapping.getDeleteDetails(),
+				"one-shot delete for " + persister.getRolePath(),
+				Collections.emptyList(),
+				keyRestrictionBindings,
+				null,
+				parameterBinders
+		).createMutationOperation( null, factory ), true );
+	}
+
+}

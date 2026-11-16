@@ -1,0 +1,88 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.query.criteria.JpaWindowFrame;
+import org.hibernate.query.common.FrameKind;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.tree.spi.AbstractSqmNode;
+import org.hibernate.query.sqm.tree.spi.SqmCacheable;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+
+import java.util.Objects;
+
+/**
+ * @author Marco Belladelli
+ */
+@Incubating(since = "6.2")
+public class SqmWindowFrame extends AbstractSqmNode implements JpaWindowFrame {
+	private final FrameKind kind;
+	private final @Nullable SqmExpression<?> expression;
+
+	public SqmWindowFrame(@Nonnull NodeBuilder nodeBuilder, @Nonnull FrameKind kind) {
+		this( nodeBuilder, kind, null );
+	}
+
+	public SqmWindowFrame(@Nonnull NodeBuilder nodeBuilder, @Nonnull FrameKind kind, @Nullable SqmExpression<?> expression) {
+		super( nodeBuilder );
+		this.kind = kind;
+		this.expression = expression;
+	}
+
+	@Nonnull
+	@Override
+	public FrameKind getKind() {
+		return kind;
+	}
+
+	@Override
+	public @Nullable SqmExpression<?> getExpression() {
+		return expression;
+	}
+
+	@Nonnull
+	@Override
+	public SqmWindowFrame copy(@Nonnull SqmCopyContext context) {
+		final SqmWindowFrame existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		return context.registerCopy(
+				this,
+				new SqmWindowFrame(
+						nodeBuilder(),
+						kind,
+						expression == null ? null : expression.copy( context )
+				)
+		);
+	}
+
+	@Override
+	public boolean equals(@Nullable Object object) {
+		return object instanceof SqmWindowFrame that
+			&& kind == that.kind
+			&& Objects.equals( expression, that.expression );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = kind.hashCode();
+		result = 31 * result + Objects.hashCode( expression );
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return object instanceof SqmWindowFrame that
+				&& kind == that.kind
+				&& SqmCacheable.areCompatible( expression, that.expression );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		int result = kind.hashCode();
+		result = 31 * result + SqmCacheable.cacheHashCode( expression );
+		return result;
+	}
+}

@@ -1,0 +1,12 @@
+/// Supported temporal-table capabilities, requests, and declarative DDL
+/// results supplied by a Dialect.
+///
+/// This extension family is incubating and may change as temporal-table
+/// support evolves.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "temporal-versioning")
+package org.hibernate.dialect.temporal.spi;
+
+import org.hibernate.Incubating;

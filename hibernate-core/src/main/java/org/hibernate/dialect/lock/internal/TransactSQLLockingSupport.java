@@ -1,0 +1,371 @@
+package org.hibernate.dialect.lock.internal;
+
+
+import org.hibernate.dialect.lock.spi.TransactionConcurrencyResolver;
+import org.hibernate.dialect.lock.spi.TransactionConcurrency;
+
+import jakarta.persistence.Timeout;
+import org.hibernate.HibernateException;
+import org.hibernate.Timeouts;
+import org.hibernate.dialect.DatabaseVersion;
+import org.hibernate.dialect.lock.spi.RowLockStrategy;
+import org.hibernate.dialect.lock.PessimisticLockStyle;
+import org.hibernate.dialect.lock.spi.ConnectionLockTimeoutStrategy;
+import org.hibernate.dialect.lock.spi.LockTimeoutType;
+import org.hibernate.dialect.lock.spi.LockingClauseRequest;
+import org.hibernate.dialect.lock.spi.LockingSqlRewriter;
+import org.hibernate.dialect.lock.spi.LockingSqlRewriteResult;
+import org.hibernate.dialect.lock.spi.LockingSupport;
+import org.hibernate.dialect.lock.spi.StandardLockingSqlRewriters;
+import org.hibernate.dialect.lock.spi.OuterJoinLockingType;
+import org.hibernate.dialect.lock.spi.PessimisticLockKind;
+import org.hibernate.dialect.lock.spi.TableLockHintRenderer;
+import org.hibernate.dialect.lock.spi.TableLockHintRequest;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+
+import java.sql.Connection;
+
+/**
+ * Locking support for TransactSQL based Dialects (SQL Server and Sybase).
+ *
+ * @author Steve Ebersole
+ */
+public class TransactSQLLockingSupport extends LockingSupportParameterized {
+	/**
+	 * Reads with locking, and so waits for the outcome of an uncommitted write,
+	 * regardless of the {@code READ_COMMITTED_SNAPSHOT} setting, releasing the
+	 * share lock at the end of the statement.
+	 */
+	public static final String SQL_SERVER_CURRENT_READ_HINT = " with (readcommittedlock,rowlock)";
+
+	public static final LockingSupport SQL_SERVER = new TransactSQLLockingSupport(
+			PessimisticLockStyle.TABLE_HINT,
+			LockTimeoutType.CONNECTION,
+			LockTimeoutType.QUERY,
+			LockTimeoutType.QUERY,
+			RowLockStrategy.TABLE,
+			OuterJoinLockingType.IDENTIFIED,
+			SQLServerImpl.IMPL,
+			TransactSQLLockingSupport::renderSqlServerTableLockHint,
+			// plain reads wait unless READ_COMMITTED_SNAPSHOT is enabled, which cannot be detected
+			false,
+			SQL_SERVER_CURRENT_READ_HINT
+	);
+
+	public static final LockingSupport SYBASE = new TransactSQLLockingSupport(
+			PessimisticLockStyle.TABLE_HINT,
+			LockTimeoutType.CONNECTION,
+			LockTimeoutType.QUERY,
+			LockTimeoutType.NONE,
+			RowLockStrategy.TABLE,
+			OuterJoinLockingType.IDENTIFIED,
+			SybaseImpl.IMPL,
+			TransactSQLLockingSupport::renderSybaseTableLockHint
+	);
+
+	public static final LockingSupport SYBASE_ASE = forSybaseASE( true );
+
+	public static LockingSupport forSybaseASE(boolean selectForUpdateEnabled) {
+		return new TransactSQLLockingSupport(
+				PessimisticLockStyle.TABLE_HINT,
+				LockTimeoutType.CONNECTION,
+				LockTimeoutType.CONNECTION,
+				LockTimeoutType.QUERY,
+				RowLockStrategy.TABLE,
+				OuterJoinLockingType.IDENTIFIED,
+				SybaseImpl.IMPL,
+				TransactSQLLockingSupport::renderSybaseAseTableLockHint ) {
+			@Override
+			public TransactionConcurrencyResolver getTransactionConcurrencyResolver() {
+				return SybaseASETransactionConcurrencyResolver.INSTANCE;
+			}
+
+			@Override
+			public String render(LockingClauseRequest request) {
+				if ( request.timeout().milliseconds() == Timeouts.SKIP_LOCKED_MILLI ) {
+					if ( request.lockKind() == PessimisticLockKind.UPDATE ) {
+						if ( !selectForUpdateEnabled ) {
+							throw new org.hibernate.query.IllegalQueryOperationException(
+									"Sybase ASE exclusive skip-locked locking requires the server option 'select for update'" );
+						}
+						return " for update";
+					}
+					// READPAST cannot be combined with HOLDLOCK. Retain shared locks
+					// without changing the connection's isolation level.
+					return " at isolation 2";
+				}
+				return super.render( request );
+			}
+		};
+	}
+
+	public static final LockingSupport SYBASE_LEGACY = new TransactSQLLockingSupport(
+			PessimisticLockStyle.TABLE_HINT,
+			LockTimeoutType.CONNECTION,
+			LockTimeoutType.NONE,
+			LockTimeoutType.NONE,
+			RowLockStrategy.TABLE,
+			OuterJoinLockingType.IDENTIFIED,
+			SybaseImpl.IMPL,
+			TransactSQLLockingSupport::renderSybaseTableLockHint
+	);
+
+	public static LockingSupport forSybaseAnywhere(DatabaseVersion version) {
+		return new TransactSQLLockingSupport(
+				version.isBefore( 10 )
+						? PessimisticLockStyle.TABLE_HINT
+						: PessimisticLockStyle.CLAUSE,
+				LockTimeoutType.CONNECTION,
+				LockTimeoutType.NONE,
+				LockTimeoutType.NONE,
+				version.isSameOrAfter( 10 )
+						? RowLockStrategy.COLUMN
+						: RowLockStrategy.TABLE,
+				OuterJoinLockingType.IDENTIFIED,
+				SybaseImpl.IMPL,
+				version.isBefore( 10 )
+						? TransactSQLLockingSupport::renderSybaseTableLockHint
+						: TableLockHintRenderer.NONE
+		);
+	}
+
+	private final ConnectionLockTimeoutStrategy connectionLockTimeoutStrategy;
+	private final TableLockHintRenderer tableLockHintRenderer;
+	private final String currentReadTableHint;
+
+	public TransactSQLLockingSupport(
+			PessimisticLockStyle pessimisticLockStyle,
+			LockTimeoutType wait,
+			LockTimeoutType noWait,
+			LockTimeoutType skipLocked,
+			RowLockStrategy rowLockStrategy,
+			OuterJoinLockingType outerJoinLockingType,
+			ConnectionLockTimeoutStrategy connectionLockTimeoutStrategy,
+			TableLockHintRenderer tableLockHintRenderer) {
+		this(
+				pessimisticLockStyle,
+				wait,
+				noWait,
+				skipLocked,
+				rowLockStrategy,
+				outerJoinLockingType,
+				connectionLockTimeoutStrategy,
+				tableLockHintRenderer,
+				true,
+				null
+		);
+	}
+
+	/**
+	 * @param readsWaitForUncommittedWrites See {@link Metadata#readsWaitForUncommittedWrites()}
+	 * @param currentReadTableHint The hint rendered for a {@linkplain #renderCurrentReadTableHint
+	 * current read}, or {@code null} to use the share-lock hint
+	 */
+	public TransactSQLLockingSupport(
+			PessimisticLockStyle pessimisticLockStyle,
+			LockTimeoutType wait,
+			LockTimeoutType noWait,
+			LockTimeoutType skipLocked,
+			RowLockStrategy rowLockStrategy,
+			OuterJoinLockingType outerJoinLockingType,
+			ConnectionLockTimeoutStrategy connectionLockTimeoutStrategy,
+			TableLockHintRenderer tableLockHintRenderer,
+			boolean readsWaitForUncommittedWrites,
+			String currentReadTableHint) {
+		super(
+				pessimisticLockStyle,
+				rowLockStrategy,
+				wait,
+				noWait,
+				skipLocked,
+				outerJoinLockingType,
+				readsWaitForUncommittedWrites
+		);
+		this.connectionLockTimeoutStrategy = connectionLockTimeoutStrategy;
+		this.tableLockHintRenderer = tableLockHintRenderer;
+		this.currentReadTableHint = currentReadTableHint;
+	}
+
+	@Override
+	public TransactionConcurrencyResolver getTransactionConcurrencyResolver() {
+		if ( this == SYBASE || this == SYBASE_ASE || this == SYBASE_LEGACY ) {
+			return SybaseASETransactionConcurrencyResolver.INSTANCE;
+		}
+		return SQL_SERVER_CURRENT_READ_HINT.equals( currentReadTableHint )
+				? SQLServerTransactionConcurrencyResolver.INSTANCE : StandardTransactionConcurrencyResolver.INSTANCE;
+	}
+
+	@Override
+	public String renderCurrentReadTableHint(String tableExpression, TransactionConcurrency concurrency) {
+		return currentReadTableHint != null ? currentReadTableHint : super.renderCurrentReadTableHint( tableExpression, concurrency );
+	}
+
+	@Override
+	public TableLockHintRenderer getTableLockHintRenderer() {
+		return tableLockHintRenderer;
+	}
+
+	@Override
+	public LockingSqlRewriter getLockingSqlRewriter() {
+		final var rewriter = StandardLockingSqlRewriters.forSupport( this );
+		if ( getPessimisticLockStyle() != PessimisticLockStyle.TABLE_HINT ) {
+			return rewriter;
+		}
+		return request -> {
+			final var result = rewriter.rewrite( request );
+			return result.outcome() == LockingSqlRewriteResult.Outcome.APPLIED
+					? LockingSqlRewriteResult.applied( result.sql() + render( new LockingClauseRequest(
+							request.lockKind(), request.timeout(), request.targets() ) ) )
+					: result;
+		};
+	}
+
+	@Override
+	public ConnectionLockTimeoutStrategy getConnectionLockTimeoutStrategy() {
+		return connectionLockTimeoutStrategy;
+	}
+
+	public static TableLockHintRenderer sqlServerTableLockHintRenderer(DatabaseVersion version) {
+		return version.isSameOrAfter( 9 )
+				? TransactSQLLockingSupport::renderSqlServerTableLockHint
+				: TransactSQLLockingSupport::renderLegacySqlServerTableLockHint;
+	}
+
+	private static String renderSqlServerTableLockHint(TableLockHintRequest request) {
+		final int timeout = request.timeout().milliseconds();
+		return switch ( request.lockKind() ) {
+			case UPDATE -> switch ( timeout ) {
+				case Timeouts.SKIP_LOCKED_MILLI -> " with (updlock,rowlock,readpast)";
+				case Timeouts.NO_WAIT_MILLI -> " with (updlock,holdlock,rowlock,nowait)";
+				default -> " with (updlock,holdlock,rowlock)";
+			};
+			case SHARE -> switch ( timeout ) {
+				case Timeouts.SKIP_LOCKED_MILLI -> " with (updlock,rowlock,readpast)";
+				case Timeouts.NO_WAIT_MILLI -> " with (holdlock,rowlock,nowait)";
+				default -> " with (holdlock,rowlock)";
+			};
+			case NONE -> "";
+		};
+	}
+
+	private static String renderLegacySqlServerTableLockHint(TableLockHintRequest request) {
+		return switch ( request.lockKind() ) {
+			case UPDATE -> request.timeout().milliseconds() == Timeouts.SKIP_LOCKED_MILLI
+					? " with (updlock,rowlock,readpast)"
+					: " with (updlock,rowlock)";
+			case SHARE -> " with (holdlock,rowlock)";
+			case NONE -> "";
+		};
+	}
+
+	private static String renderSybaseAseTableLockHint(TableLockHintRequest request) {
+		if ( request.lockKind() == PessimisticLockKind.NONE ) {
+			return "";
+		}
+		return request.timeout().milliseconds() == Timeouts.SKIP_LOCKED_MILLI
+				? " readpast"
+				: " holdlock";
+	}
+
+	private static String renderSybaseTableLockHint(TableLockHintRequest request) {
+		return request.lockKind() == PessimisticLockKind.NONE ? "" : " holdlock";
+	}
+
+	public static class SQLServerImpl implements ConnectionLockTimeoutStrategy {
+		public static final SQLServerImpl IMPL = new SQLServerImpl();
+
+		@Override
+		public Level getSupportedLevel() {
+			return Level.EXTENDED;
+		}
+
+		@Override
+		public Timeout getLockTimeout(Connection connection, SessionFactoryImplementor factory) {
+			return Helper.getLockTimeout(
+					"select @@lock_timeout",
+					(resultSet) -> {
+						final int timeoutInMilliseconds = resultSet.getInt( 1 );
+						return switch ( timeoutInMilliseconds ) {
+							case -1 -> Timeouts.WAIT_FOREVER;
+							case 0 -> Timeouts.NO_WAIT;
+							default -> Timeout.milliseconds( timeoutInMilliseconds );
+						};
+					},
+					connection,
+					factory
+			);
+		}
+
+		@Override
+		public void setLockTimeout(Timeout timeout, Connection connection, SessionFactoryImplementor factory) {
+			Helper.setLockTimeout(
+					timeout,
+					(t) -> {
+						final int milliseconds = timeout.milliseconds();
+						if ( milliseconds == Timeouts.SKIP_LOCKED_MILLI ) {
+							throw new HibernateException( "Connection lock-timeout does not accept skip-locked" );
+						}
+						return milliseconds;
+					},
+					"set lock_timeout %s",
+					connection,
+					factory
+			);
+		}
+	}
+
+	public static class SybaseImpl implements ConnectionLockTimeoutStrategy {
+		public static final SybaseImpl IMPL = new SybaseImpl();
+
+		@Override
+		public Level getSupportedLevel() {
+			return Level.EXTENDED;
+		}
+
+		@Override
+		public Timeout getLockTimeout(Connection connection, SessionFactoryImplementor factory) {
+			return Helper.getLockTimeout(
+					"select @@lock_timeout",
+					(resultSet) -> {
+						final int timeoutInSeconds = resultSet.getInt( 1 );
+						return switch ( timeoutInSeconds ) {
+							case -1 -> Timeouts.WAIT_FOREVER;
+							case 0 -> Timeouts.NO_WAIT;
+							default -> Timeout.seconds( timeoutInSeconds );
+						};
+					},
+					connection,
+					factory
+			);
+		}
+
+		@Override
+		public void setLockTimeout(Timeout timeout, Connection connection, SessionFactoryImplementor factory) {
+			// see https://infocenter.sybase.com/help/index.jsp?topic=/com.sybase.infocenter.dc31654.1600/doc/html/san1360629104549.html
+			// SAP Adaptive Server Enterprise 16.0
+			// > System Administration Guide 16.0: Volume 1
+			//   > Setting Configuration Parameters
+			//     > Configuration Parameters
+			//       > Alphabetical Listing of Configuration Parameters
+			//         > lock wait period
+			//
+			// range:   0 – 2147483647
+			// default: 2147483647
+			// unit:    seconds
+			final int milliseconds = timeout.milliseconds();
+
+			if ( milliseconds == Timeouts.SKIP_LOCKED_MILLI ) {
+				throw new HibernateException( "Sybase does not accept skip-locked for lock-timeout" );
+			}
+
+			if ( milliseconds == Timeouts.WAIT_FOREVER_MILLI ) {
+				// Even though Sybase's wait-forever (and default) value is -1, it won't accept
+				// -1 as a value because, well, of course it won't.  Need to omit the argument to reset it
+				Helper.setLockTimeout( "set lock wait", connection, factory );
+			}
+			else {
+				Helper.setLockTimeout( (int) Math.ceil( (double) milliseconds / 1000), "set lock wait %s", connection, factory );
+			}
+		}
+	}
+}

@@ -1,0 +1,223 @@
+[[batch]]
+== Batching
+:example-dir-doc-batch: {core-project-dir}/src/test/java/org/hibernate/orm/test/batch
+:example-dir-bulkid: {core-project-dir}/src/test/java/org/hibernate/orm/test/bulkid
+:batch-extras-dir: extras
+
+Processing many rows involves separate choices about persistence semantics, JDBC execution,
+persistence-context memory, and transaction boundaries. Choose a processing model first,
+then measure the batching and resource-management controls appropriate to it.
+
+[[batch-processing-models]]
+=== Choosing a processing model
+
+[cols="1,3,2",options="header"]
+|===
+|Model |Behavior |Typical use
+|Stateful entity operations |Managed identity, dirty checking, cascades, and lifecycle callbacks
+  |Work requiring ordinary entity lifecycle semantics
+|Stateless commands |Explicit operations on detached objects without a persistent first-level cache
+  |Processing bounded groups with explicit inserts, updates, or deletes
+|Bulk mutations |Set-based changes without loading each matching entity into the application
+  |Applying a common change or predicate-based deletion to many entities
+|===
+
+_JDBC batching_ groups compatible SQL statement executions. It is an optimization of entity operations,
+not the same operation as an HQL bulk update or delete.
+It is also distinct from <<fetching-batch,association batch fetching>>, multiple-id loading,
+and JDBC _fetch size_, which concerns retrieving result rows.
+
+Three independent controls matter for a stateful workload:
+
+* JDBC batch size: how many compatible parameter sets are accumulated before executing a batch.
+* Flush/clear interval: how much managed state is retained before writing pending changes and detaching objects.
+* Transaction chunk size: how much work shares a commit or rollback boundary.
+
+These values need not be equal. A large JDBC batch does not limit persistence-context memory,
+and clearing the context does not commit a transaction.
+
+[[batch-jdbcbatch]]
+=== JDBC batching configuration and eligibility
+
+A JDBC batch applies several sets of bound values to a compatible `PreparedStatement`.
+It can reduce driver and network overhead, but the number of network round trips depends on the driver
+and database. A batch does not guarantee one server call.
+
+// suppress inspection "AsciiDocLinkResolve"
+The setting <<settings-hibernate.jdbc.batch_size,`hibernate.jdbc.batch_size`>> supplies the stateful-session default.
+Its default is zero; zero or a negative value disables batching. A size greater than one permits grouping
+multiple executions. The configured size is an upper bound, not a promise that every batch is full.
+Choose a starting size and measure representative workloads rather than assuming a universally optimal value.
+
+The examples below use a small factory batch size of two to make full and partial groups easy to verify:
+
+[source,xml]
+----
+<property name="hibernate.jdbc.batch_size" value="2"/>
+----
+
+A `Session` can override this default. `setJdbcBatchSize(null)` removes its override.
+When changing the size temporarily, flush the intended work while the override still applies,
+then restore the previous override:
+
+[[batch-session-jdbc-batch-size-example]]
+.Temporarily overriding the JDBC batch size
+====
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-override]
+----
+====
+
+
+[[batch-session-batch]]
+=== Stateful inserts and updates
+
+The following examples use a small model with assigned identifiers and an ordinary version attribute:
+
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-model]
+----
+
+[[batch-session-batch-example]]
+Persisting a very large number of entities in one context without clearing retains managed objects and
+persistence-context bookkeeping until they are detached or the context closes.
+This increases memory use and dirty-checking work and can eventually cause an `OutOfMemoryError`.
+The memory required depends on entity state, associations, and bookkeeping; an object count alone
+cannot establish a safe heap size.
+
+[[batch-session-batch-insert]]
+==== Inserting with regular flush and clear
+
+Use `flush()` to write pending changes and `clear()` to detach all managed entities.
+Flush before clearing when those changes must be preserved: clearing does not write pending changes.
+The flush interval below bounds context state independently of the JDBC batch size:
+
+[[batch-session-batch-insert-example]]
+.Inserting with regular flush and clear
+====
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-inserts]
+----
+====
+
+The final flush handles the incomplete group. Transaction commit also flushes pending state under the
+applicable flush mode. See <<flushing>> for flush behavior and <<pc>> for managed state and detachment.
+
+==== Transaction chunks
+
+Flushing does not commit. Clearing does not release transaction locks, return the transaction's connection,
+or reduce its rollback scope. Long transactions can hold locks and occupy connections for substantial periods.
+
+If the application permits partial completion, process bounded groups in separate transactions.
+This changes atomicity: a later failure does not undo earlier committed groups.
+Define how the application records progress and resumes or handles failed groups before choosing this approach.
+Do not confuse a flush/clear interval with a commit interval.
+
+[[batch-session-scroll]]
+==== Scrolling and updating
+
+A stateful update loop must actually change managed state, and periodically flush and clear it.
+The following Hibernate example uses a forward-only, typed result and closes it with try-with-resources:
+
+[[batch-session-scroll-example]]
+.Scrolling and updating with bounded context state
+====
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-scroll]
+----
+====
+
+Here the context is cleared after every two processed entities, and commit retains all five updates.
+The query's fetch size is a JDBC hint, not the JDBC write batch size or the flush interval.
+Forward-only scrolling does not by itself guarantee a server-side cursor or bounded driver buffering;
+those depend on the driver, database, connection settings, and transaction.
+See <<hql-api-incremental>> for scrolling and streaming resources.
+A result stream also requires context memory management when its results are managed entities.
+
+[[batch-stateless]]
+=== Stateless processing and explicit groups
+
+Jakarta Persistence 4 defines `EntityAgent` for explicit commands on detached entities.
+Hibernate implements it through `StatelessSession`.
+There is no persistent first-level cache, automatic dirty checking, or stateful transactional write-behind.
+Repeated loads of the same identifier need not return the same object, so account for data aliasing.
+
+Operations do not cascade to associated entities. Load required associations using a fetching plan
+or an explicit `fetch()` operation; see <<fetching>>.
+Current stateless operations invoke applicable lifecycle callbacks and Hibernate event listeners.
+They do not use the stateful action queue, and are not identical to stateful entity operations.
+See link:{doc-javadoc-url}org/hibernate/StatelessSession.html[`StatelessSession`] for operation-specific contracts.
+
+Explicit optimistic locking also has a different lifecycle: stateless requests obtain immediate database protection instead of scheduling stateful completion-time validation.
+Force-increment requests increment immediately.
+The protection required for stateless `OPTIMISTIC` must survive until transaction completion; a fresh version read or stable snapshot alone is insufficient.
+See <<locking-session-lifecycle,stateful and stateless locking timing>> and <<locking-concurrency-baseline,concurrency configuration>>.
+Stateless exceptions do not automatically mark the transaction rollback-only, but the database may still abort it and rollback does not restore detached object values.
+See <<locking-failures,locking failures>> before deciding whether a failed transaction can be reused.
+
+The standard multiple-operation methods submit a bounded group through one invocation:
+
+[[batch-stateless-session-example]]
+.Explicit groups using EntityAgent
+====
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-stateless]
+----
+====
+
+The two objects remain detached after the calls. Updates are explicit; merely changing their fields
+would not persist those changes. The same detached objects can be deleted using `deleteMultiple()`
+through another `EntityAgent` in a separate transaction:
+
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-stateless-delete]
+----
+
+`upsertMultiple()` is available for upsert workloads; its SQL and identifier requirements depend on the
+mapping and dialect. See link:{jpaJavadocUrlPrefix}EntityAgent.html[the standard EntityAgent API].
+Multiple-operation methods do not promise a single SQL statement or one network round trip.
+Hibernate's stateless session uses the second-level cache by default; see <<caching>> for cache modes and invalidation.
+
+[[batch-stateless-jdbc]]
+==== Explicit stateless JDBC batching
+
+`hibernate.jdbc.batch_size` has no effect on stateless sessions.
+Ordinary commands normally execute synchronously. Explicitly setting a stateless session's JDBC batch size
+can instead accumulate commands, delaying SQL execution until a batch fills or the transaction completes.
+This is distinct from submitting an explicit group with `insertMultiple()`, `updateMultiple()`, or `deleteMultiple()`.
+
+[source,java,indent=0]
+----
+include::{example-dir-doc-batch}/BatchingGuideTests.java[tags=batch-guide-stateless-jdbc]
+----
+
+The example runs in a transaction. An active transaction is required for this automatic batching path;
+do not assume the same buffering occurs outside it.
+Use explicit groups when their execution boundary better matches the application's processing model.
+
+[[batch-bulk-hql]]
+=== Bulk query execution
+
+Bulk mutation execution is distinct from JDBC batching of entity operations.
+See <<query-mutations>> for affected counts, persistence-context synchronization, and multi-table mutation strategies.
+
+[[batch-verification]]
+=== Measuring and verifying batching
+
+SQL logging and affected-row counts alone do not prove JDBC batch execution.
+Several statements may be added to one batch while still producing a log entry for each set of parameters.
+Inspect batch additions, executions, and how fully batches are populated using suitable JDBC instrumentation.
+Actual network behavior still depends on the driver.
+
+Use <<statistics>> and SQL inspection as complementary evidence, and verify the final persisted values and versions.
+Keep setup and cleanup outside the measured interval. Use known initial cache and context state so that reads
+or cached data do not obscure the operations being measured.
+For this chapter's controlled five-row insert/update examples, batch size two and flush interval two produce
+five JDBC batch additions and three batch executions, including the final one-row group.
+Those counts describe the fixture, not every entity mapping, driver, or workload.

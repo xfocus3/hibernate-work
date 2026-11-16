@@ -1,0 +1,294 @@
+package org.hibernate.type.descriptor.java;
+
+import java.sql.Types;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.TemporalAccessor;
+import java.util.Calendar;
+import java.sql.Date;
+import java.util.GregorianCalendar;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.HibernateException;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.descriptor.jdbc.JdbcTypeIndicators;
+import org.hibernate.type.spi.TypeConfiguration;
+
+import jakarta.persistence.TemporalType;
+
+import static org.hibernate.internal.util.CharSequenceHelper.subSequence;
+
+/**
+ * Descriptor for {@link java.sql.Date} handling.
+ *
+ * @implSpec Unlike most {@link JavaType} implementations, can handle 2 different "domain
+ * representations" (most map just a single type): general {@link Date} values in addition
+ * to {@link java.sql.Date} values.  This capability is shared with
+ * {@link JdbcTimeJavaType} and {@link JdbcTimestampJavaType}.
+ */
+public class JdbcDateJavaType extends AbstractTemporalJavaType<Date> {
+	public static final JdbcDateJavaType INSTANCE = new JdbcDateJavaType();
+
+	/**
+	 * Intended for use in reading HQL literals and writing SQL literals
+	 *
+	 * @see DateTimeFormatter#ISO_LOCAL_DATE
+	 */
+	public static final DateTimeFormatter LITERAL_FORMATTER = DateTimeFormatter.ISO_LOCAL_DATE;
+
+	private static final DateTimeFormatter ENCODED_FORMATTER = new DateTimeFormatterBuilder()
+			.append( DateTimeFormatter.ISO_DATE )
+			.optionalStart()
+			.appendLiteral( 'T' )
+			.append( DateTimeFormatter.ISO_LOCAL_TIME )
+			.toFormatter();
+
+	public JdbcDateJavaType() {
+		super( Date.class, DateMutabilityPlan.INSTANCE );
+	}
+
+	@Override @SuppressWarnings("deprecation")
+	public TemporalType getPrecision() {
+		return TemporalType.DATE;
+	}
+
+	@Override
+	public Class<Date> getJavaType() {
+		return java.sql.Date.class;
+	}
+
+	@Override
+	public boolean isInstance(Object value) {
+		// this check holds true for java.sql.Date as well
+		return value instanceof java.util.Date
+			&& !( value instanceof java.sql.Time );
+	}
+
+	@Override
+	public Date cast(Object value) {
+		return (Date) value;
+	}
+
+	@Override
+	public boolean areEqual(Date one, Date another) {
+		if ( one == another ) {
+			return true;
+		}
+
+		if ( one == null || another == null ) {
+			return false;
+		}
+
+		if ( one.getTime() == another.getTime() ) {
+			return true;
+		}
+
+		final var calendar1 = Calendar.getInstance();
+		final var calendar2 = Calendar.getInstance();
+		calendar1.setTime( one );
+		calendar2.setTime( another );
+
+		return calendar1.get( Calendar.MONTH ) == calendar2.get( Calendar.MONTH )
+			&& calendar1.get( Calendar.DAY_OF_MONTH ) == calendar2.get( Calendar.DAY_OF_MONTH )
+			&& calendar1.get( Calendar.YEAR ) == calendar2.get( Calendar.YEAR );
+	}
+
+	@Override
+	public int extractHashCode(Date value) {
+		final var calendar = Calendar.getInstance();
+		calendar.setTime( value );
+		int hashCode = 1;
+		hashCode = 31 * hashCode + calendar.get( Calendar.MONTH );
+		hashCode = 31 * hashCode + calendar.get( Calendar.DAY_OF_MONTH );
+		hashCode = 31 * hashCode + calendar.get( Calendar.YEAR );
+		return hashCode;
+	}
+
+	@Override
+	public Date coerce(Object value) {
+		try {
+			return wrap( value, null );
+		}
+		catch (Exception e) {
+			throw CoercionHelper.coercionException( e );
+		}
+	}
+
+	@Override
+	public @Nullable Object coerceOrNull(@Nonnull Object value) {
+		return wrapOrNull( value );
+	}
+
+	@Override
+	public <X> X unwrap(Date value, Class<X> type, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+
+		if ( LocalDate.class.isAssignableFrom( type ) ) {
+			return type.cast( unwrapLocalDate( value ) );
+		}
+
+		if ( java.sql.Date.class.isAssignableFrom( type ) ) {
+			return type.cast( value );
+		}
+
+		if ( java.sql.Timestamp.class.isAssignableFrom( type ) ) {
+			return type.cast( new java.sql.Timestamp( toDateEpoch( value ) ) );
+		}
+
+		if ( java.sql.Time.class.isAssignableFrom( type ) ) {
+			throw new IllegalArgumentException( "Illegal attempt to treat 'java.sql.Date' as 'java.sql.Time'" );
+		}
+
+		if ( java.util.Date.class.isAssignableFrom( type ) ) {
+			return type.cast( value );
+		}
+
+		if ( Long.class.isAssignableFrom( type ) ) {
+			return type.cast( toDateEpoch( value ) );
+		}
+
+		if ( String.class.isAssignableFrom( type ) ) {
+			return type.cast( toString( value ) );
+		}
+
+		if ( Calendar.class.isAssignableFrom( type ) ) {
+			final var gregorianCalendar = new GregorianCalendar();
+			gregorianCalendar.setTimeInMillis( toDateEpoch( value ) );
+			return type.cast( gregorianCalendar );
+		}
+
+		throw unknownUnwrap( type );
+	}
+
+	private LocalDate unwrapLocalDate(java.util.Date value) {
+		return value instanceof java.sql.Date date
+				? date.toLocalDate()
+				: new java.sql.Date( toDateEpoch( value ) ).toLocalDate();
+	}
+
+	@Override
+	public @Nullable Date wrap(@Nullable Object value, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+		final var wrapped = wrapOrNull( value );
+		if ( wrapped == null ) {
+			throw unknownWrap( value.getClass() );
+		}
+		return wrapped;
+	}
+
+	public @Nullable Date wrapOrNull(@Nonnull Object value) {
+		if ( value instanceof java.sql.Date date ) {
+			return date;
+		}
+
+		if ( value instanceof Long longValue ) {
+			return new java.sql.Date( toDateEpoch( longValue ) );
+		}
+
+		if ( value instanceof Calendar calendar ) {
+			return new java.sql.Date( toDateEpoch( calendar.getTimeInMillis() ) );
+		}
+
+		if ( value instanceof java.util.Date date ) {
+			return toDate( date );
+		}
+
+		if ( value instanceof LocalDate localDate ) {
+			return java.sql.Date.valueOf( localDate );
+		}
+
+		return null;
+	}
+
+	static java.sql.Date toDate(java.util.Date value) {
+		if ( value instanceof java.sql.Date date ) {
+			final long millis = date.getTime();
+			final long dateEpoch = toDateEpoch( millis );
+			return dateEpoch == millis ? date : new java.sql.Date( dateEpoch );
+		}
+		else {
+			return new java.sql.Date( toDateEpoch( value ) );
+		}
+	}
+
+	static long toDateEpoch(java.util.Date value) {
+		return toDateEpoch( value.getTime() );
+	}
+
+	static long toDateEpoch(long value) {
+		final var calendar = Calendar.getInstance();
+		calendar.setTimeInMillis( value );
+		calendar.set(Calendar.HOUR_OF_DAY, 0);
+		calendar.clear(Calendar.MINUTE);
+		calendar.clear(Calendar.SECOND);
+		calendar.clear(Calendar.MILLISECOND);
+		return calendar.getTimeInMillis();
+	}
+
+	private static TemporalAccessor fromDate(java.util.Date value) {
+		return value instanceof java.sql.Date date
+				? date.toLocalDate()
+				: LocalDate.ofInstant( value.toInstant(), ZoneOffset.systemDefault() );
+	}
+
+	@Override
+	public String toString(Date value) {
+		return LITERAL_FORMATTER.format( fromDate( value ) );
+	}
+
+	@Override
+	public Date fromString(CharSequence string) {
+		try {
+			final var temporalAccessor = LITERAL_FORMATTER.parse( string );
+			return java.sql.Date.valueOf( temporalAccessor.query( LocalDate::from ) );
+		}
+		catch ( DateTimeParseException pe) {
+			throw new HibernateException( "could not parse date string " + string, pe );
+		}
+	}
+
+	@Override
+	public Date fromEncodedString(CharSequence charSequence, int start, int end) {
+		try {
+			final var temporalAccessor = ENCODED_FORMATTER.parse( subSequence( charSequence, start, end ) );
+			return java.sql.Date.valueOf( temporalAccessor.query( LocalDate::from ) );
+		}
+		catch ( DateTimeParseException pe) {
+			throw new HibernateException( "could not parse time string " + subSequence( charSequence, start, end ), pe );
+		}
+	}
+
+	@Override
+	public void appendEncodedString(SqlAppender sb, Date value) {
+		LITERAL_FORMATTER.formatTo( fromDate( value ), sb );
+	}
+
+	@Override
+	public JdbcType getRecommendedJdbcType(JdbcTypeIndicators context) {
+		return context.getJdbcType( Types.DATE );
+	}
+
+	@Override
+	protected TemporalJavaType<Date> forDatePrecision(TypeConfiguration typeConfiguration) {
+		return this;
+	}
+
+	public static class DateMutabilityPlan extends MutableMutabilityPlan<Date> {
+		public static final DateMutabilityPlan INSTANCE = new DateMutabilityPlan();
+
+		@Override
+		public Date deepCopyNotNull(Date value) {
+			return new java.sql.Date( value.getTime() );
+		}
+	}
+}

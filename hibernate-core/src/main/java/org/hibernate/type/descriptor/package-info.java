@@ -1,0 +1,12 @@
+/**
+ * Contracts for reading and writing values to and from JDBC.
+ * <p>
+ * Used by implementations of {@link org.hibernate.type.descriptor.jdbc.JdbcType}.
+ *
+ * @see org.hibernate.type.descriptor.ValueBinder
+ * @see org.hibernate.type.descriptor.ValueExtractor
+ */
+@SPI
+package org.hibernate.type.descriptor;
+
+import org.hibernate.SPI;

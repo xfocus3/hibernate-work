@@ -1,0 +1,315 @@
+package org.hibernate.property.access.spi;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Map;
+
+import jakarta.annotation.Nullable;
+
+import org.hibernate.Incubating;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.accessor.ValueReader;
+import org.hibernate.accessor.ValueWriter;
+import org.hibernate.property.access.internal.AccessStrategyHelper;
+import org.hibernate.usertype.CompositeUserType;
+
+/**
+ * Monomorphic dispatcher for property value access. A single concrete class
+ * handles get, set, and getForInsert for all property access patterns via an
+ * internal {@link Kind} enum.
+ *
+ * <p>One instance per attribute, combining read and write. Created at boot time
+ * with all fields pre-resolved. Every call site sees exactly one concrete type,
+ * enabling JIT to inline and specialize.
+ *
+ * <p>For the {@link Kind#STANDARD} mode, delegates to
+ * {@link ValueReader}/{@link ValueWriter}
+ * from hibernate-accessor — ORM never implements those interfaces.
+ */
+@Incubating(since = "8.0")
+public final class PropertyValueAccessor {
+
+	/**
+	 * A placeholder for a property value, indicating that
+	 * we don't know the value of the back reference
+	 */
+	public static final Serializable UNKNOWN = new Serializable() {
+		@Override
+		public String toString() {
+			return "<unknown>";
+		}
+
+		@Serial
+		public Object readResolve() {
+			return UNKNOWN;
+		}
+	};
+	private static final int ENHANCEMENT_STATE_NONE = 0;
+
+	private enum Kind {
+		STANDARD,
+		READ_ONLY,
+		MAP,
+		EMBEDDED,
+		NOOP,
+		COMPOSITE_USER_TYPE,
+		BACK_REF,
+		INDEX_BACK_REF,
+		CHAINED
+	}
+
+	private final Kind kind;
+
+	// STANDARD/READ_ONLY mode
+	private final @Nullable ValueReader<?> reader;
+	private final @Nullable ValueWriter writer;
+	private final int enhancementState;
+	private final @Nullable Class<?> containerJavaType;
+	private final @Nullable String propertyName;
+
+	// MAP mode
+	private final @Nullable String mapKey;
+
+	// COMPOSITE_USER_TYPE mode
+	private final @Nullable CompositeUserType<?> compositeUserType;
+	private final int compositePropertyIndex;
+
+	// BACK_REF / INDEX_BACK_REF mode
+	private final @Nullable String entityName;
+	private final @Nullable String backRefPropertyName;
+
+	// CHAINED mode
+	private final @Nullable PropertyValueAccessor[] chain;
+
+	@SuppressWarnings("squid:S107")
+	private PropertyValueAccessor(
+			Kind kind,
+			@Nullable ValueReader<?> reader,
+			@Nullable ValueWriter writer,
+			int enhancementState,
+			@Nullable Class<?> containerJavaType,
+			@Nullable String propertyName,
+			@Nullable String mapKey,
+			@Nullable CompositeUserType<?> compositeUserType,
+			int compositePropertyIndex,
+			@Nullable String entityName,
+			@Nullable String backRefPropertyName,
+			@Nullable PropertyValueAccessor[] chain) {
+		this.kind = kind;
+		this.reader = reader;
+		this.writer = writer;
+		this.enhancementState = enhancementState;
+		this.containerJavaType = containerJavaType;
+		this.propertyName = propertyName;
+		this.mapKey = mapKey;
+		this.compositeUserType = compositeUserType;
+		this.compositePropertyIndex = compositePropertyIndex;
+		this.entityName = entityName;
+		this.backRefPropertyName = backRefPropertyName;
+		this.chain = chain;
+	}
+
+	public static PropertyValueAccessor standard(
+			ValueReader<?> reader,
+			@Nullable ValueWriter writer,
+			String propertyName) {
+		return standard( reader, writer, null, propertyName );
+	}
+
+	public static PropertyValueAccessor standard(
+			ValueReader<?> reader,
+			@Nullable ValueWriter writer,
+			@Nullable Class<?> containerJavaType,
+			String propertyName) {
+		return enhanced( reader, writer, ENHANCEMENT_STATE_NONE, containerJavaType, propertyName );
+	}
+
+	public static PropertyValueAccessor readonly(ValueReader<?> reader, String propertyName) {
+		return readonly( reader, null, propertyName );
+	}
+
+	public static PropertyValueAccessor readonly(
+			ValueReader<?> reader,
+			@Nullable Class<?> containerJavaType,
+			String propertyName) {
+		return standard( reader, null, containerJavaType, propertyName );
+	}
+
+	public static PropertyValueAccessor enhanced(
+			ValueReader<?> reader,
+			@Nullable ValueWriter writer,
+			int enhancementState,
+			String propertyName) {
+		return enhanced( reader, writer, enhancementState, null, propertyName );
+	}
+
+	public static PropertyValueAccessor enhanced(
+			ValueReader<?> reader,
+			@Nullable ValueWriter writer,
+			int enhancementState,
+			@Nullable Class<?> containerJavaType,
+			String propertyName) {
+		return new PropertyValueAccessor(
+				writer == null ? Kind.READ_ONLY : Kind.STANDARD, reader, writer, enhancementState,
+				containerJavaType, propertyName, null, null, -1, null, null, null
+		);
+	}
+
+	public static PropertyValueAccessor map(String propertyName) {
+		return new PropertyValueAccessor(
+				Kind.MAP, null, null, ENHANCEMENT_STATE_NONE, null, null,
+				propertyName, null, -1, null, null, null
+		);
+	}
+
+	private static final PropertyValueAccessor EMBEDDED_INSTANCE = new PropertyValueAccessor(
+			Kind.EMBEDDED, null, null, ENHANCEMENT_STATE_NONE, null, null,
+			null, null, -1, null, null, null
+	);
+
+	public static PropertyValueAccessor embedded() {
+		return EMBEDDED_INSTANCE;
+	}
+
+	private static final PropertyValueAccessor NOOP_INSTANCE = new PropertyValueAccessor(
+			Kind.NOOP, null, null, ENHANCEMENT_STATE_NONE, null, null,
+			null, null, -1, null, null, null
+	);
+
+	public static PropertyValueAccessor noop() {
+		return NOOP_INSTANCE;
+	}
+
+	public static PropertyValueAccessor compositeUserType(
+			CompositeUserType<?> compositeUserType,
+			int propertyIndex) {
+		return new PropertyValueAccessor(
+				Kind.COMPOSITE_USER_TYPE, null, null, ENHANCEMENT_STATE_NONE, null, null,
+				null, compositeUserType, propertyIndex, null, null, null
+		);
+	}
+
+	public static PropertyValueAccessor backRef(String entityName, String propertyName) {
+		return new PropertyValueAccessor(
+				Kind.BACK_REF, null, null, ENHANCEMENT_STATE_NONE, null, null,
+				null, null, -1, entityName, propertyName, null
+		);
+	}
+
+	public static PropertyValueAccessor indexBackRef(String entityName, String propertyName) {
+		return new PropertyValueAccessor(
+				Kind.INDEX_BACK_REF, null, null, ENHANCEMENT_STATE_NONE, null, null,
+				null, null, -1, entityName, propertyName, null
+		);
+	}
+
+	public static PropertyValueAccessor chained(PropertyValueAccessor[] chain) {
+		return new PropertyValueAccessor(
+				Kind.CHAINED, null, null, ENHANCEMENT_STATE_NONE, null, null,
+				null, null, -1, null, null, chain
+		);
+	}
+
+	@SuppressWarnings("unchecked")
+	public @Nullable Object get(Object owner) {
+		try {
+			return switch ( kind ) {
+				case STANDARD,READ_ONLY -> reader.get( owner );
+				case MAP -> ( (Map<?, ?>) owner ).get( mapKey );
+				case EMBEDDED -> owner;
+				case NOOP -> null;
+				case COMPOSITE_USER_TYPE -> ( (CompositeUserType<Object>) compositeUserType ).getPropertyValue( owner, compositePropertyIndex );
+				case BACK_REF, INDEX_BACK_REF -> UNKNOWN;
+				case CHAINED -> {
+					Object result = owner;
+					for ( PropertyValueAccessor accessor : chain ) {
+						result = accessor.get( result );
+					}
+					yield result;
+				}
+			};
+		}
+		catch (Error e) {
+			// never wrap fatal/VM errors
+			throw e;
+		}
+		catch (Throwable t) {
+			if ( kind == Kind.CHAINED && t instanceof org.hibernate.PropertyAccessException cause ) {
+				throw cause;
+			}
+			throw accessException( t, owner, false );
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	public void set(Object target, @Nullable Object value) {
+
+		switch ( kind ) {
+			case STANDARD -> {
+				try {
+					writer.set( target, value );
+					if ( enhancementState != ENHANCEMENT_STATE_NONE ) {
+						AccessStrategyHelper.handleEnhancedInjection( target, value, enhancementState, propertyName );
+					}
+				}
+				catch (Error e) {
+					// never wrap fatal/VM errors
+					throw e;
+				}
+				catch (Throwable t) {
+					throw accessException( t, target, true );
+				}
+			}
+			case READ_ONLY -> throw new UnsupportedOperationException( "Cannot set read-only property" );
+			case MAP -> ((Map<String, Object>) target).put( mapKey, value );
+			case EMBEDDED, NOOP, BACK_REF, INDEX_BACK_REF -> {
+			}
+			case COMPOSITE_USER_TYPE -> throw new UnsupportedOperationException(
+					"CompositeUserType properties are read-only through PropertyValueAccessor"
+			);
+			case CHAINED -> throw new UnsupportedOperationException(
+					"Setting through a chained property access is not supported"
+			);
+		}
+	}
+
+	private org.hibernate.PropertyAccessException accessException(Throwable cause, Object receiver, boolean setter) {
+		final String message =
+				containerJavaType != null && !containerJavaType.isInstance( receiver )
+						? "Expected an object of type '" + containerJavaType.getName()
+								+ "' but was " + ( receiver == null ? "null" : "'" + receiver.getClass().getName() + "'" )
+						: "Exception during property access: " + cause.getMessage();
+		return new org.hibernate.PropertyAccessException( cause, message, setter,
+				containerJavaType == null ? receiver.getClass() : containerJavaType, propertyName );
+	}
+
+	public @Nullable Object getForInsert(
+			Object owner,
+			@Nullable Map<Object, Object> mergeMap,
+			SharedSessionContractImplementor session) {
+		return switch ( kind ) {
+			case BACK_REF -> session.getPersistenceContextInternal()
+					.getOwnerId( entityName, backRefPropertyName, owner, mergeMap );
+			case INDEX_BACK_REF -> session.getPersistenceContextInternal()
+					.getIndexInOwner( entityName, backRefPropertyName, owner, mergeMap );
+			case CHAINED -> {
+				Object result = owner;
+				for ( PropertyValueAccessor accessor : chain ) {
+					if ( result == null ) {
+						throw new PropertyAccessException(
+								"Could not chain accessor because result of previous accessor was null"
+						);
+					}
+					result = accessor.getForInsert( result, mergeMap, session );
+				}
+				yield result;
+			}
+			default -> get( owner );
+		};
+	}
+
+	@SuppressWarnings("unchecked")
+	private static <E extends Throwable> RuntimeException sneakyThrow(Throwable t) throws E {
+		throw (E) t;
+	}
+}

@@ -1,0 +1,17 @@
+package org.hibernate.engine.spi;
+
+import org.hibernate.engine.creation.spi.SessionBuilderImplementor;
+
+/**
+ * Base class for {@link SessionBuilderImplementor} implementations that wish to implement only parts of that contract
+ * themselves while forwarding other method invocations to a delegate instance.
+ *
+ * @author Gunnar Morling
+ */
+public abstract class AbstractDelegatingSessionBuilderImplementor extends AbstractDelegatingSessionBuilder implements SessionBuilderImplementor {
+
+	public AbstractDelegatingSessionBuilderImplementor(SessionBuilderImplementor delegate) {
+		super( delegate );
+	}
+
+}

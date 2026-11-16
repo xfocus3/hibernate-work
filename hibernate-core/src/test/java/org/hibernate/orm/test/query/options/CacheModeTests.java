@@ -1,0 +1,116 @@
+package org.hibernate.orm.test.query.options;
+
+import java.util.List;
+
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+
+import org.hibernate.CacheMode;
+import org.hibernate.testing.orm.domain.StandardDomainModel;
+import org.hibernate.testing.orm.domain.contacts.Contact;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+/**
+ * @author Steve Ebersole
+ */
+@DomainModel( standardModels = StandardDomainModel.CONTACTS )
+@SessionFactory
+public class CacheModeTests {
+	@Test
+	public void testNullCacheModeRestoresSessionDefaults(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			final var queries = List.of(
+					session.createQuery( "select c from Contact c", Contact.class ),
+					session.createSelectionQuery( "select c from Contact c", Contact.class ),
+					session.createNativeQuery( "select id from contacts", Integer.class ),
+					session.createQuery( "select c from Contact c" )
+			);
+			for ( var query : queries ) {
+				session.setCacheMode( CacheMode.IGNORE );
+				query.setCacheMode( CacheMode.REFRESH_SESSION );
+				query.setCacheMode( null );
+
+				assertEquals( CacheMode.IGNORE, query.getCacheMode() );
+				query.getResultList();
+				assertEquals( CacheMode.IGNORE, session.getCacheMode() );
+
+				session.setCacheMode( CacheMode.GET );
+				assertEquals( CacheMode.GET, query.getCacheMode() );
+				query.getResultList();
+				assertEquals( CacheMode.GET, session.getCacheMode() );
+			}
+		} );
+	}
+
+	@Test
+	public void testNullCacheMode(SessionFactoryScope scope) {
+		// tests passing null as CacheMode
+		scope.inTransaction( (session) -> {
+			session.createQuery( "select c from Contact c", Contact.class )
+					.setCacheMode( null )
+					.list();
+		});
+	}
+
+	@Test
+	public void testJpaCacheModesClearRefreshSession(SessionFactoryScope scope) {
+		scope.inTransaction( (session) -> {
+			final var query = session.createQuery( "select c from Contact c" )
+					.setCacheMode( CacheMode.REFRESH_SESSION );
+
+			assertEquals( CacheMode.REFRESH_SESSION, query.getCacheMode() );
+
+			query.setCacheRetrieveMode( CacheRetrieveMode.BYPASS );
+
+			assertEquals( CacheMode.REFRESH, query.getCacheMode() );
+			assertEquals( CacheRetrieveMode.BYPASS, query.getCacheRetrieveMode() );
+			assertEquals( CacheStoreMode.REFRESH, query.getCacheStoreMode() );
+		} );
+	}
+
+	@Test
+	public void testCacheModeGettersUseInheritedSessionCacheMode(SessionFactoryScope scope) {
+		scope.inTransaction( (session) -> {
+			session.setCacheMode( CacheMode.GET );
+
+			final var query = session.createQuery( "select c from Contact c" );
+
+			assertEquals( CacheMode.GET, query.getCacheMode() );
+			assertEquals( CacheRetrieveMode.USE, query.getCacheRetrieveMode() );
+			assertEquals( CacheStoreMode.BYPASS, query.getCacheStoreMode() );
+		} );
+	}
+
+	@Test
+	public void testSetJpaCacheRetrieveModeOnQueryInheritingSessionCacheMode(SessionFactoryScope scope) {
+		scope.inTransaction( (session) -> {
+			session.setCacheMode( CacheMode.NORMAL );
+
+			final var query = session.createQuery( "select c from Contact c" );
+			query.setCacheRetrieveMode( CacheRetrieveMode.BYPASS );
+
+			assertEquals( CacheMode.PUT, query.getCacheMode() );
+			assertEquals( CacheRetrieveMode.BYPASS, query.getCacheRetrieveMode() );
+			assertEquals( CacheStoreMode.USE, query.getCacheStoreMode() );
+		} );
+	}
+
+	@Test
+	public void testSetJpaCacheStoreModeOnQueryInheritingSessionCacheMode(SessionFactoryScope scope) {
+		scope.inTransaction( (session) -> {
+			session.setCacheMode( CacheMode.NORMAL );
+
+			final var query = session.createQuery( "select c from Contact c" );
+			query.setCacheStoreMode( CacheStoreMode.BYPASS );
+
+			assertEquals( CacheMode.GET, query.getCacheMode() );
+			assertEquals( CacheRetrieveMode.USE, query.getCacheRetrieveMode() );
+			assertEquals( CacheStoreMode.BYPASS, query.getCacheStoreMode() );
+		} );
+	}
+}

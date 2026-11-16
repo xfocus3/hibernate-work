@@ -1,0 +1,67 @@
+package org.hibernate.query.sqm.tuple.internal;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.model.domain.internal.PathHelper;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.tree.spi.domain.SqmBasicValuedSimplePath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmDomainType;
+import org.hibernate.type.descriptor.java.JavaType;
+
+/**
+ * @author Christian Beikov
+ */
+public class AnonymousTupleSimpleSqmPathSource<J> implements SqmPathSource<J> {
+	private final String localPathName;
+	private final SqmDomainType<J> domainType;
+	private final BindableType jpaBindableType;
+
+	public AnonymousTupleSimpleSqmPathSource(
+			String localPathName,
+			SqmDomainType<J> domainType,
+			BindableType jpaBindableType) {
+		this.localPathName = localPathName;
+		this.domainType = domainType;
+		this.jpaBindableType = jpaBindableType;
+	}
+
+	@Override
+	public Class<J> getBindableJavaType() {
+		return domainType.getJavaType();
+	}
+
+	@Override
+	public String getPathName() {
+		return localPathName;
+	}
+
+	@Override
+	public SqmDomainType<J> getPathType() {
+		return domainType;
+	}
+
+	@Override
+	public BindableType getBindableType() {
+		return jpaBindableType;
+	}
+
+	@Override
+	public JavaType<J> getExpressibleJavaType() {
+		return domainType.getExpressibleJavaType();
+	}
+
+	@Override
+	public SqmPathSource<?> findSubPathSource(String name) {
+		throw new IllegalStateException( "Basic paths cannot be dereferenced" );
+	}
+
+	@Override
+	public SqmPath<J> createSqmPath(SqmPath<?> lhs, @Nullable SqmPathSource<?> intermediatePathSource) {
+		return new SqmBasicValuedSimplePath<>(
+				PathHelper.append( lhs, this, intermediatePathSource ),
+				this,
+				lhs,
+				lhs.nodeBuilder()
+		);
+	}
+}

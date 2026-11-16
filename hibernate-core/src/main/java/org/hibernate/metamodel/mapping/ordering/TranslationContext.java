@@ -1,0 +1,21 @@
+package org.hibernate.metamodel.mapping.ordering;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.jpa.spi.JpaCompliance;
+
+/**
+ * Access to information needed while translating a collection's order-by fragment
+ *
+ * @author Steve Ebersole
+ */
+public interface TranslationContext {
+
+	@Nonnull
+	SessionFactoryImplementor getFactory();
+
+	@Nonnull
+	default JpaCompliance getJpaCompliance() {
+		return getFactory().getSessionFactoryOptions().getJpaCompliance();
+	}
+}

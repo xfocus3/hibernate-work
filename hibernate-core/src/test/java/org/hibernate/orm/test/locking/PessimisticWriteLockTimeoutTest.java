@@ -1,0 +1,76 @@
+package org.hibernate.orm.test.locking;
+
+import jakarta.persistence.LockModeType;
+import org.hibernate.Timeouts;
+import org.hibernate.dialect.OracleDialect;
+import org.hibernate.dialect.PostgreSQLDialect;
+import org.hibernate.dialect.SQLServerDialect;
+import org.hibernate.testing.orm.junit.DialectFeatureChecks;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.RequiresDialect;
+import org.hibernate.testing.orm.junit.RequiresDialectFeature;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * @author Vlad Mihalcea
+ */
+@SuppressWarnings("JUnitMalformedDeclaration")
+@DomainModel(annotatedClasses = A.class)
+@SessionFactory(useCollectingStatementObserver = true)
+public class PessimisticWriteLockTimeoutTest {
+	@BeforeEach
+	public void createTestData(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.persist( new A() );
+		} );
+	}
+
+	@AfterEach
+	void tearDown(SessionFactoryScope factoryScope) {
+		factoryScope.dropData();
+	}
+
+	@Test
+	@RequiresDialect(OracleDialect.class)
+	@RequiresDialect(PostgreSQLDialect.class)
+	@RequiresDialect(SQLServerDialect.class)
+	@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsNoWait.class )
+	public void testNoWait(SessionFactoryScope factoryScope) {
+		final var sqlCollector = factoryScope.getCollectingStatementObserver();
+		sqlCollector.clear();
+
+		factoryScope.inTransaction( (session) -> {
+			session.createQuery( "select a from A a", A.class )
+					.setLockMode( LockModeType.PESSIMISTIC_WRITE )
+					.setLockTimeout( Timeouts.NO_WAIT )
+					.list();
+
+			assertThat( sqlCollector.getSqlQueries() ).hasSize( 1 );
+			assertThat( sqlCollector.getSqlQueries().get( 0 ) ).containsIgnoringCase( "nowait" );
+		} );
+	}
+
+	@Test
+	@RequiresDialect(OracleDialect.class)
+	@RequiresDialect(PostgreSQLDialect.class)
+	@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsSkipLocked.class )
+	public void testSkipLocked(SessionFactoryScope factoryScope) {
+		final var sqlCollector = factoryScope.getCollectingStatementObserver();
+		sqlCollector.clear();
+
+		factoryScope.inTransaction( (session) -> {
+			session.createQuery("select a from A a", A.class )
+					.setLockMode( LockModeType.PESSIMISTIC_WRITE )
+					.setLockTimeout( Timeouts.SKIP_LOCKED )
+					.list();
+			assertThat( sqlCollector.getSqlQueries() ).hasSize( 1 );
+			assertThat( sqlCollector.getSqlQueries().get( 0 ) ).containsIgnoringCase( "skip locked" );
+		} );
+	}
+}

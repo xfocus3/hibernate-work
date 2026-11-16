@@ -1,0 +1,19 @@
+package org.hibernate.service.spi;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.Map;
+
+/**
+ * Allows the service to request access to the configuration properties for configuring itself.
+ *
+ * @author Steve Ebersole
+ */
+public interface Configurable {
+	/**
+	 * Configure the service.
+	 *
+	 * @param configurationValues The configuration properties.
+	 */
+	void configure(@Nonnull Map<String, Object> configurationValues);
+}

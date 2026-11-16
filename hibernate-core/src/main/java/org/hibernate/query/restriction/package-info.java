@@ -1,0 +1,12 @@
+/**
+ * The {@link org.hibernate.query.restriction.Restriction} framework.
+ *
+ * @see org.hibernate.query.restriction.Restriction
+ * @see org.hibernate.query.restriction.Path
+ *
+ * @since 7
+ */
+@Incubating(since = "7.0")
+package org.hibernate.query.restriction;
+
+import org.hibernate.Incubating;

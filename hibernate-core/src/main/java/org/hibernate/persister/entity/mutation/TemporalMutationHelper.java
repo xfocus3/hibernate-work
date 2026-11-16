@@ -1,0 +1,15 @@
+package org.hibernate.persister.entity.mutation;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+
+import static org.hibernate.temporal.TemporalTableStrategy.NATIVE;
+
+public class TemporalMutationHelper {
+	public static boolean isUsingParameters(@Nonnull SharedSessionContractImplementor session) {
+		final var factory = session.getFactory();
+		return factory.getSessionFactoryOptions().getTemporalTableStrategy() != NATIVE
+			&& !factory.getChangesetCoordinator().useServerTimestamp( session.getDialect() );
+	}
+}

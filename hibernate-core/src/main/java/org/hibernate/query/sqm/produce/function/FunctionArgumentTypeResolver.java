@@ -1,0 +1,78 @@
+package org.hibernate.query.sqm.produce.function;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.sqm.function.NamedSqmFunctionDescriptor;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.query.sqm.tree.spi.expression.SqmExpression;
+import org.hibernate.query.sqm.tree.spi.expression.SqmFunction;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+
+import java.util.List;
+
+/**
+ * Pluggable strategy for resolving a function argument type for a specific call.
+ *
+ * @author Christian Beikov
+ */
+public interface FunctionArgumentTypeResolver {
+	/**
+	 * Resolve the argument type for a function given its context-implied return type.
+	 * <p>
+	 * The <em>context-implied</em> type is the type implied by where the function
+	 * occurs in the query.  E.g., for an equality predicate (`something = some_function`)
+	 * the implied type would be defined by the type of `something`.
+	 *
+	 * @return The resolved type.
+	 * @deprecated Use {@link #resolveFunctionArgumentType(List, int, SqmToSqlAstConverter)} instead
+	 */
+	@Deprecated(forRemoval = true, since = "7.0")
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	@Nullable MappingModelExpressible<?> resolveFunctionArgumentType(
+			SqmFunction<?> function,
+			int argumentIndex,
+			SqmToSqlAstConverter converter);
+
+	/**
+	 * Resolve the argument type for a function given its context-implied return type.
+	 * <p>
+	 * The <em>context-implied</em> type is the type implied by where the function
+	 * occurs in the query.  E.g., for an equality predicate (`something = some_function`)
+	 * the implied type would be defined by the type of `something`.
+	 *
+	 * @return The resolved type.
+	 * @since 7.0
+	 */
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	default @Nullable MappingModelExpressible<?> resolveFunctionArgumentType(
+			List<? extends SqmTypedNode<?>> arguments,
+			int argumentIndex,
+			SqmToSqlAstConverter converter) {
+		return resolveFunctionArgumentType(
+				new SqmFunction<>(
+						"",
+						new NamedSqmFunctionDescriptor( "", false, null, null ),
+						null,
+						arguments,
+						converter.getSqmCreationContext().getNodeBuilder()
+				) {
+					@Nonnull
+					@Override
+					public Expression convertToSqlAst(@Nonnull SqmToSqlAstConverter walker) {
+						throw new UnsupportedOperationException();
+					}
+
+					@Nonnull
+					@Override
+					public SqmExpression<Object> copy(@Nonnull SqmCopyContext context) {
+						throw new UnsupportedOperationException();
+					}
+				},
+				argumentIndex,
+				converter
+		);
+	}
+}

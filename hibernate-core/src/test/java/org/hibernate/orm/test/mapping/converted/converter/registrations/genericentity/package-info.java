@@ -1,0 +1,4 @@
+@ConverterRegistration(converter = ConverterRegistrationWithGenericEntityTest.StringConverter.class)
+package org.hibernate.orm.test.mapping.converted.converter.registrations.genericentity;
+
+import org.hibernate.annotations.ConverterRegistration;

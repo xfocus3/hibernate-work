@@ -1,0 +1,193 @@
+plugins {
+    id "de.thetaphi.forbiddenapis"
+    id "com.diffplug.spotless"
+}
+
+// Might need to skip errorprone/nullaway when using JDK 17 to build.
+// Note: for now we're skipping them by default, see https://github.com/hibernate/hibernate-orm/pull/12624#issuecomment-4668170987
+def skipErrorProne = project.findProperty('skipErrorProne') ?: true
+if (!skipErrorProne) {
+    plugins.apply( 'net.ltgt.errorprone' )
+    plugins.apply( 'net.ltgt.nullaway' )
+}
+
+tasks.register( "formatChecks" ) {
+    // Only runs static code analysis, doesn't require compilation
+    group = "verification"
+    description = "Code style and formatting checks"
+
+    dependsOn tasks.spotlessCheck
+    dependsOn tasks.enforceRules
+}
+
+
+def enforceRulesTask = tasks.register('enforceRules') {
+    def mainSources = file("src/main/java")
+    inputs.dir(mainSources).optional()
+    onlyIf{mainSources.exists()}
+
+    doLast {
+        def illegalImport = ~/^import (sun|java.awt|org.slf4j)/
+        def missingNewline = ~/^\s*}\s*(else|catch|finally)/
+        def lowerEll = ~/\b\d+l\b/
+        def equals = ~/boolean +equals\((@?\w+ )*Object \w+\)/
+        def hashCode = ~/int +hashCode\(\)/
+        def errors = 0
+        def tree = fileTree("src/main/java/")
+        tree.include "**/*.java"
+        tree.each { file ->
+            def lineNum = 0
+            def shortName = file.path.substring(rootDir.path.length())
+            def equalsMinusHashcode = 0
+            file.eachLine { line ->
+                lineNum++
+                if (line =~ illegalImport) {
+                    errors++
+                    logger.error("Illegal import in ${shortName}\n${lineNum}: ${line}")
+                }
+                if (line =~ missingNewline) {
+                    errors++
+                    logger.error("Missing newline in ${shortName}\n${lineNum}: ${line}")
+                }
+                if (line =~ lowerEll) {
+                    errors++
+                    logger.error("Lowercase long literal in ${shortName}\n${lineNum}: ${line}")
+                }
+                if (!line.startsWith("//")) { //ignore commented-out code
+                    if (line =~ equals) {
+                        equalsMinusHashcode++
+                    }
+                    if (line =~ hashCode) {
+                        equalsMinusHashcode--
+                    }
+                }
+            }
+            if (equalsMinusHashcode > 0) {
+                errors++
+                logger.error("Equals with missing hash code in ${shortName}")
+            }
+            if (equalsMinusHashcode < 0) {
+                errors++
+                logger.error("Hash code with missing equals in ${shortName}")
+            }
+        }
+        if (errors > 0) {
+            throw new GradleException("Code rules were violated ($errors problems)")
+        }
+    }
+}
+
+tasks.check.dependsOn enforceRulesTask
+
+spotless {
+    //Don't fail during the check: rather than enforcing guidelines, we use this plugin to fix mistakes automatically.
+    enforceCheck = false
+    java {
+        targetExclude( "target/**/*.java" )
+        replaceRegex( "removeRedHatHeader", new GroovyShell().evaluate(rootProject.file("shared/config/spotless/header-patterns.groovy")).block, '${prefix}' )
+        removeUnusedImports()
+        leadingSpacesToTabs( 4 )
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
+tasks.compileJava.dependsOn tasks.spotlessJavaApply
+
+dependencies {
+    compileOnly libs.jakarta.annotation
+    testCompileOnly libs.jakarta.annotation
+}
+
+if (!skipErrorProne) {
+    dependencies {
+        errorprone libs.compilation.errorprone
+        errorprone libs.compilation.nullaway
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        def enableErrorProne = (name == 'compileJava') // Only enabled for the 'main' sourceSet
+        options.errorprone {
+            enabled = enableErrorProne
+
+            // We really are only interested in NullAway for now
+            disableAllChecks = true
+            disableWarningsInGeneratedCode = true
+
+            errorproneArgs.add("-XepAllErrorsAsWarnings")
+
+            nullaway {
+                error()
+                annotatedPackages.add('org.hibernate.processor')
+                annotatedPackages.add('org.hibernate.(jdbc|exception|integrator|processor|spi|pretty|property.access|query.sqm.tree|stat)')
+                annotatedPackages.add('org.hibernate.metamodel.mapping')
+                annotatedPackages.add('org.hibernate.engine.(config|jndi|profile|spi|transaction)')
+                annotatedPackages.add('org.hibernate.(action|context|bytecode|service).spi')
+                // Note subpackages are implicitly included. Exclude them with unannotatedSubPackages.add(...).
+
+                onlyNullMarked = false
+                treatGeneratedAsUnannotated = true
+                checkContracts = true
+                checkOptionalEmptiness = true
+                exhaustiveOverride = true
+                excludedFieldAnnotations.add('jakarta.validation.constraints.NotNull')
+                excludedFieldAnnotations.add('jakarta.validation.constraints.NotEmpty')
+
+                customInitializerAnnotations.add('org.hibernate.internal.util.NullnessUtil.Initializer')
+            }
+        }
+    }
+}
+if (!skipErrorProne && layout.projectDirectory.dir("src/nullaway").asFile.exists()) {
+    sourceSets {
+        // Separate sourceSet for NullAway LibraryModels - compiled BEFORE main
+        nullaway {
+            java {
+                srcDirs = ['src/nullaway/java']
+            }
+            resources {
+                srcDirs = ['src/nullaway/resources']
+            }
+        }
+    }
+    dependencies {
+        // Dependencies for NullAway LibraryModels (separate sourceSet)
+        nullawayImplementation libs.compilation.nullaway
+        nullawayImplementation libs.compilation.guava
+    }
+
+    // Ensure NullAway LibraryModels are compiled and resources processed first
+    compileJava.dependsOn compileNullawayJava, processNullawayResources
+    // Add the compiled LibraryModels to annotation processor path (where NullAway can load them via ServiceLoader)
+    compileJava {
+        doFirst {
+            options.annotationProcessorPath += files(
+                    sourceSets.nullaway.output.classesDirs,
+                    sourceSets.nullaway.output.resourcesDir
+            )
+        }
+    }
+}
+
+tasks.withType(de.thetaphi.forbiddenapis.gradle.CheckForbiddenApis) {
+    enabled = (name == 'forbiddenApisMain') // Only enabled for the 'main' sourceSet
+}
+
+tasks.forbiddenApisMain {
+    enabled = true
+
+    // unfortunately we currently have many uses of default Locale implicitly (~370)
+    // which need to be fixed before we can enable the "unsafe" check
+    //bundledSignatures += ["jdk-system-out", "jdk-non-portable", "jdk-unsafe-${jdkVersions.baseline}"]
+    bundledSignatures += ["jdk-system-out", "jdk-non-portable"]
+
+    signaturesFiles += rootProject.files('rules/forbidden-apis.txt')
+    ignoreSignaturesOfMissingClasses = true
+
+    suppressAnnotations += [
+            "org.hibernate.internal.build.AllowSysOut",
+            "org.hibernate.internal.build.AllowPrintStacktrace",
+            "org.hibernate.internal.build.AllowNonPortable",
+            "org.hibernate.internal.build.AllowReflection"
+    ]
+}

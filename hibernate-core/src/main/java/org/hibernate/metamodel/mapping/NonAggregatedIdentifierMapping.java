@@ -1,0 +1,84 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.metamodel.mapping.internal.IdClassEmbeddable;
+import org.hibernate.metamodel.mapping.internal.VirtualIdEmbeddable;
+import org.hibernate.sql.results.graph.FetchOptions;
+import org.hibernate.sql.results.graph.embeddable.EmbeddableValuedFetchable;
+
+/**
+ * A "non-aggregated" composite identifier, which means that the entity itself
+ * does not define a singular representation of its identifier like an
+ * {@linkplain AggregatedIdentifierMapping aggregated mapping} does.
+ *
+ * An IdClass can be used to provide a simple, singular representation of the
+ * identifier for easier reference in API calls.  JPA requires using an IdClass
+ * when mapping such identifiers. Hibernate supports mapping such identifiers
+ * with or without the IdClass; without, the entity itself is used as the
+ * identifier.
+ *
+ * @see jakarta.persistence.IdClass
+ * @see jakarta.persistence.MapsId
+ *
+ * @author Steve Ebersole
+ */
+public interface NonAggregatedIdentifierMapping extends CompositeIdentifierMapping, EmbeddableValuedFetchable, FetchOptions, VirtualModelPart {
+	/**
+	 * The virtual-id representation of this id mapping
+	 */
+	@Nonnull
+	@org.hibernate.Internal
+	VirtualIdEmbeddable getVirtualIdEmbeddable();
+
+	/**
+	 * The id-class representation of this id mapping
+	 */
+	@Nullable
+	@org.hibernate.Internal
+	IdClassEmbeddable getIdClassEmbeddable();
+
+	/**
+	 * The id-class, if there is one, otherwise the virtual-id.
+	 */
+	@Nonnull
+	IdentifierValueMapper getIdentifierValueMapper();
+
+	@Override
+	default int getFetchableKey() {
+		return -1;
+	}
+
+	/**
+	 * Think of an AttributeConverter for id values to account for representation
+	 * difference between virtual and id-class mappings
+	 */
+	interface IdentifierValueMapper extends EmbeddableMappingType {
+		@Nonnull
+		EmbeddableValuedModelPart getEmbeddedPart();
+
+		/**
+		 * Extract the identifier out of the given entity, returning the mapper's
+		 * representation
+		 */
+		@Nonnull
+		Object getIdentifier(@Nonnull Object entity, @Nullable SharedSessionContractImplementor session);
+
+		/**
+		 * Extract the identifier out of the given entity, returning the mapper's
+		 * representation
+		 */
+		void setIdentifier(@Nonnull Object entity, @Nonnull Object id, @Nonnull SharedSessionContractImplementor session);
+
+		/**
+		 * Convenience method to iterate the attributes for this mapper's representation
+		 */
+		default void forEachAttribute(@Nonnull IndexedConsumer<SingularAttributeMapping> consumer) {
+			//noinspection unchecked,rawtypes
+			getEmbeddedPart().getEmbeddableTypeDescriptor().forEachAttributeMapping( (IndexedConsumer) consumer );
+		}
+	}
+}

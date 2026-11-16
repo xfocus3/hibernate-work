@@ -1,0 +1,382 @@
+package org.hibernate.query.results.internal.dynamic;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.AssertionFailure;
+import org.hibernate.LockMode;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.internal.ManyToManyCollectionPart;
+import org.hibernate.query.NativeQuery;
+import org.hibernate.query.results.spi.FetchBuilder;
+import org.hibernate.query.results.internal.complete.CompleteFetchBuilder;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseConstant;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.sql.results.graph.Fetch;
+import org.hibernate.sql.results.graph.FetchParent;
+import org.hibernate.sql.results.graph.Fetchable;
+import org.hibernate.sql.results.graph.entity.EntityResult;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesMetadata;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Function;
+
+import static java.util.Collections.addAll;
+import static org.hibernate.query.results.internal.ResultsHelper.impl;
+import static org.hibernate.query.results.internal.ResultsHelper.resolveSqlExpression;
+
+/**
+ * @author Steve Ebersole
+ * @author Christian Beikov
+ */
+public class DynamicResultBuilderEntityStandard
+		extends AbstractFetchBuilderContainer<DynamicResultBuilderEntityStandard>
+		implements DynamicResultBuilderEntity, NativeQuery.RootReturn {
+
+	private final NavigablePath navigablePath;
+
+	private final EntityMappingType entityMapping;
+	private final String tableAlias;
+
+	private LockMode lockMode;
+
+	private List<String> idColumnNames;
+	private String discriminatorColumnName;
+
+	public DynamicResultBuilderEntityStandard(EntityMappingType entityMapping, String tableAlias) {
+		this( entityMapping, tableAlias, new NavigablePath( entityMapping.getEntityName() ) );
+	}
+
+	public DynamicResultBuilderEntityStandard(
+			EntityMappingType entityMapping,
+			String tableAlias,
+			NavigablePath navigablePath) {
+		this.navigablePath = navigablePath;
+		this.entityMapping = entityMapping;
+		this.tableAlias = tableAlias;
+	}
+
+	private DynamicResultBuilderEntityStandard(DynamicResultBuilderEntityStandard original) {
+		super( original );
+		this.navigablePath = original.navigablePath;
+		this.entityMapping = original.entityMapping;
+		this.tableAlias = original.tableAlias;
+		this.lockMode = original.lockMode;
+		this.idColumnNames = original.idColumnNames == null ? null : List.copyOf( original.idColumnNames );
+		this.discriminatorColumnName = original.discriminatorColumnName;
+	}
+
+	@Override
+	public Class<?> getJavaType() {
+		return entityMapping.getJavaType().getJavaTypeClass();
+	}
+
+	@Override
+	@Nonnull
+	public EntityMappingType getEntityMapping() {
+		return entityMapping;
+	}
+
+	@Override
+	@Nonnull
+	public String getTableAlias() {
+		return tableAlias;
+	}
+
+	@Override
+	@Nonnull
+	public NavigablePath getNavigablePath() {
+		return navigablePath;
+	}
+
+	@Override
+	@Nullable
+	public LockMode getLockMode() {
+		return lockMode;
+	}
+
+	@Override
+	@Nonnull
+	public NativeQuery.RootReturn addIdColumnAliases(@Nonnull String... aliases) {
+		if ( idColumnNames == null ) {
+			idColumnNames = new ArrayList<>( aliases.length );
+		}
+		addAll( idColumnNames, aliases );
+		return this;
+	}
+
+	@Override
+	@Nullable
+	public String getDiscriminatorAlias() {
+		return discriminatorColumnName;
+	}
+
+	@Override
+	protected String getPropertyBase() {
+		return entityMapping.getEntityName();
+	}
+
+	@Override
+	@Nonnull
+	public DynamicResultBuilderEntityStandard cacheKeyInstance() {
+		return new DynamicResultBuilderEntityStandard( this );
+	}
+
+	@Override
+	@Nonnull
+	public EntityResult<?> buildResult(
+			@Nonnull JdbcValuesMetadata jdbcResultsMetadata,
+			int resultPosition,
+			@Nonnull DomainResultCreationState domainResultCreationState) {
+		return buildResultOrFetch(
+				(tableGroup) -> (EntityResult<?>) entityMapping.createDomainResult(
+						navigablePath,
+						tableGroup,
+						tableAlias,
+						domainResultCreationState
+				),
+				null,
+				jdbcResultsMetadata,
+				domainResultCreationState
+		);
+	}
+
+	public Fetch buildFetch(
+			FetchParent parent,
+			Fetchable fetchable,
+			JdbcValuesMetadata jdbcResultsMetadata,
+			DomainResultCreationState domainResultCreationState) {
+		return buildResultOrFetch(
+				(tableGroup) -> parent.generateFetchableFetch(
+						fetchable,
+						parent.resolveNavigablePath( fetchable ),
+						FetchTiming.IMMEDIATE,
+						true,
+						null,
+						domainResultCreationState
+				),
+				fetchable,
+				jdbcResultsMetadata,
+				domainResultCreationState
+		);
+	}
+
+	private <T> T buildResultOrFetch(
+			Function<TableGroup, T> resultOrFetchBuilder,
+			Fetchable fetchable,
+			JdbcValuesMetadata jdbcResultsMetadata,
+			DomainResultCreationState domainResultCreationState) {
+		final var creationState = impl( domainResultCreationState );
+		final var fromClauseAccess = domainResultCreationState.getSqlAstCreationState().getFromClauseAccess();
+		final TableGroup collectionTableGroup;
+		final NavigablePath elementNavigablePath;
+		if ( fetchable instanceof PluralAttributeMapping ) {
+			collectionTableGroup = fromClauseAccess.getTableGroup( navigablePath );
+			elementNavigablePath = navigablePath.append( CollectionPart.Nature.ELEMENT.getName() );
+		}
+		else {
+			collectionTableGroup = null;
+			elementNavigablePath = navigablePath;
+		}
+		final var tableGroup = fromClauseAccess.resolveTableGroup(
+				elementNavigablePath,
+				path -> {
+					if ( lockMode != null ) {
+						domainResultCreationState.getSqlAstCreationState()
+								.registerLockMode( tableAlias, lockMode );
+					}
+					return entityMapping.createRootTableGroup(
+							true,
+							navigablePath,
+							tableAlias,
+							new SqlAliasBaseConstant( tableAlias ),
+							null,
+							creationState
+					);
+				}
+		);
+		final var tableReference = tableGroup.getPrimaryTableReference();
+		final var idFetchBuilder = findIdFetchBuilder();
+		final var keyColumnAliases = getKeyColumnAliases( idFetchBuilder );
+		if ( keyColumnAliases != null ) {
+			final ModelPart keyPart;
+			final TableGroup keyTableGroup;
+			if ( fetchable instanceof PluralAttributeMapping pluralAttributeMapping ) {
+				if ( pluralAttributeMapping.getCollectionDescriptor().isOneToMany() ) {
+					keyPart = entityMapping.getIdentifierMapping();
+					keyTableGroup = tableGroup;
+				}
+				else {
+					// In here, we know that the idColumnNames refer to the columns of the join table,
+					// so we also need to resolve selections for the element identifier columns
+					final var elementDescriptor =
+							(ManyToManyCollectionPart)
+									pluralAttributeMapping.getElementDescriptor();
+					keyPart = elementDescriptor.getForeignKeyDescriptor().getKeyPart();
+					keyTableGroup = collectionTableGroup;
+					final var idColumnAliases = getIdColumnAliases( idFetchBuilder );
+					entityMapping.getIdentifierMapping()
+							.forEachSelectable( (selectionIndex, selectableMapping) ->
+									resolveSqlSelection(
+											idColumnAliases.get( selectionIndex ),
+											tableReference,
+											selectableMapping,
+											jdbcResultsMetadata,
+											domainResultCreationState
+									)
+							);
+				}
+			}
+			else {
+				keyPart = entityMapping.getIdentifierMapping();
+				keyTableGroup = tableGroup;
+			}
+
+			keyPart.forEachSelectable( (selectionIndex, selectableMapping) -> resolveSqlSelection(
+					keyColumnAliases.get( selectionIndex ),
+					keyTableGroup.resolveTableReference(
+							selectableMapping.getContainingTableExpression() ),
+					selectableMapping,
+					jdbcResultsMetadata,
+					domainResultCreationState
+			) );
+		}
+
+		if ( discriminatorColumnName != null ) {
+			resolveSqlSelection(
+					discriminatorColumnName,
+					tableReference,
+					entityMapping.getDiscriminatorMapping(),
+					jdbcResultsMetadata,
+					domainResultCreationState
+			);
+		}
+
+		try {
+			creationState.pushExplicitFetchMementoResolver(
+					f -> f == null ? null : findFetchBuilder( f ) );
+			return resultOrFetchBuilder.apply( tableGroup );
+		}
+		finally {
+			creationState.popExplicitFetchMementoResolver();
+		}
+	}
+
+	private static List<String> getIdColumnAliases(FetchBuilder idFetchBuilder) {
+		if ( idFetchBuilder instanceof DynamicFetchBuilder dynamicFetchBuilder ) {
+			return dynamicFetchBuilder.getColumnAliases();
+		}
+		else if ( idFetchBuilder instanceof CompleteFetchBuilder completeFetchBuilder ) {
+			return completeFetchBuilder.getColumnAliases();
+		}
+		else {
+			throw new AssertionFailure( "Unexpected fetch builder" );
+		}
+	}
+
+	private @Nullable List<String> getKeyColumnAliases(FetchBuilder idFetchBuilder) {
+		if ( idColumnNames != null ) {
+			return idColumnNames;
+		}
+		else if ( idFetchBuilder != null ) {
+			return ( (DynamicFetchBuilder) idFetchBuilder).getColumnAliases();
+		}
+		else {
+			return null;
+		}
+	}
+
+	private FetchBuilder findIdFetchBuilder() {
+		return findFetchBuilder( entityMapping.getIdentifierMapping() );
+	}
+
+	private void resolveSqlSelection(
+			String columnAlias,
+			TableReference tableReference,
+			SelectableMapping selectableMapping,
+			JdbcValuesMetadata jdbcResultsMetadata,
+			DomainResultCreationState domainResultCreationState) {
+		final var creationStateImpl = impl( domainResultCreationState );
+		creationStateImpl.resolveSqlSelection(
+				resolveSqlExpression(
+						creationStateImpl,
+						jdbcResultsMetadata,
+						tableReference,
+						selectableMapping,
+						columnAlias
+				),
+				selectableMapping.getJdbcMapping().getJdbcJavaType(),
+				null,
+				domainResultCreationState.getSqlAstCreationState().getCreationContext()
+						.getTypeConfiguration()
+		);
+	}
+
+	@Override
+	@Nonnull
+	public DynamicResultBuilderEntityStandard setLockMode(@Nullable LockMode lockMode) {
+		this.lockMode = lockMode;
+		return this;
+	}
+
+	@Override
+	@Nonnull
+	public DynamicResultBuilderEntityStandard setDiscriminatorAlias(@Nullable String columnName) {
+		this.discriminatorColumnName = columnName;
+		return this;
+	}
+
+	@Override
+	@Nonnull
+	public NativeQuery.RootReturn addProperty(@Nonnull String propertyName, @Nonnull String columnAlias) {
+		final var subPart = entityMapping.findSubPart( propertyName );
+		addProperty( (Fetchable) subPart, columnAlias );
+		return this;
+	}
+
+	@Override
+	@Nonnull
+	public NativeQuery.ReturnProperty addProperty(@Nonnull String propertyName) {
+		return addProperty( (Fetchable) entityMapping.findSubPart( propertyName ) );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = fetchBuilderMap == null ? 0 : fetchBuilderMap.hashCode();
+		result = 31 * result + navigablePath.hashCode();
+		result = 31 * result + entityMapping.hashCode();
+		result = 31 * result + tableAlias.hashCode();
+		result = 31 * result + ( lockMode != null ? lockMode.hashCode() : 0 );
+		result = 31 * result + ( idColumnNames != null ? idColumnNames.hashCode() : 0 );
+		result = 31 * result + ( discriminatorColumnName != null ? discriminatorColumnName.hashCode() : 0 );
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object object) {
+		if ( this == object ) {
+			return true;
+		}
+		if ( !( object instanceof DynamicResultBuilderEntityStandard that ) ) {
+			return false;
+		}
+		else {
+			return navigablePath.equals( that.navigablePath )
+				&& entityMapping.equals( that.entityMapping )
+				&& tableAlias.equals( that.tableAlias )
+				&& lockMode == that.lockMode
+				&& Objects.equals( idColumnNames, that.idColumnNames )
+				&& Objects.equals( discriminatorColumnName, that.discriminatorColumnName )
+				&& Objects.equals( fetchBuilderMap, that.fetchBuilderMap );
+		}
+	}
+}

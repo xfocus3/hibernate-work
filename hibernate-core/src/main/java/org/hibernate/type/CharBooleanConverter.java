@@ -1,0 +1,41 @@
+package org.hibernate.type;
+
+import org.hibernate.SPI;
+
+import static org.hibernate.SPI.Role.USE;
+
+import org.hibernate.type.descriptor.java.BooleanJavaType;
+import org.hibernate.type.descriptor.java.CharacterJavaType;
+import org.hibernate.type.descriptor.java.JavaType;
+
+/**
+ * Abstract supertype of converters which map {@link Boolean} to {@link Character}.
+ *
+ * @author Steve Ebersole
+ * @author Gavin King
+ */
+public abstract class CharBooleanConverter implements StandardBooleanConverter<Character> {
+	@Override
+	public Character convertToDatabaseColumn(Boolean attribute) {
+		return toRelationalValue( attribute );
+	}
+
+	@Override
+	public Boolean convertToEntityAttribute(Character dbData) {
+		return toDomainValue( dbData );
+	}
+
+	@Override
+	@SPI(USE)
+	public JavaType<Boolean> getDomainJavaType() {
+		return BooleanJavaType.INSTANCE;
+	}
+
+	@Override
+	@SPI(USE)
+	public JavaType<Character> getRelationalJavaType() {
+		return CharacterJavaType.INSTANCE;
+	}
+
+	protected abstract String[] getValues();
+}

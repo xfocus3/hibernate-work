@@ -1,0 +1,557 @@
+package org.hibernate.dialect.function.array;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+import org.hibernate.QueryException;
+import org.hibernate.dialect.HANADialect;
+import org.hibernate.dialect.function.xml.HANAXmlTableFunction;
+import org.hibernate.sql.ast.spi.query.cte.CteMaterialization;
+import org.hibernate.type.descriptor.jdbc.XmlHelper;
+import org.hibernate.dialect.function.json.ExpressionTypeHelper;
+import org.hibernate.dialect.function.json.HANAJsonValueFunction;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.EmbeddableValuedModelPart;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.EntityValuedModelPart;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.JdbcMappingContainer;
+import org.hibernate.metamodel.mapping.ModelPartContainer;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SqlTypedMapping;
+import org.hibernate.metamodel.mapping.ValuedModelPart;
+import org.hibernate.metamodel.mapping.internal.EmbeddedCollectionPart;
+import org.hibernate.sql.ast.spi.query.SetReturningFunctionType;
+import org.hibernate.query.spi.QueryEngine;
+import org.hibernate.query.sqm.ComparisonOperator;
+import org.hibernate.query.sqm.function.SelfRenderingSqmSetReturningFunction;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.ast.internal.ColumnQualifierCollectorSqlAstWalker;
+import org.hibernate.sql.ast.spi.creation.FromClauseAccess;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.cte.CteColumn;
+import org.hibernate.sql.ast.spi.query.cte.CteStatement;
+import org.hibernate.sql.ast.spi.query.cte.CteTable;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.SelfRenderingExpression;
+import org.hibernate.sql.ast.spi.query.expression.SqlTuple;
+import org.hibernate.sql.ast.spi.query.from.FunctionTableGroup;
+import org.hibernate.sql.ast.spi.query.from.StandardTableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroupProducer;
+import org.hibernate.sql.ast.spi.query.predicate.ComparisonPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.NullnessPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.PredicateContainer;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.results.internal.SqlSelectionImpl;
+import org.hibernate.type.BasicPluralType;
+import org.hibernate.type.SqlTypes;
+import org.hibernate.type.Type;
+import org.hibernate.type.descriptor.java.BasicPluralJavaType;
+import org.hibernate.type.descriptor.sql.spi.DdlTypeRegistry;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+/**
+ * HANA unnest function.
+ */
+public class HANAUnnestFunction extends UnnestFunction {
+
+	public HANAUnnestFunction() {
+		super( "v", "i", true );
+	}
+
+	@Override
+	protected <T> SelfRenderingSqmSetReturningFunction<T> generateSqmSetReturningFunctionExpression(
+			List<? extends SqmTypedNode<?>> arguments,
+			QueryEngine queryEngine) {
+		return new SelfRenderingSqmSetReturningFunction<>(
+				this,
+				this,
+				arguments,
+				getArgumentsValidator(),
+				getSetReturningTypeResolver(),
+				queryEngine.getCriteriaBuilder(),
+				getName()
+		) {
+			@Nonnull
+			@Override
+			public TableGroup convertToSqlAst(
+					@Nonnull NavigablePath navigablePath,
+					@Nonnull String identifierVariable,
+					boolean lateral,
+					boolean canUseInnerJoins,
+					boolean withOrdinality,
+					@Nonnull SqmToSqlAstConverter walker) {
+				// SAP HANA only supports table column references i.e. `TABLE_NAME.COLUMN_NAME`
+				// or constants as arguments to xmltable/json_table, so it's impossible to do lateral joins.
+				// There is a nice trick we can apply to make this work though, which is to figure out
+				// the table group an expression belongs to and render a special CTE returning xml/json that can be joined.
+				// The xml/json of that CTE needs to be extended by table group primary key data,
+				// so we can join it later.
+				final FunctionTableGroup functionTableGroup = (FunctionTableGroup) super.convertToSqlAst(
+						navigablePath,
+						identifierVariable,
+						lateral,
+						canUseInnerJoins,
+						withOrdinality,
+						walker
+				);
+				//noinspection unchecked
+				final List<SqlAstNode> sqlArguments = (List<SqlAstNode>) functionTableGroup.getPrimaryTableReference()
+						.getFunctionExpression()
+						.getArguments();
+				final Expression argument = (Expression) sqlArguments.get( 0 );
+				final Set<String> qualifiers = ColumnQualifierCollectorSqlAstWalker.determineColumnQualifiers( argument );
+				// Can only do this transformation if the argument contains a single column reference qualifier
+				if ( qualifiers.size() == 1 ) {
+					final String tableQualifier = qualifiers.iterator().next();
+					// Find the table group which the unnest argument refers to
+					final FromClauseAccess fromClauseAccess = walker.getFromClauseAccess();
+					final TableGroup sourceTableGroup =
+							fromClauseAccess.findTableGroupByIdentificationVariable( tableQualifier );
+					if ( sourceTableGroup != null ) {
+						final List<ColumnInfo> idColumns = new ArrayList<>();
+						addIdColumns( sourceTableGroup.getModelPart(), idColumns );
+
+						// Register a query transformer to register the CTE and rewrite the array argument
+						walker.registerQueryTransformer( (cteContainer, querySpec, converter) -> {
+							// Determine a CTE name that is available
+							final String baseName = "_data";
+							String cteName;
+							int index = 0;
+							do {
+								cteName = baseName + ( index++ );
+							} while ( cteContainer.getCteStatement( cteName ) != null );
+
+							final TableGroup parentTableGroup = querySpec.getFromClause().queryTableGroups(
+									tg -> tg.findTableGroupJoin( functionTableGroup ) == null ? null : tg
+							);
+							final PredicateContainer predicateContainer;
+							if ( parentTableGroup != null ) {
+								predicateContainer = parentTableGroup.findTableGroupJoin( functionTableGroup );
+							}
+							else {
+								predicateContainer = querySpec;
+							}
+							final Expression lhs = createExpression( tableQualifier, idColumns );
+							final Expression rhs = createExpression(
+									functionTableGroup.getPrimaryTableReference().getIdentificationVariable(),
+									idColumns
+							);
+							predicateContainer.applyPredicate( new ComparisonPredicate( lhs, ComparisonOperator.EQUAL, rhs ) );
+
+							final String tableName = cteName;
+							final List<CteColumn> cteColumns = List.of(
+									new CteColumn( "v", argument.getExpressionType().getSingleJdbcMapping() )
+							);
+							final QuerySpec cteQuery = new QuerySpec( false );
+							cteQuery.getFromClause().addRoot(
+									new StandardTableGroup(
+											true,
+											sourceTableGroup.getNavigablePath(),
+											(TableGroupProducer) sourceTableGroup.getModelPart(),
+											false,
+											null,
+											sourceTableGroup.findTableReference( tableQualifier ),
+											false,
+											null,
+											joinTableName -> false,
+											(joinTableName, tg) -> null,
+											null
+									)
+							);
+							final Expression wrapperExpression;
+							if ( ExpressionTypeHelper.isXml( argument ) ) {
+								wrapperExpression = new XmlWrapperExpression( idColumns, tableQualifier, argument );
+								// xmltable is allergic to null values and produces no result if one occurs,
+								// so we must filter them out
+								cteQuery.applyPredicate( new NullnessPredicate( argument, true ) );
+							}
+							else {
+								wrapperExpression = new JsonWrapperExpression( idColumns, tableQualifier, argument );
+							}
+							cteQuery.getSelectClause().addSqlSelection( new SqlSelectionImpl( wrapperExpression ) );
+							final CteStatement cteStatement = new CteStatement(
+									new CteTable( tableName, cteColumns ),
+									new SelectStatement( cteQuery ),
+									// We need the CTE to be rendered as such, since we refer to the "table" name,
+									// so we add this hint to prevent inlining
+									CteMaterialization.NOT_MATERIALIZED
+							);
+							cteContainer.addCteStatement( cteStatement );
+							sqlArguments.set( 0, new TableColumnReferenceExpression( argument, tableName, idColumns ) );
+							return querySpec;
+						} );
+					}
+				}
+				return functionTableGroup;
+			}
+
+			@Nonnull
+			private Expression createExpression(@Nullable String qualifier, @Nonnull List<ColumnInfo> idColumns) {
+				if ( idColumns.size() == 1 ) {
+					final ColumnInfo columnInfo = idColumns.get( 0 );
+					return new ColumnReference( qualifier, columnInfo.name(), false, null, columnInfo.jdbcMapping() );
+				}
+				else {
+					final ArrayList<Expression> expressions = new ArrayList<>( idColumns.size() );
+					for ( ColumnInfo columnInfo : idColumns ) {
+						expressions.add(
+								new ColumnReference(
+										qualifier,
+										columnInfo.name(),
+										false,
+										null,
+										columnInfo.jdbcMapping()
+								)
+						);
+					}
+					return new SqlTuple( expressions, null );
+				}
+			}
+
+			private void addIdColumns(@Nonnull ModelPartContainer modelPartContainer, @Nonnull List<ColumnInfo> idColumns) {
+				if ( modelPartContainer instanceof EntityValuedModelPart entityValuedModelPart ) {
+					addIdColumns( entityValuedModelPart.getEntityMappingType(), idColumns );
+				}
+				else if ( modelPartContainer instanceof PluralAttributeMapping pluralAttributeMapping ) {
+					addIdColumns( pluralAttributeMapping, idColumns );
+				}
+				else if ( modelPartContainer instanceof EmbeddableValuedModelPart embeddableModelPart ) {
+					addIdColumns( embeddableModelPart, idColumns );
+				}
+				else {
+					throw new QueryException( "Unsupported model part container: " + modelPartContainer, (String) null );
+				}
+			}
+
+			private void addIdColumns(@Nonnull EmbeddableValuedModelPart embeddableModelPart, @Nonnull List<ColumnInfo> idColumns) {
+				if ( embeddableModelPart instanceof EmbeddedCollectionPart collectionPart ) {
+					addIdColumns( collectionPart.getCollectionAttribute(), idColumns );
+				}
+				else {
+					addIdColumns( embeddableModelPart.asAttributeMapping().getDeclaringType(), idColumns );
+				}
+			}
+
+			private void addIdColumns(@Nonnull PluralAttributeMapping pluralAttributeMapping, @Nonnull List<ColumnInfo> idColumns) {
+				final var ddlTypeRegistry = pluralAttributeMapping.getCollectionDescriptor()
+						.getFactory()
+						.getTypeConfiguration()
+						.getDdlTypeRegistry();
+				addIdColumns( pluralAttributeMapping.getKeyDescriptor().getKeyPart(), ddlTypeRegistry, idColumns );
+			}
+
+			private void addIdColumns(@Nonnull EntityMappingType entityMappingType, @Nonnull List<ColumnInfo> idColumns) {
+				final var ddlTypeRegistry = entityMappingType.getEntityPersister()
+						.getFactory()
+						.getTypeConfiguration()
+						.getDdlTypeRegistry();
+				addIdColumns( entityMappingType.getIdentifierMapping(), ddlTypeRegistry, idColumns );
+			}
+
+			private void addIdColumns(
+					@Nonnull ValuedModelPart modelPart,
+					@Nonnull DdlTypeRegistry ddlTypeRegistry,
+					@Nonnull List<ColumnInfo> idColumns) {
+				modelPart.forEachSelectable( (selectionIndex, selectableMapping) -> {
+					final JdbcMapping jdbcMapping = selectableMapping.getJdbcMapping().getSingleJdbcMapping();
+					idColumns.add( new ColumnInfo(
+							selectableMapping.getSelectionExpression(),
+							jdbcMapping,
+							ddlTypeRegistry.getTypeName(
+									jdbcMapping.getJdbcType().getDefaultSqlTypeCode(),
+									selectableMapping.toSize(),
+									(Type) jdbcMapping
+							)
+					) );
+				} );
+			}
+
+		};
+	}
+
+	record ColumnInfo(String name, JdbcMapping jdbcMapping, String ddlType) {}
+
+	static class TableColumnReferenceExpression implements SelfRenderingExpression {
+
+		private final Expression argument;
+		private final String tableName;
+		private final List<ColumnInfo> idColumns;
+
+		public TableColumnReferenceExpression(Expression argument, String tableName, List<ColumnInfo> idColumns) {
+			this.argument = argument;
+			this.tableName = tableName;
+			this.idColumns = idColumns;
+		}
+
+		@Override
+		public void renderToSql(
+				SqlAppender sqlAppender,
+				SqlAstTranslator<?> walker,
+				SessionFactoryImplementor sessionFactory) {
+			sqlAppender.appendSql( tableName );
+			sqlAppender.appendSql( ".v" );
+		}
+
+		@Override
+		public JdbcMappingContainer getExpressionType() {
+			return argument.getExpressionType();
+		}
+
+		public List<ColumnInfo> getIdColumns() {
+			return idColumns;
+		}
+	}
+
+	@Override
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	protected void renderXmlTable(
+			SqlAppender sqlAppender,
+			Expression array,
+			BasicPluralType<?, ?> pluralType,
+			@Nullable SqlTypedMapping sqlTypedMapping,
+			SetReturningFunctionType tupleType,
+			String tableIdentifierVariable,
+			SqlAstTranslator<?> walker) {
+		final XmlHelper.CollectionTags collectionTags = XmlHelper.determineCollectionTags(
+				(BasicPluralJavaType<?>) pluralType.getJavaTypeDescriptor(), walker.getSessionFactory()
+		);
+
+		sqlAppender.appendSql( "xmltable('/" );
+		sqlAppender.appendSql( collectionTags.rootName() );
+		sqlAppender.appendSql( '/' );
+		sqlAppender.appendSql( collectionTags.elementName() );
+		sqlAppender.appendSql( "' passing " );
+		array.accept( walker );
+		sqlAppender.appendSql( " columns" );
+		char separator = ' ';
+		final int offset;
+		if ( array instanceof TableColumnReferenceExpression expression ) {
+			offset = expression.getIdColumns().size();
+			for ( ColumnInfo columnInfo : expression.getIdColumns() ) {
+				sqlAppender.appendSql( separator );
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( ' ' );
+				sqlAppender.appendSql( columnInfo.ddlType() );
+				sqlAppender.appendSql( " path 'ancestor::" );
+				sqlAppender.appendSql( collectionTags.rootName() );
+				sqlAppender.appendSql( "/@" );
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( '\'' );
+				separator = ',';
+			}
+		}
+		else {
+			offset = 0;
+		}
+		if ( tupleType.findSubPart( CollectionPart.Nature.ELEMENT.getName() ) == null ) {
+			tupleType.forEachSelectable( offset, (selectionIndex, selectableMapping) -> {
+				if ( selectionIndex == 0 ) {
+					sqlAppender.append( ' ' );
+				}
+				else {
+					sqlAppender.append( ',' );
+				}
+				sqlAppender.append( selectableMapping.getSelectionExpression() );
+				if ( CollectionPart.Nature.INDEX.getName().equals( selectableMapping.getSelectableName() ) ) {
+					sqlAppender.append( " for ordinality" );
+				}
+				else {
+					sqlAppender.append( ' ' );
+					sqlAppender.append( getDdlType( selectableMapping, SqlTypes.XML_ARRAY, walker ) );
+					sqlAppender.appendSql( " path '" );
+					sqlAppender.appendSql( selectableMapping.getSelectableName() );
+					sqlAppender.appendSql( "'" );
+				}
+			} );
+		}
+		else {
+			tupleType.forEachSelectable( offset, (selectionIndex, selectableMapping) -> {
+				if ( selectionIndex == 0 ) {
+					sqlAppender.append( ' ' );
+				}
+				else {
+					sqlAppender.append( ',' );
+				}
+				sqlAppender.append( selectableMapping.getSelectionExpression() );
+				if ( CollectionPart.Nature.INDEX.getName().equals( selectableMapping.getSelectableName() ) ) {
+					sqlAppender.append( " for ordinality" );
+				}
+				else {
+					sqlAppender.append( ' ' );
+					sqlAppender.append( getDdlType( selectableMapping, SqlTypes.XML_ARRAY, walker ) );
+					sqlAppender.appendSql( " path '" );
+					sqlAppender.appendSql( "." );
+					sqlAppender.appendSql( "'" );
+				}
+			} );
+		}
+
+		sqlAppender.appendSql( ')' );
+	}
+
+	static class XmlWrapperExpression implements SelfRenderingExpression {
+		private final List<ColumnInfo> idColumns;
+		private final String tableQualifier;
+		private final Expression argument;
+
+		public XmlWrapperExpression(List<ColumnInfo> idColumns, String tableQualifier, Expression argument) {
+			this.idColumns = idColumns;
+			this.tableQualifier = tableQualifier;
+			this.argument = argument;
+		}
+
+		@Override
+		public void renderToSql(
+				SqlAppender sqlAppender,
+				SqlAstTranslator<?> walker,
+				SessionFactoryImplementor sessionFactory) {
+			final BasicPluralType<?, ?> pluralType = (BasicPluralType<?, ?>) argument.getExpressionType().getSingleJdbcMapping();
+			final XmlHelper.CollectionTags collectionTags = XmlHelper.determineCollectionTags(
+					(BasicPluralJavaType<?>) pluralType.getJavaTypeDescriptor(),
+					sessionFactory
+			);
+
+			// Produce an XML string e.g. <root id="1">...</root>
+			// which will contain the original XML as well as id column information for correlation
+			sqlAppender.appendSql( "trim('/>' from (select" );
+			char separator = ' ';
+			for ( ColumnInfo columnInfo : idColumns ) {
+				sqlAppender.appendSql( separator );
+				sqlAppender.appendSql( tableQualifier );
+				sqlAppender.appendSql( '.' );
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( ' ' );
+				sqlAppender.appendDoubleQuoteEscapedString( columnInfo.name() );
+				separator = ',';
+			}
+			sqlAppender.appendSql( " from sys.dummy for xml('root'='no','columnstyle'='attribute','rowname'='" );
+			sqlAppender.appendSql( collectionTags.rootName() );
+			sqlAppender.appendSql( "','format'='no')))||substring(" );
+			argument.accept( walker );
+			sqlAppender.appendSql( ",locate('<" );
+			sqlAppender.appendSql( collectionTags.rootName() );
+			sqlAppender.appendSql( ">'," );
+			argument.accept( walker );
+			sqlAppender.appendSql( ")+" );
+			sqlAppender.appendSql( collectionTags.rootName().length() + 2 );
+			sqlAppender.appendSql( ",length(" );
+			argument.accept( walker );
+			sqlAppender.appendSql( "))" );
+		}
+
+		@Override
+		public JdbcMappingContainer getExpressionType() {
+			return argument.getExpressionType();
+		}
+	}
+
+	@Override
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	protected String getDdlType(SqlTypedMapping sqlTypedMapping, int containerSqlTypeCode, SqlAstTranslator<?> translator) {
+		final String ddlType = super.getDdlType( sqlTypedMapping, containerSqlTypeCode, translator );
+		if ( containerSqlTypeCode == SqlTypes.JSON_ARRAY ) {
+			return HANAJsonValueFunction.jsonValueReturningType( ddlType, isCloud( translator ) );
+		}
+		else if ( containerSqlTypeCode == SqlTypes.XML_ARRAY ) {
+			return HANAXmlTableFunction.xmlValueReturningType( sqlTypedMapping, ddlType, isCloud( translator ) );
+		}
+		else {
+			return ddlType;
+		}
+	}
+
+	private static boolean isCloud(SqlAstTranslator<?> translator) {
+		return translator.getSessionFactory().getJdbcServices().getDialect() instanceof HANADialect hanaDialect
+			&& hanaDialect.isCloud();
+	}
+
+	@Override
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	protected void renderJsonTable(
+			SqlAppender sqlAppender,
+			Expression array,
+			BasicPluralType<?, ?> pluralType,
+			@Nullable SqlTypedMapping sqlTypedMapping,
+			SetReturningFunctionType tupleType,
+			String tableIdentifierVariable,
+			SqlAstTranslator<?> walker) {
+		sqlAppender.appendSql( "json_table(" );
+		array.accept( walker );
+
+		if ( array instanceof TableColumnReferenceExpression expression ) {
+			sqlAppender.appendSql( ",'$' columns(" );
+			for ( ColumnInfo columnInfo : expression.getIdColumns() ) {
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( ' ' );
+				sqlAppender.appendSql( columnInfo.ddlType() );
+				sqlAppender.appendSql( " path '$." );
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( "'," );
+			}
+
+			sqlAppender.appendSql( "nested path '$.v' columns" );
+			renderJsonTableColumns( sqlAppender, tupleType, walker, true );
+			sqlAppender.appendSql( "))" );
+		}
+		else {
+			sqlAppender.appendSql( ",'$[*]' columns" );
+			renderJsonTableColumns( sqlAppender, tupleType, walker, true );
+			sqlAppender.appendSql( ")" );
+		}
+	}
+
+	static class JsonWrapperExpression implements SelfRenderingExpression {
+		private final List<ColumnInfo> idColumns;
+		private final String tableQualifier;
+		private final Expression argument;
+
+		public JsonWrapperExpression(List<ColumnInfo> idColumns, String tableQualifier, Expression argument) {
+			this.idColumns = idColumns;
+			this.tableQualifier = tableQualifier;
+			this.argument = argument;
+		}
+
+		@Override
+		public void renderToSql(
+				SqlAppender sqlAppender,
+				SqlAstTranslator<?> walker,
+				SessionFactoryImplementor sessionFactory) {
+			// Produce a JSON string e.g. {"id":1,"v":[...]}
+			// which will contain the original JSON as well as id column information for correlation
+			sqlAppender.appendSql( "'{'||trim('{}' from (select" );
+			char separator = ' ';
+			for ( ColumnInfo columnInfo : idColumns ) {
+				sqlAppender.appendSql( separator );
+				sqlAppender.appendSql( tableQualifier );
+				sqlAppender.appendSql( '.' );
+				sqlAppender.appendSql( columnInfo.name() );
+				sqlAppender.appendSql( ' ' );
+				sqlAppender.appendDoubleQuoteEscapedString( columnInfo.name() );
+				separator = ',';
+			}
+			sqlAppender.appendSql( " from sys.dummy for json('arraywrap'='no')))||" );
+			sqlAppender.appendSql( "',\"v\":'||case when " );
+			argument.accept( walker );
+			sqlAppender.appendSql( " not like '[]' then " );
+			argument.accept( walker );
+			sqlAppender.appendSql( " end||'}'" );
+		}
+
+		@Override
+		public JdbcMappingContainer getExpressionType() {
+			return argument.getExpressionType();
+		}
+	}
+}

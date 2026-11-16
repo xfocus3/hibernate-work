@@ -1,0 +1,26 @@
+include::{root-project-dir}/.asciidoctorconfig.adoc[]
+:doctype: book
+:icons: font
+:html-meta-canonical-link: https://docs.hibernate.org/stable/orm/introduction/html_single/
+
+
+
+= A No-Nonsense Guide to Hibern8
+:toc2:
+:toclevels: 3
+:sectanchors:
+
+include::Preface.adoc[]
+
+:numbered:
+
+include::Introduction.adoc[]
+include::Configuration.adoc[]
+include::Entities.adoc[]
+include::Mapping.adoc[]
+include::Interacting.adoc[]
+include::Querying.adoc[]
+include::Processor.adoc[]
+include::Tuning.adoc[]
+include::Advanced.adoc[]
+include::Credits.adoc[]

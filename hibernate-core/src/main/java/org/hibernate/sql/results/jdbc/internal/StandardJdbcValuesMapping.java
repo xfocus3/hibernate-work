@@ -1,0 +1,255 @@
+package org.hibernate.sql.results.jdbc.internal;
+
+import java.util.BitSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.function.Supplier;
+
+import org.hibernate.LockMode;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationContext;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.results.graph.AssemblerCreationState;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultAssembler;
+import org.hibernate.sql.results.graph.FetchParent;
+import org.hibernate.sql.results.graph.Initializer;
+import org.hibernate.sql.results.graph.InitializerParent;
+import org.hibernate.sql.results.graph.InitializerProducer;
+import org.hibernate.sql.results.graph.collection.internal.AbstractImmediateCollectionInitializer;
+import org.hibernate.sql.results.graph.instantiation.DynamicInstantiationResult;
+import org.hibernate.sql.results.internal.InitializersList;
+import org.hibernate.sql.results.internal.NavigablePathMapToInitializer;
+import org.hibernate.sql.results.internal.SqlSelectionImpl;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesMapping;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesMappingResolution;
+
+import static org.hibernate.internal.util.collections.ArrayHelper.EMPTY_INT_ARRAY;
+import static org.hibernate.internal.util.collections.CollectionHelper.arrayList;
+import static org.hibernate.sql.results.internal.ResultsLogger.RESULTS_MESSAGE_LOGGER;
+
+/**
+ * @author Steve Ebersole
+ */
+public class StandardJdbcValuesMapping implements JdbcValuesMapping {
+
+	private final List<SqlSelection> sqlSelections;
+	private final List<DomainResult<?>> domainResults;
+	private final boolean needsResolve;
+	private final int[] valueIndexesToCacheIndexes;
+	// Is only meaningful if valueIndexesToCacheIndexes is not null
+	// Contains the size of the row to cache, or if the value is negative,
+	// represents the inverted index of the single value to cache
+	private final int rowToCacheSize;
+	private JdbcValuesMappingResolutionImpl resolution;
+
+	public StandardJdbcValuesMapping(
+			List<SqlSelection> sqlSelections,
+			List<DomainResult<?>> domainResults) {
+		this.sqlSelections = sqlSelections;
+		this.domainResults = domainResults;
+		// The native query might select more columns than the number of selections,
+		// so we need to compute the effective row size from the max values array position
+		int maxPosition = -1;
+		boolean needsResolve = false;
+		for ( SqlSelection sqlSelection : sqlSelections ) {
+			maxPosition = Math.max( maxPosition, sqlSelection.getValuesArrayPosition() );
+			needsResolve = needsResolve
+					|| sqlSelection instanceof SqlSelectionImpl selection && selection.needsResolve();
+		}
+		final int rowSize = maxPosition + 1;
+		final var valueIndexesToCache = new BitSet( rowSize );
+		for ( var domainResult : domainResults ) {
+			domainResult.collectValueIndexesToCache( valueIndexesToCache );
+		}
+		final int[] valueIndexesToCacheIndexes = new int[rowSize];
+		int cacheIndex = 0;
+		for ( int i = 0; i < rowSize; i++ ) {
+			if ( valueIndexesToCache.get( i ) ) {
+				valueIndexesToCacheIndexes[i] = cacheIndex++;
+			}
+			else {
+				valueIndexesToCacheIndexes[i] = -1;
+			}
+		}
+
+		this.needsResolve = needsResolve;
+		this.valueIndexesToCacheIndexes = cacheIndex == 0 ? EMPTY_INT_ARRAY : valueIndexesToCacheIndexes;
+		this.rowToCacheSize = cacheIndex;
+	}
+
+	@Override
+	public List<SqlSelection> getSqlSelections() {
+		return sqlSelections;
+	}
+
+	@Override
+	public List<DomainResult<?>> getDomainResults() {
+		return domainResults;
+	}
+
+	@Override
+	public int getRowSize() {
+		return sqlSelections.size();
+	}
+
+	@Override
+	public int[] getValueIndexesToCacheIndexes() {
+		return valueIndexesToCacheIndexes;
+	}
+
+	@Override
+	public int getRowToCacheSize() {
+		return rowToCacheSize;
+	}
+
+	public boolean needsResolve() {
+		return needsResolve;
+	}
+
+	@Override
+	public JdbcValuesMappingResolution resolveAssemblers(SessionFactoryImplementor sessionFactory) {
+		if ( resolution != null ) {
+			return resolution;
+		}
+		else {
+			final var creationState =
+					new AssemblerCreationStateImpl( this,
+							sessionFactory.getSqlTranslationEngine() );
+			final var domainResultAssemblers = resolveAssemblers( creationState );
+			creationState.initializerMap.logInitializers();
+			resolution = new JdbcValuesMappingResolutionImpl(
+					domainResultAssemblers,
+					creationState.hasCollectionInitializers,
+					creationState.initializerListBuilder.build()
+			);
+			return resolution;
+		}
+	}
+
+	private DomainResultAssembler<?>[] resolveAssemblers(AssemblerCreationState creationState) {
+		final int size = domainResults.size();
+		final List<DomainResultAssembler<?>> assemblers = arrayList( size );
+		for ( int i = 0; i < size; i++ ) {
+			final var resultAssembler =
+					domainResults.get( i )
+							.createResultAssembler( null, creationState );
+			assemblers.add( resultAssembler );
+		}
+		return assemblers.toArray( new DomainResultAssembler[0] );
+	}
+
+	@Override
+	public LockMode determineDefaultLockMode(String alias, LockMode defaultLockMode) {
+		return defaultLockMode;
+	}
+
+	private static class AssemblerCreationStateImpl implements AssemblerCreationState {
+		private final JdbcValuesMapping jdbcValuesMapping;
+		private final SqlAstCreationContext sqlAstCreationContexty;
+		//custom Map<NavigablePath, Initializer>
+		private final NavigablePathMapToInitializer initializerMap = new NavigablePathMapToInitializer();
+		private final InitializersList.Builder initializerListBuilder = new InitializersList.Builder();
+		private int initializerId;
+		boolean hasCollectionInitializers;
+		Boolean dynamicInstantiation;
+		Boolean containsMultipleCollectionFetches;
+
+		public AssemblerCreationStateImpl(
+				JdbcValuesMapping jdbcValuesMapping,
+				SqlAstCreationContext sqlAstCreationContexty) {
+			this.jdbcValuesMapping = jdbcValuesMapping;
+			this.sqlAstCreationContexty = sqlAstCreationContexty;
+		}
+
+		@Override
+		public boolean isDynamicInstantiation() {
+			if ( dynamicInstantiation == null ) {
+				dynamicInstantiation =
+						jdbcValuesMapping.getDomainResults().stream()
+								.anyMatch( domainResult -> domainResult instanceof DynamicInstantiationResult );
+			}
+			return dynamicInstantiation;
+		}
+
+		@Override
+		public boolean containsMultipleCollectionFetches() {
+			if ( containsMultipleCollectionFetches == null ) {
+				int collectionFetchesCount = 0;
+				for ( var domainResult : jdbcValuesMapping.getDomainResults() ) {
+					if ( domainResult instanceof FetchParent fetchParent ) {
+						collectionFetchesCount += fetchParent.getCollectionFetchesCount();
+					}
+				}
+				containsMultipleCollectionFetches = collectionFetchesCount > 1;
+			}
+			return containsMultipleCollectionFetches;
+		}
+
+		@Override
+		public int acquireInitializerId() {
+			return initializerId++;
+		}
+
+		@Override
+		public Initializer<?> resolveInitializer(
+				NavigablePath navigablePath,
+				ModelPart fetchedModelPart,
+				Supplier<Initializer<?>> producer) {
+			return resolveInitializer(
+					navigablePath,
+					fetchedModelPart,
+					null,
+					null,
+					(resultGraphNode, parent, creationState) -> producer.get()
+			);
+		}
+
+		@Override
+		public <P extends FetchParent> Initializer<?> resolveInitializer(
+				P resultGraphNode,
+				InitializerParent<?> parent,
+				InitializerProducer<P> producer) {
+			return resolveInitializer(
+					resultGraphNode.getNavigablePath(),
+					resultGraphNode.getReferencedModePart(),
+					resultGraphNode,
+					parent,
+					producer
+			);
+		}
+
+		public <T extends FetchParent> Initializer<?> resolveInitializer(
+				NavigablePath navigablePath,
+				ModelPart fetchedModelPart,
+				T resultGraphNode,
+				InitializerParent<?> parent,
+				InitializerProducer<T> producer) {
+			final var existing = initializerMap.get( navigablePath );
+			if ( existing != null
+					&& Objects.equals( fetchedModelPart.getNavigableRole(),
+						existing.getInitializedPart().getNavigableRole() ) ) {
+				RESULTS_MESSAGE_LOGGER.tracef( "Returning previously-registered initializer: %s", existing );
+				return existing;
+			}
+
+			final var initializer = producer.createInitializer( resultGraphNode, parent, this );
+			RESULTS_MESSAGE_LOGGER.tracef( "Registering initializer: %s", initializer );
+
+			if ( initializer instanceof AbstractImmediateCollectionInitializer ) {
+				hasCollectionInitializers = true;
+			}
+			initializerMap.put( navigablePath, initializer );
+			initializerListBuilder.addInitializer( initializer );
+
+			return initializer;
+		}
+
+		@Override
+		public SqlAstCreationContext getSqlAstCreationContext() {
+			return sqlAstCreationContexty;
+		}
+	}
+}

@@ -1,0 +1,70 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.persistence.Parameter;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.loader.ast.spi.CollectionLoader;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.persister.collection.CollectionPersister;
+import jakarta.persistence.QueryFlushMode;
+import org.hibernate.query.QueryTypeMismatchException;
+import org.hibernate.query.named.spi.NamedQueryMemento;
+
+import java.util.List;
+
+/**
+ * @author Steve Ebersole
+ */
+public class CollectionLoaderNamedQuery implements CollectionLoader {
+	private final CollectionPersister persister;
+	private final NamedQueryMemento<?> namedQueryMemento;
+
+	public CollectionLoaderNamedQuery(@Nonnull CollectionPersister persister, @Nonnull NamedQueryMemento<?> namedQueryMemento) {
+		this.persister = persister;
+		this.namedQueryMemento = namedQueryMemento;
+	}
+
+	@Nonnull
+	@Override
+	public PluralAttributeMapping getLoadable() {
+		return persister.getAttributeMapping();
+	}
+
+	@Nonnull
+	@Override
+	public PersistentCollection<?> load(@Nonnull Object key, @Nonnull SharedSessionContractImplementor session) {
+		final var query = namedQueryMemento.toSelectionQuery( session );
+		//noinspection unchecked
+		query.setParameter( (Parameter<Object>) query.getParameters().iterator().next(), key );
+		query.setQueryFlushMode( QueryFlushMode.NO_FLUSH );
+		final List<?> resultList = query.getResultList();
+		// TODO: we need a good way to inspect the query itself to see what it returns
+		if ( !resultList.isEmpty() && resultList.get(0) instanceof PersistentCollection<?> persistentCollection ) {
+			// in hbm.xml files we have the <load-collection/> element
+			return persistentCollection;
+		}
+		else {
+			// using annotations, we have no way to specify a @CollectionResult
+			final var collection =
+					session.getPersistenceContextInternal()
+							.getCollection( new CollectionKey( persister, key ) );
+			for ( Object element : resultList ) {
+				if ( element != null
+						&& !getLoadable().getElementDescriptor().getJavaType().getJavaTypeClass().isInstance( element ) ) {
+					throw new QueryTypeMismatchException( "Collection loader for '" + persister.getRole()
+							+ "' returned an instance of '" + element.getClass().getName() + "'" );
+				}
+			}
+			collection.beforeInitialize( persister, resultList.size() );
+			collection.injectLoadedState( getLoadable(), resultList );
+			collection.afterInitialize();
+			session.getPersistenceContextInternal()
+					.getCollectionEntry( collection )
+					.postInitialize( collection, session );
+			return collection;
+		}
+	}
+}

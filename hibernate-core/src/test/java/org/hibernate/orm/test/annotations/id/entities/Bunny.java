@@ -1,0 +1,36 @@
+package org.hibernate.orm.test.annotations.id.entities;
+import java.io.Serializable;
+import java.math.BigDecimal;
+import java.util.Set;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+
+/**
+ * Blown precision on related entity when &#064;JoinColumn is used.
+ *
+ * @see <a href="https://hibernate.atlassian.net/browse/ANN-748">ANN-748</a>
+ * @author Andrew C. Oliver andyspam@osintegrators.com
+ */
+@Entity
+public class Bunny implements Serializable {
+	@Id
+	@Column(name = "id", precision = 128, scale = 0)
+	private BigDecimal id;
+
+	@OneToMany(mappedBy = "bunny", cascade = { CascadeType.PERSIST })
+	Set<PointyTooth> teeth;
+
+	@OneToMany(mappedBy = "bunny", cascade = { CascadeType.PERSIST })
+	Set<TwinkleToes> toes;
+
+	public void setTeeth(Set<PointyTooth> teeth) {
+		this.teeth = teeth;
+	}
+
+	public BigDecimal getId() {
+		return id;
+	}
+}

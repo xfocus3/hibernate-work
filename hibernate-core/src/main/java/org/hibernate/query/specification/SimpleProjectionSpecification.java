@@ -1,0 +1,122 @@
+package org.hibernate.query.specification;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.EntityHandler;
+import jakarta.persistence.TypedQueryReference;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.metamodel.SingularAttribute;
+import org.hibernate.Incubating;
+
+import org.hibernate.query.SelectionQuery;
+import org.hibernate.query.restriction.Path;
+import org.hibernate.query.specification.internal.CountProjectionSpecificationImpl;
+import org.hibernate.query.specification.internal.ExistsProjectionSpecificationImpl;
+import org.hibernate.query.specification.internal.SimpleProjectionSpecificationImpl;
+
+/**
+ * Allows a {@link SelectionSpecification} to be augmented with the specification of
+ * a single projected {@linkplain SingularAttribute attribute} or {@linkplain Path path}.
+ * <pre>
+ * var specification =
+ *         SelectionSpecification.create(Book.class)
+ *                 .restrict(Restriction.contains(Book_.title, "hibernate", false))
+ *                 .sort(Order.desc(Book_.title));
+ * var projection = SimpleProjectionSpecification.create(specification, Book_.isbn);
+ * var isbns = projection.createQuery(session).getResultList();
+ * </pre>
+ * Alternatively, {@link #count} and {@link #exists} allow the number of results to be
+ * determined.
+ * <pre>
+ * var specification =
+ *         SelectionSpecification.create(Book.class)
+ *                 .restrict(Restriction.contains(Book_.title, "hibernate", false))
+ *                 .sort(Order.desc(Book_.title));
+ * var projection = SimpleProjectionSpecification.count(specification);
+ * var resultCount = projection.createQuery(session).getSingleResult();
+ * </pre>
+ * <p>
+ * Use of a {@link Path} allows joining to associated entities.
+ * <pre>
+ * var specification =
+ *         SelectionSpecification.create(Book.class)
+ *                 .restrict(Restriction.contains(Book_.title, "hibernate", false))
+ *                 .sort(Order.desc(Book_.title));
+ * var projection =
+ *         SimpleProjectionSpecification.create(specification,
+ *                 Path.from(Book.class)
+ *                     .to(Book_.publisher)
+ *                     .to(Publisher_.name));
+ * var publisherNames = projection.createQuery(session).getResultList();
+ * </pre>
+ *
+ * @param <T> The result type of the {@link SelectionSpecification}
+ * @param <X> The type of the projected path or attribute
+ *
+ * @since 7.2
+ *
+ * @apiNote This interface marked {@link Incubating} is considered experimental.
+ *          Changes to the API defined here are fully expected in future releases.
+ *
+ * @author Gavin King
+ */
+@Incubating(since = "7.2", group = "query-specifications")
+public interface SimpleProjectionSpecification<T,X> extends QuerySpecification<T> {
+	/**
+	 * Create a new {@code ProjectionSpecification} which augments the given
+	 * {@link SelectionSpecification}.
+	 */
+	@Nonnull
+	static <T,X> SimpleProjectionSpecification<T,X> create(
+			@Nonnull SelectionSpecification<T> selectionSpecification,
+			@Nonnull Path<T,X> projectedPath) {
+		return new SimpleProjectionSpecificationImpl<>( selectionSpecification, projectedPath );
+	}
+
+	/**
+	 * Create a new {@code ProjectionSpecification} which augments the given
+	 * {@link SelectionSpecification}.
+	 */
+	@Nonnull
+	static <T,X> SimpleProjectionSpecification<T,X> create(
+			@Nonnull SelectionSpecification<T> selectionSpecification,
+			@Nonnull SingularAttribute<? super T,X> projectedAttribute) {
+		return new SimpleProjectionSpecificationImpl<>( selectionSpecification, projectedAttribute );
+	}
+
+	/**
+	 * Create a new {@code ProjectionSpecification} which augments the given
+	 * {@link SelectionSpecification} with a {@code count(*)}.
+	 */
+	@Nonnull
+	static <T> SimpleProjectionSpecification<T,Long> count(
+			@Nonnull SelectionSpecification<T> selectionSpecification) {
+		return new CountProjectionSpecificationImpl<>( selectionSpecification );
+	}
+
+	/**
+	 * Create a new {@code ProjectionSpecification} which augments the given
+	 * {@link SelectionSpecification} with an {@code exists()}.
+	 */
+	@Nonnull
+	static <T> SimpleProjectionSpecification<T,Boolean> exists(
+			@Nonnull SelectionSpecification<T> selectionSpecification) {
+		return new ExistsProjectionSpecificationImpl<>( selectionSpecification );
+	}
+
+	@Nonnull
+	@Override
+	SelectionQuery<X> createQuery(@Nonnull EntityHandler entityHandler);
+
+	@Nonnull
+	@Override
+	CriteriaQuery<X> buildCriteria(@Nonnull CriteriaBuilder builder);
+
+	@Nonnull
+	@Override
+	TypedQueryReference<X> reference();
+
+	@Nonnull
+	@Override
+	SimpleProjectionSpecification<T,X> validate(@Nonnull CriteriaBuilder builder);
+}

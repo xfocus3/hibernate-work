@@ -1,0 +1,24 @@
+package org.hibernate.exception;
+
+import org.hibernate.JDBCException;
+
+import java.sql.SQLException;
+
+/**
+ * A {@link JDBCException} indicating a transaction failed because it could not be placed into a serializable ordering
+ * among all currently-executing transactions
+ *
+ * @apiNote This is used to represent {@code WriteTooOldError} on CockroachDB and
+ *          {@code ORA-08177: can't serialize access for this transaction} on Oracle.
+ *
+ * @author Karel Maesen
+ */
+public class TransactionSerializationException extends JDBCException {
+	public TransactionSerializationException(String message, SQLException cause) {
+		super( message, cause );
+	}
+
+	public TransactionSerializationException(String message, SQLException cause, String sql) {
+		super( message, cause, sql );
+	}
+}

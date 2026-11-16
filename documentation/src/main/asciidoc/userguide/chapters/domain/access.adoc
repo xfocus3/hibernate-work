@@ -1,0 +1,119 @@
+[[access]]
+==== Attribute access
+:example-dir-access: {core-project-dir}/src/test/java/org/hibernate/orm/test/mapping/access
+:domain-access-extrasdir: extras
+
+As a Jakarta Persistence provider, Hibernate can inspect entity fields or property accessor methods.
+By default, the placement of the `@Id` annotation determines the default access strategy.
+When placed on a field, Hibernate uses field-based access.
+When placed on the identifier getter, Hibernate uses property-based access.
+
+[IMPORTANT]
+====
+To avoid issues such as
+https://hibernate.atlassian.net/browse/HCANN-63[HCANN-63 - Property name beginning with at least two uppercase characters has odd functionality in HQL], follow the
+https://docs.oracle.com/javase/8/docs/api/java/beans/Introspector.html#decapitalize(java.lang.String)[Java Bean specification] when naming properties.
+====
+
+<<access-embeddable-types,Embeddable types inherit the access strategy>> from their parent entities.
+
+[[entity-pojo-accessors]]
+Strictly speaking, neither Jakarta Persistence nor Hibernate require accessor methods for a persistent field.
+However, direct access to a field of an entity from outside the entity instance itself can expose uninitialized state to the application.
+All external access to fields of an entity should go through methods or accessor methods of the entity class.
+
+Declare persistent fields as `private` to prevent direct external access.
+
+[[field-based-access]]
+===== Field-based access
+
+[[access-field-mapping-example]]
+.Field-based access
+====
+[source,java]
+----
+include::{example-dir-access}/FieldAccessTest.java[tag=access-field-mapping-example, indent=0]
+----
+====
+
+With field-based access, Hibernate does not treat entity methods as part of the persistent state.
+To exclude a field from the entity's persistent state, annotate it with `@Transient` or declare it using the Java `transient` modifier.
+
+[NOTE]
+====
+Another advantage of using field-based access is that some entity attributes can be hidden from outside the entity.
+
+For example, the data access layer usually does not need to modify the entity's `@Version` field.
+
+With field-based access, this field does not need a getter or setter for Hibernate to perform optimistic concurrency control.
+====
+
+[[property-based-access]]
+===== Property-based access
+
+[[access-property-mapping-example]]
+.Property-based access
+====
+[source,java]
+----
+include::{example-dir-access}/PropertyAccessTest.java[tag=access-property-mapping-example, indent=0]
+----
+====
+
+When using property-based access, Hibernate uses the accessors for both reading and writing the entity state.
+Annotate a getter with `@Transient` if its JavaBeans property should not be persistent.
+Business methods and association-management methods such as `addPhone()` and `removePhone()` are not persistent properties and do not require `@Transient`.
+
+===== Overriding the default access strategy
+
+Override the default access strategy with the Jakarta Persistence `@Access` annotation.
+In the following example, the `@Version` attribute is accessed by its field and not by its getter, unlike the other entity attributes.
+
+[[access-property-override-mapping-example]]
+.Overriding access strategy
+====
+[source,java]
+----
+include::{example-dir-access}/PropertyAccessOverrideTest.java[tag=access-property-override-mapping-example, indent=0]
+----
+====
+
+[[access-embeddable-types]]
+===== Embeddable types and access strategy
+
+Embeddables inherit the access strategy of their owning entities.
+This applies to both embedded attributes and collections of embeddables.
+
+An embeddable type can override this inherited access strategy.
+In the following example, the embeddable uses property-based access, regardless of the owning entity's access strategy:
+
+[[access-embeddable-mapping-example]]
+.Embeddable with exclusive access strategy
+====
+[source,java]
+----
+include::{example-dir-access}/EmbeddableAccessTest.java[tag=access-embeddable-mapping-example, indent=0]
+----
+====
+
+The owning entity can use field-based access while the embeddable uses property-based access as specified explicitly:
+
+[[access-embedded-mapping-example]]
+.Entity including a single embeddable type
+====
+[source,java]
+----
+include::{example-dir-access}/EmbeddableAccessTest.java[tag=access-embedded-mapping-example, indent=0]
+----
+====
+
+This also applies to collections of embeddable types:
+
+[[access-element-collection-mapping-example]]
+.Entity including a collection of embeddable types
+====
+[source,java]
+----
+include::{example-dir-access}/ElementCollectionAccessTest.java[tag=access-element-collection-mapping-example, indent=0]
+----
+====

@@ -1,0 +1,246 @@
+package org.hibernate.engine.creation;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import org.hibernate.CacheMode;
+import org.hibernate.ConnectionAcquisitionMode;
+import org.hibernate.ConnectionReleaseMode;
+import org.hibernate.Incubating;
+import org.hibernate.Interceptor;
+import org.hibernate.SPI;
+import org.hibernate.Session;
+import org.hibernate.SharedSessionContract;
+import org.hibernate.StatelessSession;
+import org.hibernate.cfg.StateManagementSettings;
+
+import java.sql.Connection;
+import java.time.Instant;
+import java.util.TimeZone;
+import java.util.function.UnaryOperator;
+
+/**
+ * Common options for builders of {@linkplain Session stateful}
+ * and {@linkplain StatelessSession stateless} sessions.
+ *
+ * @since 7.2
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "7.2")
+public interface CommonBuilder {
+	/// Open the session using the specified options.
+	@Nonnull
+	SharedSessionContract open();
+
+	/// Adds a specific connection to be used to the session options.
+	///
+	/// @param connection The connection to use.
+	/// @return {@code this}, for method chaining
+	@Nonnull
+	CommonBuilder connection(@Nonnull Connection connection);
+
+	/// Specifies the connection handling modes for the session.
+	///
+	/// @apiNote If [ConnectionAcquisitionMode#IMMEDIATELY] is specified,
+	/// then the release mode must be [ConnectionReleaseMode#ON_CLOSE].
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @since 7.0
+	@Nonnull
+	CommonBuilder connectionHandling(@Nonnull ConnectionAcquisitionMode acquisitionMode, @Nonnull ConnectionReleaseMode releaseMode);
+
+	/// Supply an [Interceptor] for the session being built.
+	/// Hibernate invokes its callbacks during that session’s lifecycle.
+	/// If the instance is also supplied to other sessions, it must be thread-safe.
+	///
+	/// @param interceptor The interceptor to use.
+	/// @return `this`, for method chaining
+	@Nonnull
+	@SPI(SPI.Role.SUPPLY)
+	CommonBuilder interceptor(@Nullable Interceptor interceptor);
+
+	/// Specifies that no {@link Interceptor} should be used.  This indicates to
+	/// ignore both (if either) the [interceptor][org.hibernate.cfg.SessionEventSettings#INTERCEPTOR]
+	/// and [session-scoped interceptor][org.hibernate.cfg.SessionEventSettings#SESSION_SCOPED_INTERCEPTOR]
+	/// associated with the `SessionFactory`
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @apiNote Calling [#interceptor(Interceptor)] with `null` has the same effect
+	@Nonnull
+	CommonBuilder noInterceptor();
+
+	/// Specifies that no [session-scoped interceptor][org.hibernate.cfg.SessionEventSettings#SESSION_SCOPED_INTERCEPTOR]
+	/// should be used for the session.  If the `SessionFactory` has a configured
+	/// [interceptor][org.hibernate.cfg.SessionEventSettings#INTERCEPTOR], it will still be used.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @see #noInterceptor
+	///
+	/// @apiNote Unlike [#noInterceptor], this operation does not disable use of an
+	/// [interceptor][org.hibernate.cfg.SessionEventSettings#INTERCEPTOR] associated with the `SessionFactory`.
+	///
+	/// @since 7.2
+	@Nonnull
+	CommonBuilder noSessionInterceptorCreation();
+
+	/// Applies the given statement inspection function to the session.
+	///
+	/// @param operator An operator which accepts a SQL string, returning
+	/// a processed SQL string to be used by Hibernate instead.  The
+	/// operator may simply (and usually) return the original SQL.
+	///
+	/// @return `this`, for method chaining
+	@Nonnull
+	CommonBuilder statementInspector(@Nullable UnaryOperator<String> operator);
+
+	/// Signifies that no SQL statement inspector should be used.
+	///
+	/// By default, if no inspector is explicitly specified, the
+	/// inspector associated with the {@link org.hibernate.SessionFactory}, if one, is
+	/// inherited by the new session.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @apiNote Calling [#statementInspector] with `null` has the same effect.
+	@Nonnull
+	CommonBuilder noStatementInspector();
+
+	/// Specify the tenant identifier to be associated with the opened session.
+	///
+	/// ```java
+	/// try (var session = sessionFactory.withOptions()
+	///			.tenantIdentifier(tenantId)
+	///			.openSession()) {
+	/// 	...
+	///	}
+	/// ```
+	/// @param tenantIdentifier The tenant identifier.
+	///
+	/// @return `this`, for method chaining
+	@Nonnull
+	CommonBuilder tenantIdentifier(Object tenantIdentifier);
+
+	/// Specify a [read-only mode][Session#isDefaultReadOnly]
+	/// for the session. If a session is created in read-only mode, then
+	/// [Connection#setReadOnly] is called when a JDBC connection is obtained.
+	///
+	/// Furthermore, if read/write replication is in use, then:
+	/// * a read-only session will connect to a read-only replica, but
+	/// * a non-read-only session will connect to a writable replica.
+	///
+	/// When read/write replication is in use, it's strongly recommended
+	/// that the session be created with the [initial cache-mode][#initialCacheMode]
+	/// set to [CacheMode#GET], to avoid writing stale data read from a read-only
+	/// replica to the second-level cache. Hibernate cannot possibly guarantee that
+	/// data read from a read-only replica is up to date.
+	///
+	/// When read/write replication is in use, it's possible that an item
+	/// read from the second-level cache might refer to data which does not
+	/// yet exist in the read-only replica. In this situation, an exception
+	/// occurs when the association is fetched. To completely avoid this
+	/// possibility, the [initial cache-mode][#initialCacheMode] must be
+	/// set to [CacheMode#IGNORE]. However, it's also usually possible to
+	/// structure data access code in a way which eliminates this possibility.
+	/// ```java
+	/// try (var readOnlySession =
+	/// 		sessionFactory.withOptions()
+	/// 			.readOnly(true)
+	/// 			.initialCacheMode(CacheMode.IGNORE)
+	///				.openSession()) {
+	/// 	...
+	/// }
+	/// ```
+	///
+	/// If a session is created in read-only mode, then it cannot be
+	/// changed to read-write mode, and any call to [Session#setDefaultReadOnly(boolean)]
+	/// with fail. On the other hand, if a session is created in read-write mode, then it
+	/// may later be switched to read-only mode, but all database access is directed to
+	/// the writable replica.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @see org.hibernate.engine.jdbc.connections.spi.MultiTenantConnectionProvider#getReadOnlyConnection(Object)
+	/// @see org.hibernate.engine.jdbc.connections.spi.MultiTenantConnectionProvider#releaseReadOnlyConnection(Object, Connection)
+	///
+	/// @since 7.2
+	@Incubating(since = "8.0")
+	@Nonnull
+	CommonBuilder readOnly(boolean readOnly);
+
+	/// Specifies a session-specific size for JDBC batching, overriding any
+	/// SessionFactory-level size.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @see org.hibernate.cfg.BatchSettings#STATEMENT_BATCH_SIZE
+	///
+	/// @since 8.0
+	@Nonnull
+	CommonBuilder jdbcBatchSize(int batchSize);
+
+	/// Specify the initial [CacheMode] for the session.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @see SharedSessionContract#getCacheMode()
+	///
+	/// @since 7.2
+	@Nonnull
+	CommonBuilder initialCacheMode(@Nonnull CacheMode cacheMode);
+
+	/// Specify the [CacheStoreMode] for the session.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @since 8.0
+	@Nonnull
+	CommonBuilder cacheStoreMode(@Nullable CacheStoreMode cacheStoreMode);
+
+	/// Specify the [CacheRetrieveMode] for the session.
+	///
+	/// @return `this`, for method chaining
+	///
+	/// @since 8.0
+	@Nonnull
+	CommonBuilder cacheRetrieveMode(@Nullable CacheRetrieveMode cacheRetrieveMode);
+
+	/// Specify the [JDBC time zone][org.hibernate.cfg.JdbcSettings#JDBC_TIME_ZONE]
+	/// to use for the session.
+	///
+	/// @return `this`, for method chaining
+	@Nonnull
+	CommonBuilder jdbcTimeZone(@Nullable TimeZone timeZone);
+
+	/**
+	 * Specify the instant for reading
+	 * {@linkplain org.hibernate.annotations.Temporal temporal} entity data.
+	 * Instances of temporal entities retrieved in the session will represent
+	 * the revisions effective at the given instant.
+	 *
+	 * @see org.hibernate.annotations.Temporal
+	 */
+	@Incubating(since = "8.0")
+	@Nonnull
+	CommonBuilder asOf(@Nullable Instant instant);
+
+	/**
+	 * Specify the
+	 * {@linkplain StateManagementSettings#CHANGESET_ID_SUPPLIER changeset id}
+	 * for reading {@linkplain org.hibernate.annotations.Temporal temporal}
+	 * of {@linkplain org.hibernate.annotations.Audited audited} entity data.
+	 * Instances of temporal or audited entities retrieved in the session will
+	 * represent the revisions effective at the end of the given changeset.
+	 * The given value should match the type returned by the configured
+	 * changeset id supplier.
+	 *
+	 * @see org.hibernate.annotations.Temporal
+	 */
+	@Incubating(since = "8.0")
+	@Nonnull
+	CommonBuilder atChangeset(@Nullable Object changesetId);
+}

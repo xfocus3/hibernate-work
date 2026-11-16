@@ -1,0 +1,83 @@
+package org.hibernate.query.sqm.tree.spi.jpa;
+
+import org.hibernate.query.criteria.JpaTupleElement;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tree.spi.AbstractSqmNode;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmVisitableNode;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.type.descriptor.java.JavaType;
+
+/**
+ * Base support for {@link JpaTupleElement} impls
+ *
+ * @author Steve Ebersole
+ */
+public abstract class AbstractJpaTupleElement<T>
+		extends AbstractSqmNode
+		implements SqmVisitableNode, JpaTupleElement<T> {
+
+	private @Nullable SqmBindableType<T> expressibleType;
+	private @Nullable JavaType<T> javaType;
+	private @Nullable String alias;
+
+	protected AbstractJpaTupleElement(@Nullable SqmBindableType<? super T> expressibleType, @Nonnull NodeBuilder criteriaBuilder) {
+		super( criteriaBuilder );
+		setExpressibleType( expressibleType );
+	}
+
+	protected void copyTo(@Nonnull AbstractJpaTupleElement<T> target, @Nonnull SqmCopyContext context) {
+		target.alias = alias;
+	}
+
+	@Override
+	public @Nullable String getAlias() {
+		return alias;
+	}
+
+	/**
+	 * Protected access to set the alias.
+	 */
+	protected void setAlias(@Nullable String alias) {
+		this.alias = alias;
+	}
+
+	public @Nullable SqmBindableType<T> getNodeType() {
+		return expressibleType;
+	}
+
+	@Override
+	public @Nullable JavaType<T> getJavaTypeDescriptor() {
+		return javaType;
+	}
+
+	protected final void setExpressibleType(
+			// This is fine, since this method is final
+			AbstractJpaTupleElement<T> this,
+			@Nullable SqmBindableType<?> expressibleType) {
+		//noinspection unchecked
+		this.expressibleType = (SqmBindableType<T>) expressibleType;
+		this.javaType = null;
+	}
+
+	protected final void setExpressibleType(
+			// This is fine, since this method is final
+			AbstractJpaTupleElement<T> this,
+			@Nullable SqmBindableType<?> expressibleType,
+			@Nullable JavaType<?> javaType) {
+		//noinspection unchecked
+		this.expressibleType = (SqmBindableType<T>) expressibleType;
+		// Only need to set the java type when no expressible type is given
+		if ( expressibleType == null && javaType != null ) {
+			//noinspection unchecked
+			this.javaType = (JavaType<T>) javaType;
+		}
+		else {
+			this.javaType = null;
+		}
+	}
+
+}

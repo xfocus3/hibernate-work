@@ -1,0 +1,72 @@
+package org.hibernate.metamodel.mapping.ordering.ast;
+
+import jakarta.annotation.Nullable;
+
+import org.hibernate.sql.ast.spi.creation.SqlTreeCreationException;
+
+import jakarta.persistence.criteria.Nulls;
+import org.hibernate.query.SortDirection;
+import org.hibernate.query.spi.QueryEngine;
+import org.hibernate.query.sqm.sql.spi.FakeSqmToSqlAstConverter;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.expression.SqmSelfRenderingExpression;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+
+/**
+ * Contract for anything that can be a sort expression
+ *
+ * @author Steve Ebersole
+ */
+public interface OrderingExpression extends Node {
+
+	SqlAstNode resolve(QuerySpec ast, TableGroup tableGroup, @Nullable String modelPartName, SqlAstCreationState creationState);
+
+	String toDescriptiveText();
+
+	/**
+	 * Apply the SQL AST sort-specifications associated with this ordering-expression
+	 */
+	void apply(
+			QuerySpec ast,
+			TableGroup tableGroup,
+			@Nullable String collation,
+			String modelPartName,
+			SortDirection sortOrder,
+			Nulls nullPrecedence,
+			SqlAstCreationState creationState);
+
+	static Expression applyCollation(
+			Expression expression,
+			@Nullable String collation,
+			SqlAstCreationState creationState) {
+		final Expression sortExpression;
+		if ( collation == null ) {
+			sortExpression = expression;
+		}
+		else {
+			final QueryEngine queryEngine =
+					creationState.getSqmCreationContext().getQueryEngine();
+			final SqmToSqlAstConverter converter =
+					creationState instanceof SqmToSqlAstConverter sqmToSqlAstConverter
+							? sqmToSqlAstConverter
+							: new FakeSqmToSqlAstConverter( creationState );
+			sortExpression =
+					queryEngine.getSqmFunctionRegistry()
+							.findFunctionDescriptor( "collate" )
+							.generateSqmExpression(
+									new SqmSelfRenderingExpression<>( walker -> expression, null, queryEngine.getCriteriaBuilder() ),
+									null,
+									queryEngine
+							)
+							.convertToSqlAst( converter );
+		}
+		if ( sortExpression == null ) {
+			throw new SqlTreeCreationException( "The collate function did not produce a SQL expression" );
+		}
+		return sortExpression;
+	}
+}

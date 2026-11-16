@@ -1,0 +1,88 @@
+plugins {
+    id "java-platform"
+    id "local.module"
+    id "local.publishing"
+}
+
+description = 'Platform (BOM) for Hibernate ORM dependencies'
+
+dependencies {
+    constraints {
+        api project( ":hibernate-core" )
+        api project( ":hibernate-testing" )
+        api project( ":hibernate-dialect-testkit" )
+
+        api project( ":hibernate-envers" )
+        api project( ":hibernate-spatial" )
+        api project( ":hibernate-vector" )
+
+        api project( ":hibernate-community-dialects" )
+        api project( ":hibernate-scan-jandex" )
+
+        api project( ":hibernate-agroal" )
+        api project( ":hibernate-c3p0" )
+        api project( ":hibernate-hikaricp" )
+        api project( ":hibernate-ucp" )
+
+        api project( ":hibernate-jcache" )
+
+        api project( ":hibernate-micrometer" )
+        api project( ":hibernate-graalvm")
+
+        api project( ":hibernate-processor" )
+        api project( ":hibernate-gradle-plugin" )
+        api project( ":hibernate-maven-plugin" )
+        api project( ":hibernate-ant" )
+
+        api project( ":hibernate-assistant" )
+
+        api project( ":hibernate-reveng" )
+
+        api project( ":hibernate-jfr" )
+
+        api libs.hibernateModels
+        api libs.hibernateAccessor
+
+        api libs.jakarta.jpa
+        api libs.jakarta.jta
+        api libs.jakarta.data
+
+        runtime libs.antlrRuntime
+        runtime libs.logging
+        runtime libs.byteBuddy
+        runtime libs.byteBuddyAgent
+        runtime libs.jandex
+
+        runtime libs.hibernateAccessorAsm
+        runtime libs.hibernateAccessorByteBuddy
+
+        runtime libs.jakarta.jaxb
+        runtime libs.jakarta.jaxbApi
+        runtime libs.jakarta.inject
+
+
+        api libs.agroal
+        api libs.agroalPool
+        api libs.c3p0
+        api libs.hikaricp
+
+        api libs.jcache
+
+        api libs.micrometer
+    }
+}
+
+
+tasks.register("releasePrepare") {
+    group = "release-prepare"
+    description = "See :release:releasePrepare for details."
+
+    dependsOn tasks.generateMetadataFileForPublishedArtifactsPublication
+    dependsOn tasks.generatePomFileForPublishedArtifactsPublication
+    dependsOn tasks.publishAllPublicationsToStagingRepository
+}
+
+var publishingExtension = project.getExtensions().getByType(PublishingExtension) as PublishingExtension
+publishingExtension.publications.named("publishedArtifacts", MavenPublication) {
+    from components.javaPlatform
+}

@@ -1,0 +1,144 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import jakarta.annotation.Nullable;
+
+import java.util.Objects;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.internal.util.QuotingHelper.appendSingleQuoteEscapedString;
+
+/**
+ * Represents a literal value in the sqm, e.g.<ul>
+ *     <li>1</li>
+ *     <li>'some string'</li>
+ *     <li>some.JavaClass.CONSTANT</li>
+ *     <li>some.JavaEnum.VALUE</li>
+ *     <li>etc</li>
+ * </ul>
+ *
+ * @author Steve Ebersole
+ */
+public class SqmLiteral<T> extends AbstractSqmExpression<T> {
+	private final @Nullable T value;
+
+	public SqmLiteral(@Nonnull T value, @Nullable SqmBindableType<? super T> inherentType, @Nonnull NodeBuilder nodeBuilder) {
+		super( null, nodeBuilder );
+		assert value != null;
+		assert inherentType == null
+			|| inherentType.getExpressibleJavaType().isInstance( castNonNull( value ) );
+		setExpressibleType(
+				inherentType,
+				inherentType == null ? resolveJavaType( value ) : null
+		);
+		this.value = value;
+	}
+
+	private JavaType<?> resolveJavaType(T value) {
+		return nodeBuilder().getTypeConfiguration().getJavaTypeRegistry()
+				.resolveDescriptor( value instanceof Enum<?> enumValue
+						? enumValue.getDeclaringClass()
+						: value.getClass() );
+	}
+
+	protected SqmLiteral(@Nullable SqmBindableType<T> inherentType, @Nonnull NodeBuilder nodeBuilder) {
+		super( inherentType, nodeBuilder );
+		this.value = null;
+	}
+
+	// Constructor for SqmEnumLiteral
+	SqmLiteral(@Nullable SqmBindableType<T> inherentType, JavaType<T> javaType, @Nonnull T value, @Nonnull NodeBuilder nodeBuilder) {
+		super( inherentType, nodeBuilder );
+		setExpressibleType( inherentType, javaType );
+		this.value = value;
+	}
+
+	@Nonnull
+	@Override
+	public SqmLiteral<T> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		else {
+			final SqmLiteral<T> expression =
+					context.registerCopy( this,
+							new SqmLiteral<>( castNonNull( getLiteralValue() ), getNodeType(), nodeBuilder() ) );
+			copyTo( expression, context );
+			return expression;
+		}
+	}
+
+	public @Nullable T getLiteralValue() {
+		return value;
+	}
+
+	@Nullable
+	@Override
+	public <R> R accept(@Nonnull SemanticQueryWalker<R> walker) {
+		return walker.visitLiteral( this );
+	}
+
+	@Nonnull
+	@Override
+	public String asLoggableText() {
+		return "Literal( " + getLiteralValue() + ")";
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		appendHqlString( hql, getJavaTypeDescriptor(), getLiteralValue() );
+	}
+
+	public static <T> void appendHqlString(@Nonnull StringBuilder sb, @Nullable JavaType<T> javaType, @Nullable T value) {
+		if ( value == null ) {
+			sb.append( "null" );
+		}
+		else {
+			if ( javaType == null ) {
+				throw new IllegalArgumentException( "Can't render value because java type is null" );
+			}
+			if ( value instanceof Number || value instanceof Boolean ) {
+				// We know these are safe to render
+				sb.append( value );
+			}
+			else if ( value instanceof Enum<?> enumValue ) {
+				sb.append( enumValue.getDeclaringClass().getTypeName() ).append( "." ).append( enumValue.name() );
+			}
+			else {
+				// Even if this is not 100% correct, our goal with this implementation is to provide
+				// a cache key or insight into the query structure, not necessarily produce an executable query
+				appendSingleQuoteEscapedString( sb, javaType.toString( value ) );
+			}
+		}
+	}
+
+	@Override
+	public boolean equals(@Nullable Object object) {
+		return object instanceof SqmLiteral<?> that
+			&& getClass() == that.getClass()
+			&& Objects.equals( value, that.value );
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hashCode( value );
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return equals( object );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		return hashCode();
+	}
+}

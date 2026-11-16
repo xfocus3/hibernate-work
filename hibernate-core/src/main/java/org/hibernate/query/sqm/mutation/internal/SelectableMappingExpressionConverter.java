@@ -1,0 +1,52 @@
+package org.hibernate.query.sqm.mutation.internal;
+
+import java.util.function.Function;
+
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.expression.SqmSelfRenderingExpression;
+import org.hibernate.query.sqm.tree.spi.from.SqmFrom;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelection;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+
+/**
+ * A function for producing an {@link Expression} from a {@link NavigablePath} for a {@link TableGroup} and {@link SelectableMapping}.
+ */
+public class SelectableMappingExpressionConverter implements Function<SemanticQueryWalker<?>, Expression> {
+
+	private final NavigablePath navigablePath;
+	private final SelectableMapping selectableMapping;
+
+	private SelectableMappingExpressionConverter(NavigablePath navigablePath, SelectableMapping selectableMapping) {
+		this.navigablePath = navigablePath;
+		this.selectableMapping = selectableMapping;
+	}
+
+	public static <T> SqmSelection<T> forSelectableMapping(SqmFrom<?, T> from, SelectableMapping selectableMapping) {
+		return new SqmSelection<>(
+				new SqmSelfRenderingExpression<>(
+						new SelectableMappingExpressionConverter( from.getNavigablePath(), selectableMapping ),
+						(SqmBindableType<T>) selectableMapping.getJdbcMapping(),
+						from.nodeBuilder()
+				),
+				from.nodeBuilder()
+		);
+	}
+
+	@Override
+	public Expression apply(SemanticQueryWalker semanticQueryWalker) {
+		final SqmToSqlAstConverter converter = (SqmToSqlAstConverter) semanticQueryWalker;
+		final TableGroup tableGroup = converter.getFromClauseAccess().getTableGroup( navigablePath );
+		final Expression expression = converter.getCurrentProcessingState()
+				.getSqlExpressionResolver()
+				.resolveSqlExpression(
+						tableGroup.getTableReference( selectableMapping.getContainingTableExpression() ),
+						selectableMapping
+				);
+		return new ExpressionDomainResultProducer( expression );
+	}
+}

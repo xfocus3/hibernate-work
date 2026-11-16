@@ -1,0 +1,18 @@
+package org.hibernate.event.jfr.testing;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Repeatable;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+/**
+ * Declares a JFR event type to enable for the annotated test method.
+ * Repeatable: multiple events can be enabled on the same method.
+ */
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Repeatable(EnableEvents.class)
+public @interface EnableEvent {
+	String value();
+}

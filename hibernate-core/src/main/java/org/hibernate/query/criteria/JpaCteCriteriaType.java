@@ -1,0 +1,38 @@
+package org.hibernate.query.criteria;
+
+import java.util.List;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.metamodel.model.domain.DomainType;
+
+/**
+ * A CTE (common table expression) criteria type.
+ */
+@Incubating(since = "6.3")
+public interface JpaCteCriteriaType<T> extends JpaCriteriaNode {
+
+	/**
+	 * The name under which this CTE is registered.
+	 */
+	@Nullable String getName();
+
+	/**
+	 * The domain type of the CTE.
+	 */
+	@Nonnull
+	DomainType<T> getType();
+
+	/**
+	 * The attributes of the CTE type.
+	 */
+	@Nonnull
+	List<JpaCteCriteriaAttribute> getAttributes();
+
+	/**
+	 * Returns the found attribute or null.
+	 */
+	@Nullable
+	JpaCteCriteriaAttribute getAttribute(@Nonnull String name);
+}

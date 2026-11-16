@@ -1,0 +1,241 @@
+package org.hibernate.dialect.function;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.jdbc.Size;
+import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.JdbcMappingContainer;
+import org.hibernate.metamodel.mapping.MappingType;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SelectablePath;
+import org.hibernate.metamodel.mapping.SqlTypedMapping;
+import org.hibernate.metamodel.mapping.internal.SelectableMappingImpl;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tuple.internal.AnonymousTupleType;
+import org.hibernate.query.sqm.spi.SqmExpressible;
+import org.hibernate.query.sqm.produce.function.SetReturningFunctionTypeResolver;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.type.BasicPluralType;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.descriptor.jdbc.AggregateJdbcType;
+import org.hibernate.type.descriptor.sql.DdlType;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ *
+ * @since 7.0
+ */
+public class UnnestSetReturningFunctionTypeResolver implements SetReturningFunctionTypeResolver {
+
+	protected final @Nullable String defaultBasicArrayColumnName;
+	protected final String defaultIndexSelectionExpression;
+
+	public UnnestSetReturningFunctionTypeResolver(@Nullable String defaultBasicArrayColumnName, String defaultIndexSelectionExpression) {
+		this.defaultBasicArrayColumnName = defaultBasicArrayColumnName;
+		this.defaultIndexSelectionExpression = defaultIndexSelectionExpression;
+	}
+
+	@Override
+	public AnonymousTupleType<?> resolveTupleType(List<? extends SqmTypedNode<?>> arguments, TypeConfiguration typeConfiguration) {
+		final SqmTypedNode<?> arrayArgument = arguments.get( 0 );
+		final SqmExpressible<?> expressible = arrayArgument.getExpressible();
+		if ( expressible == null ) {
+			throw new IllegalArgumentException( "Couldn't determine array type of argument to function 'unnest'" );
+		}
+		if ( !( expressible.getSqmType() instanceof BasicPluralType<?,?> pluralType ) ) {
+			throw new IllegalArgumentException( "Argument passed to function 'unnest' is not a BasicPluralType. Found: " + expressible );
+		}
+
+		final BasicType<?> elementType = pluralType.getElementType();
+		final SqmBindableType<?>[] componentTypes;
+		final String[] componentNames;
+		if ( elementType.getJdbcType() instanceof AggregateJdbcType aggregateJdbcType
+			&& aggregateJdbcType.getEmbeddableMappingType() != null ) {
+			final EmbeddableMappingType embeddableMappingType = aggregateJdbcType.getEmbeddableMappingType();
+			componentTypes = determineComponentTypes( embeddableMappingType );
+			componentNames = new String[componentTypes.length];
+			final int numberOfAttributeMappings = embeddableMappingType.getNumberOfAttributeMappings();
+			int index = 0;
+			for ( int i = 0; i < numberOfAttributeMappings; i++ ) {
+				final AttributeMapping attributeMapping = embeddableMappingType.getAttributeMapping( i );
+				if ( attributeMapping.getMappedType() instanceof SqmExpressible<?> ) {
+					componentNames[index++] = attributeMapping.getAttributeName();
+				}
+			}
+			assert index == componentNames.length - 1;
+			componentTypes[index] = typeConfiguration.getBasicTypeForJavaType( Long.class );
+			componentNames[index] = CollectionPart.Nature.INDEX.getName();
+		}
+		else {
+			componentTypes = new SqmBindableType<?>[]{ elementType, typeConfiguration.getBasicTypeForJavaType( Long.class ) };
+			componentNames = new String[]{ CollectionPart.Nature.ELEMENT.getName(), CollectionPart.Nature.INDEX.getName() };
+		}
+		return new AnonymousTupleType<>( componentTypes, componentNames );
+	}
+
+	@Override
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	public SelectableMapping[] resolveFunctionReturnType(
+			List<? extends SqlAstNode> arguments,
+			String tableIdentifierVariable,
+			boolean lateral,
+			boolean withOrdinality,
+			SqmToSqlAstConverter converter) {
+		final Expression expression = (Expression) arguments.get( 0 );
+		final JdbcMappingContainer expressionType = expression.getExpressionType();
+		if ( expressionType == null ) {
+			throw new IllegalArgumentException( "Couldn't determine array type of argument to function 'unnest'" );
+		}
+		if ( !( expressionType.getSingleJdbcMapping() instanceof BasicPluralType<?,?> pluralType ) ) {
+			throw new IllegalArgumentException( "Argument passed to function 'unnest' is not a BasicPluralType. Found: " + expressionType );
+		}
+
+		final SelectableMapping indexMapping = withOrdinality ? new SelectableMappingImpl(
+				"",
+				defaultIndexSelectionExpression,
+				new SelectablePath( CollectionPart.Nature.INDEX.getName() ),
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				null,
+				false,
+				false,
+				false,
+				false,
+				false,
+				false,
+				converter.getCreationContext().getTypeConfiguration().getBasicTypeForJavaType( Long.class )
+		) : null;
+
+		final BasicType<?> elementType = pluralType.getElementType();
+		final SelectableMapping[] returnType;
+		if ( elementType.getJdbcType() instanceof AggregateJdbcType aggregateJdbcType
+				&& aggregateJdbcType.getEmbeddableMappingType() != null ) {
+			final EmbeddableMappingType embeddableMappingType = aggregateJdbcType.getEmbeddableMappingType();
+			final int jdbcValueCount = embeddableMappingType.getJdbcValueCount();
+			returnType = new SelectableMapping[jdbcValueCount + (indexMapping == null ? 0 : 1)];
+			for ( int i = 0; i < jdbcValueCount; i++ ) {
+				final SelectableMapping selectableMapping = embeddableMappingType.getJdbcValueSelectable( i );
+				final String selectableName = selectableMapping.getSelectableName();
+				returnType[i] = new SelectableMappingImpl(
+						selectableMapping.getContainingTableExpression(),
+						selectableName,
+						new SelectablePath( selectableName ),
+						null,
+						null,
+						selectableMapping.getLength(),
+						selectableMapping.getArrayLength(),
+						selectableMapping.getPrecision(),
+						selectableMapping.getScale(),
+						selectableMapping.getTemporalPrecision(),
+						selectableMapping.isLob(),
+						true,
+						false,
+						false,
+						false,
+						selectableMapping.isFormula(),
+						selectableMapping.getJdbcMapping()
+				);
+				if ( indexMapping != null ) {
+					returnType[jdbcValueCount] = indexMapping;
+				}
+			}
+		}
+		else {
+			final String elementSelectionExpression = defaultBasicArrayColumnName == null
+					? tableIdentifierVariable
+					: defaultBasicArrayColumnName;
+			final TypeConfiguration typeConfiguration = converter.getCreationContext().getTypeConfiguration();
+			final DdlType ddlType = typeConfiguration.getDdlTypeRegistry()
+					.getDescriptor( elementType.getJdbcType().getDefaultSqlTypeCode() );
+			final SelectableMapping elementMapping;
+			if ( expressionType instanceof SqlTypedMapping typedMapping ) {
+				final String columnTypeName = ddlType.getTypeName(
+						new Size(
+								typedMapping.getPrecision(),
+								typedMapping.getScale(),
+								typedMapping.getLength()
+						),
+						elementType,
+						typeConfiguration.getDdlTypeRegistry()
+				);
+				elementMapping = new SelectableMappingImpl(
+						"",
+						elementSelectionExpression,
+						new SelectablePath( CollectionPart.Nature.ELEMENT.getName() ),
+						null,
+						null,
+						typedMapping.getLength(),
+						typedMapping.getArrayLength(),
+						typedMapping.getPrecision(),
+						typedMapping.getScale(),
+						typedMapping.getTemporalPrecision(),
+						typedMapping.isLob(),
+						true,
+						false,
+						false,
+						false,
+						false,
+						elementType
+				);
+			}
+			else {
+				final String columnTypeName = ddlType.getTypeName(
+						Size.nil(),
+						elementType,
+						typeConfiguration.getDdlTypeRegistry()
+				);
+				elementMapping = new SelectableMappingImpl(
+						"",
+						elementSelectionExpression,
+						new SelectablePath( CollectionPart.Nature.ELEMENT.getName() ),
+						null,
+						null,
+						null,
+						null,
+						null,
+						null,
+						null,
+						false,
+						true,
+						false,
+						false,
+						false,
+						false,
+						elementType
+				);
+			}
+			if ( indexMapping == null ) {
+				returnType = new SelectableMapping[]{ elementMapping };
+			}
+			else {
+				returnType = new SelectableMapping[] {elementMapping, indexMapping};
+			}
+		}
+		return returnType;
+	}
+
+	private static SqmBindableType<?>[] determineComponentTypes(EmbeddableMappingType embeddableMappingType) {
+		final int numberOfAttributeMappings = embeddableMappingType.getNumberOfAttributeMappings();
+		final ArrayList<SqmBindableType<?>> expressibles = new ArrayList<>( numberOfAttributeMappings + 1 );
+
+		for ( int i = 0; i < numberOfAttributeMappings; i++ ) {
+			final AttributeMapping attributeMapping = embeddableMappingType.getAttributeMapping( i );
+			final MappingType mappedType = attributeMapping.getMappedType();
+			if ( mappedType instanceof SqmBindableType<?> sqmExpressible ) {
+				expressibles.add( sqmExpressible );
+			}
+		}
+		return expressibles.toArray( new SqmBindableType<?>[expressibles.size() + 1] );
+	}
+}

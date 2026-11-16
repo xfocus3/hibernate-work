@@ -1,0 +1,16 @@
+package org.hibernate.processor.test.data.hhh20212;
+
+import jakarta.data.repository.CrudRepository;
+import jakarta.data.repository.Find;
+import jakarta.data.repository.Repository;
+import org.hibernate.StatelessSession;
+
+@Repository
+public interface HHH20212Repository extends CrudRepository<HHH20212Entity, Long> {
+	default StatelessSession getStatelessSession() {
+		throw new UnsupportedOperationException();
+	}
+
+	@Find
+	HHH20212Entity byId(Long id);
+}

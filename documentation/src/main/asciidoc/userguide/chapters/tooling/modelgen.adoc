@@ -1,0 +1,89 @@
+[[tooling-modelgen]]
+==== Annotation processing and the static metamodel
+
+:example-dir-model: {testing-project-dir}/src/main/java/org/hibernate/testing/orm/domain/userguide
+:example-dir-metamodelgen-generated: {testing-project-dir}/target/generated/sources/annotationProcessor/java/main/org/hibernate/testing/orm/domain/userguide
+:toolingTestsDir: {core-project-dir}/src/test/java/org/hibernate/orm/test/tooling
+
+`org.hibernate.orm:hibernate-processor` is a compiler annotation processor. It generates
+Jakarta Persistence static metamodel classes and also supports query validation and generated
+query/repository code. See link:{doc-introduction-url}#generator[the Introduction guide] for its
+broader capabilities and link:{doc-data-repositories-url}[the Repositories guide] for Jakarta Data.
+
+Configure the processor separately from the runtime dependency and enhancement plugin:
+see <<tooling-gradle-modelgen,Gradle>>, <<tooling-maven-modelgen,Maven>>, or <<tooling-ant-modelgen,Ant>>.
+Use explicit processor configuration rather than relying on discovery from the application
+classpath. In particular, JDK 23 and later require annotation processing to be explicitly
+configured or requested. See the
+https://docs.oracle.com/en/java/javase/25/docs/specs/man/javac.html#annotation-processing[`javac` documentation].
+
+[[tooling-modelgen-classes]]
+===== Generated classes
+
+For a managed class `Order`, the processor generates `Order_` in the same package, annotated
+with `jakarta.persistence.metamodel.StaticMetamodel`. It handles entities, embeddables, and
+mapped superclasses, including metamodel inheritance for managed superclass relationships.
+It does not generate a persistence metamodel for every arbitrary class on the classpath.
+
+[[ex-tooling-modelgen-model]]
+.Example model
+====
+[source,java,indent=0]
+----
+include::{example-dir-model}/tooling/Customer.java[tags=tooling-modelgen-model]
+include::{example-dir-model}/tooling/Order.java[tags=tooling-modelgen-model]
+include::{example-dir-model}/tooling/Item.java[tags=tooling-modelgen-model]
+----
+====
+
+[[tooling-modelgen-metamodel]]
+.Generated `Order_`
+====
+[source,java,indent=0]
+----
+include::{example-dir-metamodelgen-generated}/tooling/Order_.java[]
+----
+====
+
+The generated fields describe persistent attributes. Their interfaces depend on the attribute:
+for example, the numeric `id` uses `NumericAttribute`, the entity reference uses
+`SingularAttribute`, and the set uses `SetAttribute`. The processor also generates attribute-name
+constants and a `class_` field describing the managed type. During factory bootstrap, Hibernate
+populates the static metamodel fields; compiling a generated class alone does not populate them.
+By default, generated classes also carry `jakarta.annotation.Generated` when the
+`jakarta.annotation` package is available to compilation. The build examples below
+supply that API dependency. Use `addGeneratedAnnotation` to override this default.
+
+[[tooling-modelgen-usage]]
+.Using generated attributes in Criteria
+====
+[source,java,indent=0]
+----
+include::{toolingTestsDir}/modelgen/ModelGenTests.java[tags=tooling-modelgen-usage]
+----
+====
+
+[[tooling-modelgen-options]]
+===== Processor options
+
+Pass processor options through the compiler's `-Aname=value` mechanism. These are processor
+options, not Hibernate runtime settings. The following table summarizes commonly relevant
+options; the Introduction and Repositories guides describe the associated features.
+
+[cols="2,1,4",options="header"]
+|===
+|Option |Default |Purpose
+|`debug` |`false` |Enable processor debug messages.
+|`fullyAnnotationConfigured` |`false` |Ignore XML mappings when `true`.
+|`persistenceXml` |`/META-INF/persistence.xml` |Select the persistence XML resource.
+|`ormXml` |Standard ORM XML discovery |Specify additional ORM XML resources.
+|`lazyXmlParsing` |`false` |Use XML change detection to avoid unnecessary parsing.
+|`addGeneratedAnnotation` |`true` when `jakarta.annotation` is available to compilation; otherwise `false` |Generate `jakarta.annotation.Generated`.
+|`addGenerationDate` |`false` |Include the generation date in `Generated`.
+|`addSuppressWarningsAnnotation` |No suppression |A comma-separated warning list; `true` selects `deprecation` and `rawtypes`.
+|`suppressJakartaDataMetamodel` |`false` |Suppress generation of the Jakarta Data metamodel.
+|`include` |`*` |Include matching types; accepts comma-separated patterns with `*` wildcards.
+|`exclude` |Empty |Exclude matching types using the same pattern syntax.
+|`index` |`true` |Generate/use the processor's entity and enum index for query validation.
+|`jakartaDataSortCompliance` |`false` |Allow Jakarta Data `Sort` parameters with an unbounded wildcard, such as `Sort<?>`, in repository methods.
+|===

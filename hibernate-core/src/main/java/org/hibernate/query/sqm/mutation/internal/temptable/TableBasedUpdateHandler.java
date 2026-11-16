@@ -1,0 +1,724 @@
+package org.hibernate.query.sqm.mutation.internal.temptable;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.dialect.temptable.internal.TemporaryTable;
+import org.hibernate.dialect.temptable.spi.TemporaryTableStrategy;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.util.MutableObject;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.SoftDeleteMapping;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.query.SemanticException;
+import org.hibernate.query.results.internal.TableGroupImpl;
+import org.hibernate.query.spi.DomainQueryExecutionContext;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.spi.QueryParameterImplementor;
+import org.hibernate.query.sqm.ComparisonOperator;
+import org.hibernate.query.sqm.internal.CacheableSqmInterpretation;
+import org.hibernate.query.sqm.internal.DomainParameterXref;
+import org.hibernate.query.sqm.internal.SqmUtil;
+import org.hibernate.query.sqm.mutation.internal.AbstractMutationHandler;
+import org.hibernate.query.sqm.mutation.internal.MultiTableSqmMutationConverter;
+import org.hibernate.query.sqm.mutation.internal.TableKeyExpressionCollector;
+import org.hibernate.query.sqm.mutation.internal.UpdateHandler;
+import org.hibernate.query.sqm.mutation.spi.AfterUseAction;
+import org.hibernate.query.sqm.spi.SqmParameterMappingModelResolutionAccess;
+import org.hibernate.query.sqm.tree.spi.expression.SqmParameter;
+import org.hibernate.query.sqm.tree.spi.update.SqmUpdateStatement;
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslatorFactory;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.expression.QueryLiteral;
+import org.hibernate.sql.ast.spi.query.expression.SqlTuple;
+import org.hibernate.sql.ast.spi.query.from.NamedTableReference;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.from.TableReferenceJoin;
+import org.hibernate.sql.ast.spi.query.from.UnionTableReference;
+import org.hibernate.sql.ast.spi.query.insert.InsertSelectStatement;
+import org.hibernate.sql.ast.spi.query.predicate.ComparisonPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.ExistsPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.InSubQueryPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.ast.spi.query.predicate.PredicateCollector;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.ast.spi.query.select.SelectClause;
+import org.hibernate.sql.ast.spi.query.update.Assignment;
+import org.hibernate.sql.ast.spi.query.update.UpdateStatement;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingImpl;
+import org.hibernate.sql.exec.internal.SqlTypedMappingJdbcParameter;
+import org.hibernate.sql.exec.spi.ExecutionContext;
+import org.hibernate.sql.exec.spi.JdbcOperationQueryMutation;
+import org.hibernate.sql.exec.spi.JdbcParameterBindings;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+import org.hibernate.sql.results.internal.SqlSelectionImpl;
+import org.jboss.logging.Logger;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import static org.hibernate.internal.util.collections.CollectionHelper.mapOfSize;
+import static org.hibernate.query.sqm.internal.SqmJdbcExecutionContextAdapter.omittingLockingAndPaging;
+import static org.hibernate.query.sqm.mutation.internal.temptable.ExecuteWithTemporaryTableHelper.createIdTableSelectQuerySpec;
+import static org.hibernate.query.sqm.mutation.internal.temptable.ExecuteWithTemporaryTableHelper.createMatchingIdsIntoIdTableInsert;
+import static org.hibernate.query.sqm.mutation.internal.temptable.ExecuteWithTemporaryTableHelper.performAfterTemporaryTableUseActions;
+import static org.hibernate.query.sqm.mutation.internal.temptable.ExecuteWithTemporaryTableHelper.performBeforeTemporaryTableUseActions;
+import static org.hibernate.query.sqm.mutation.internal.temptable.ExecuteWithTemporaryTableHelper.saveIntoTemporaryTable;
+import static org.hibernate.sql.ast.spi.query.predicate.Predicate.combinePredicates;
+
+/**
+* @author Steve Ebersole
+*/
+public class TableBasedUpdateHandler
+		extends AbstractMutationHandler
+		implements UpdateHandler {
+	private static final Logger LOG = Logger.getLogger( TableBasedUpdateHandler.class );
+
+	private final TemporaryTable idTable;
+	private final TemporaryTableStrategy temporaryTableStrategy;
+	private final boolean forceDropAfterUse;
+	private final Function<SharedSessionContractImplementor,String> sessionUidAccess;
+	private final DomainParameterXref domainParameterXref;
+	private final Map<QueryParameterImplementor<?>, Map<SqmParameter<?>, List<JdbcParametersList>>> jdbcParamsXref;
+	private final Map<SqmParameter<?>, MappingModelExpressible<?>> resolvedParameterMappingModelTypes;
+	private final @Nullable JdbcParameter sessionUidParameter;
+
+	private final CacheableSqmInterpretation<InsertSelectStatement, JdbcOperationQueryMutation> matchingIdsIntoIdTableInsert;
+	private final List<TableUpdater> tableUpdaters;
+
+	public TableBasedUpdateHandler(
+			SqmUpdateStatement<?> sqmUpdate,
+			DomainParameterXref domainParameterXref,
+			TemporaryTable idTable,
+			TemporaryTableStrategy temporaryTableStrategy,
+			boolean forceDropAfterUse,
+			Function<SharedSessionContractImplementor, String> sessionUidAccess,
+			DomainQueryExecutionContext context,
+			MutableObject<JdbcParameterBindings> firstJdbcParameterBindingsConsumer) {
+		super( sqmUpdate, context.getSession().getSessionFactory() );
+		this.idTable = idTable;
+		this.temporaryTableStrategy  = temporaryTableStrategy;
+		this.forceDropAfterUse = forceDropAfterUse;
+		this.sessionUidAccess = sessionUidAccess;
+
+		final var sessionUidColumn = idTable.getSessionUidColumn();
+		this.sessionUidParameter =
+				sessionUidColumn == null
+						? null
+						: new SqlTypedMappingJdbcParameter( sessionUidColumn );
+		final var sessionFactory = getSessionFactory();
+		final var domainModel = sessionFactory.getMappingMetamodel();
+		final var entityDescriptor =
+				domainModel.getEntityDescriptor( sqmUpdate.getTarget().getEntityName() );
+
+		final String rootEntityName = entityDescriptor.getRootEntityName();
+		final var rootEntityDescriptor = domainModel.getEntityDescriptor( rootEntityName );
+
+		final String hierarchyRootTableName = rootEntityDescriptor.getTableName();
+
+		final var converterDelegate = new MultiTableSqmMutationConverter(
+				entityDescriptor,
+				sqmUpdate,
+				sqmUpdate.getTarget(),
+				domainParameterXref,
+				context.getQueryOptions(),
+				context.getSession().getLoadQueryInfluencers(),
+				context.getQueryParameterBindings(),
+				sessionFactory.getSqlTranslationEngine()
+		);
+
+		final var updatingTableGroup = converterDelegate.getMutatingTableGroup();
+
+		final var hierarchyRootTableReference = updatingTableGroup.resolveTableReference(
+				updatingTableGroup.getNavigablePath(),
+				hierarchyRootTableName
+		);
+		assert hierarchyRootTableReference != null;
+
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		// visit the set-clause using our special converter, collecting
+		// information about the assignments
+
+		final var assignments = converterDelegate.visitSetClause( sqmUpdate.getSetClause() );
+		converterDelegate.addVersionedAssignment( assignments::add, sqmUpdate );
+
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		// visit the where-clause using our special converter, collecting information
+		// about the restrictions
+
+		final var predicateCollector = new PredicateCollector(
+				converterDelegate.visitWhereClause( sqmUpdate.getWhereClause() )
+		);
+
+		entityDescriptor.applyBaseRestrictions(
+				predicateCollector::applyPredicate,
+				updatingTableGroup,
+				true,
+				context.getSession().getLoadQueryInfluencers().getEnabledFilters(),
+				false,
+				null,
+				converterDelegate
+		);
+
+		converterDelegate.pruneTableGroupJoins();
+
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		// cross-reference the TableReference by alias.  The TableGroup already
+		// cross-references it by name, bu the ColumnReference only has the alias
+
+		final Map<String, TableReference> tableReferenceByAlias =
+				mapOfSize( updatingTableGroup.getTableReferenceJoins().size() + 1 );
+		collectTableReference( updatingTableGroup.getPrimaryTableReference(), tableReferenceByAlias::put );
+		for ( int i = 0; i < updatingTableGroup.getTableReferenceJoins().size(); i++ ) {
+			collectTableReference( updatingTableGroup.getTableReferenceJoins().get( i ), tableReferenceByAlias::put );
+		}
+
+		final var softDeleteMapping = entityDescriptor.getSoftDeleteMapping();
+		final var suppliedPredicate =
+				suppliedPredicate( softDeleteMapping, updatingTableGroup, entityDescriptor, predicateCollector );
+
+		final Map<TableReference, List<Assignment>> assignmentsByTable =
+				mapOfSize( updatingTableGroup.getTableReferenceJoins().size() + 1 );
+
+		this.domainParameterXref = domainParameterXref;
+		this.jdbcParamsXref = SqmUtil.generateJdbcParamsXref( domainParameterXref, converterDelegate );
+		this.resolvedParameterMappingModelTypes =
+				converterDelegate.getSqmParameterMappingModelExpressibleResolutions();
+
+		final var jdbcParameterBindings = SqmUtil.createJdbcParameterBindings(
+				context.getQueryParameterBindings(),
+				domainParameterXref,
+				jdbcParamsXref,
+				new SqmParameterMappingModelResolutionAccess() {
+					@Override @SuppressWarnings("unchecked")
+					public <T> MappingModelExpressible<T> getResolvedMappingModelType(SqmParameter<T> parameter) {
+						return (MappingModelExpressible<T>) resolvedParameterMappingModelTypes.get( parameter );
+					}
+				},
+				context.getSession()
+		);
+		if ( sessionUidParameter != null ) {
+			jdbcParameterBindings.addBinding( sessionUidParameter,
+					new JdbcParameterBindingImpl( idTable.getSessionUidColumn().getJdbcMapping(),
+							UUID.fromString( sessionUidAccess.apply( context.getSession() ) ) ) );
+		}
+
+
+		// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+		// segment the assignments by table-reference
+
+		for ( int i = 0; i < assignments.size(); i++ ) {
+			final var assignment = assignments.get( i );
+			final var assignmentColumnRefs = assignment.getAssignable().getColumnReferences();
+			TableReference assignmentTableReference = null;
+			for ( int c = 0; c < assignmentColumnRefs.size(); c++ ) {
+				final var columnReference = assignmentColumnRefs.get( c );
+				final var tableReference = resolveTableReference( columnReference, tableReferenceByAlias );
+				if ( assignmentTableReference != null && assignmentTableReference != tableReference ) {
+					throw new SemanticException( "Assignment referred to columns from multiple tables: "
+													+ assignment.getAssignable(), (String) null );
+				}
+				assignmentTableReference = tableReference;
+			}
+			assignmentsByTable.computeIfAbsent( assignmentTableReference, k -> new ArrayList<>() )
+					.add( assignment );
+		}
+
+		final var executionContext = omittingLockingAndPaging( context );
+		this.matchingIdsIntoIdTableInsert = createMatchingIdsIntoIdTableInsert(
+				converterDelegate,
+				suppliedPredicate,
+				idTable,
+				sessionUidParameter,
+				jdbcParameterBindings,
+				executionContext
+		);
+
+		final var idTableSubQuery = createIdTableSelectQuerySpec(
+				idTable,
+				sessionUidParameter,
+				entityDescriptor,
+				executionContext
+		);
+		final ArrayList<TableUpdater> tableUpdaters = new ArrayList<>();
+		entityDescriptor.visitConstraintOrderedTables(
+				(tableExpression, tableKeyColumnVisitationSupplier) -> tableUpdaters.add(
+						createTableUpdater(
+								updatingTableGroup,
+								tableExpression,
+								tableKeyColumnVisitationSupplier,
+								assignmentsByTable,
+								idTableSubQuery,
+								jdbcParameterBindings,
+								executionContext
+						)
+				)
+		);
+		this.tableUpdaters = tableUpdaters;
+		firstJdbcParameterBindingsConsumer.set( jdbcParameterBindings );
+	}
+
+	private static Predicate suppliedPredicate(
+			SoftDeleteMapping softDeleteMapping,
+			TableGroup updatingTableGroup,
+			EntityPersister entityDescriptor,
+			PredicateCollector predicateCollector) {
+		if ( softDeleteMapping != null ) {
+			final var rootTableReference =
+					(NamedTableReference)
+							updatingTableGroup.resolveTableReference(
+									updatingTableGroup.getNavigablePath(),
+									entityDescriptor.getIdentifierTableDetails().getTableName()
+							);
+			return combinePredicates( predicateCollector.getPredicate(),
+					softDeleteMapping.createNonDeletedRestriction( rootTableReference ) );
+		}
+		else {
+			return predicateCollector.getPredicate();
+		}
+	}
+
+	@Override
+	public JdbcParameterBindings createJdbcParameterBindings(DomainQueryExecutionContext context) {
+		final var jdbcParameterBindings = SqmUtil.createJdbcParameterBindings(
+				context.getQueryParameterBindings(),
+				domainParameterXref,
+				jdbcParamsXref,
+				new SqmParameterMappingModelResolutionAccess() {
+					@Override
+					@SuppressWarnings("unchecked")
+					public <T> MappingModelExpressible<T> getResolvedMappingModelType(SqmParameter<T> parameter) {
+						return (MappingModelExpressible<T>) resolvedParameterMappingModelTypes.get( parameter );
+					}
+				},
+				context.getSession()
+		);
+		if ( sessionUidParameter != null ) {
+			jdbcParameterBindings.addBinding( sessionUidParameter,
+					new JdbcParameterBindingImpl( idTable.getSessionUidColumn().getJdbcMapping(),
+							UUID.fromString( sessionUidAccess.apply( context.getSession() ) ) ) );
+		}
+		return jdbcParameterBindings;
+	}
+
+	@Override
+	public boolean dependsOnParameterBindings() {
+		if ( matchingIdsIntoIdTableInsert.jdbcOperation().dependsOnParameterBindings() ) {
+			return true;
+		}
+		for ( var updater : tableUpdaters ) {
+			if ( updater.jdbcUpdate.dependsOnParameterBindings()
+				|| updater.jdbcInsert != null && updater.jdbcInsert.dependsOnParameterBindings() ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@Override
+	public boolean isCompatibleWith(JdbcParameterBindings jdbcParameterBindings, QueryOptions queryOptions) {
+		if ( !matchingIdsIntoIdTableInsert.jdbcOperation().isCompatibleWith( jdbcParameterBindings, queryOptions ) ) {
+			return false;
+		}
+		for ( var updater : tableUpdaters ) {
+			if ( !updater.jdbcUpdate.isCompatibleWith( jdbcParameterBindings, queryOptions ) ) {
+				return false;
+			}
+			if ( updater.jdbcInsert != null
+				&& !updater.jdbcInsert.isCompatibleWith( jdbcParameterBindings, queryOptions ) ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	protected TableReference resolveTableReference(
+			ColumnReference columnReference,
+			Map<String, TableReference> tableReferenceByAlias) {
+		final var tableReferenceByQualifier =
+				tableReferenceByAlias.get( columnReference.getQualifier() );
+		if ( tableReferenceByQualifier != null ) {
+			return tableReferenceByQualifier;
+		}
+
+		throw new SemanticException( "Assignment referred to column of a joined association: " + columnReference, (String) null );
+	}
+
+	protected NamedTableReference resolveUnionTableReference(
+			TableReference tableReference,
+			String tableExpression) {
+		if ( tableReference instanceof UnionTableReference ) {
+			return new NamedTableReference(
+					tableExpression,
+					tableReference.getIdentificationVariable(),
+					tableReference.isOptional()
+			);
+		}
+		return (NamedTableReference) tableReference;
+	}
+
+	private TableUpdater createTableUpdater(
+			TableGroup updatingTableGroup,
+			String tableExpression,
+			Supplier<Consumer<SelectableConsumer>> tableKeyColumnVisitationSupplier,
+			Map<TableReference, List<Assignment>> assignmentsByTable,
+			QuerySpec idTableSubQuery,
+			JdbcParameterBindings firstJdbcParameterBindings,
+			ExecutionContext executionContext) {
+
+		// update `updatingTableReference`
+		// set ...
+		// where `keyExpression` in ( `idTableSubQuery` )
+
+		final var updatingTableReference = updatingTableGroup.getTableReference(
+				updatingTableGroup.getNavigablePath(),
+				tableExpression,
+				true
+		);
+
+		final var assignments = assignmentsByTable.get( updatingTableReference );
+		if ( assignments == null || assignments.isEmpty() ) {
+			// no assignments for this table - skip it
+			return null;
+		}
+
+		final var dmlTableReference =
+				resolveUnionTableReference( updatingTableReference, tableExpression );
+		final var sqlAstTranslatorFactory =
+				executionContext.getSession().getFactory()
+						.getJdbcServices().getJdbcEnvironment()
+						.getSqlAstTranslatorFactory();
+
+		final var keyExpression =
+				resolveMutatingTableKeyExpression( tableExpression,
+						tableKeyColumnVisitationSupplier );
+		return new TableUpdater(
+				createTableUpdate(
+						idTableSubQuery,
+						executionContext,
+						assignments,
+						dmlTableReference,
+						sqlAstTranslatorFactory,
+						firstJdbcParameterBindings,
+						keyExpression
+				),
+				isTableOptional( tableExpression ) ? createTableInsert(
+						tableExpression,
+						dmlTableReference,
+						keyExpression,
+						tableKeyColumnVisitationSupplier,
+						idTableSubQuery,
+						assignments,
+						sqlAstTranslatorFactory,
+						firstJdbcParameterBindings,
+						executionContext
+				) : null
+		);
+	}
+
+	protected boolean isTableOptional(String tableExpression) {
+		final var entityPersister = getEntityDescriptor().getEntityPersister();
+		for ( int i = 0; i < entityPersister.getTableSpan(); i++ ) {
+			if ( tableExpression.equals( entityPersister.getTableName( i ) )
+				&& entityPersister.isNullableTable( i ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private JdbcOperationQueryMutation createTableInsert(
+			String targetTableExpression,
+			NamedTableReference targetTableReference,
+			Expression targetTableKeyExpression,
+			Supplier<Consumer<SelectableConsumer>> tableKeyColumnVisitationSupplier,
+			QuerySpec idTableSubQuery,
+			List<Assignment> assignments,
+			SqlAstTranslatorFactory sqlAstTranslatorFactory,
+			JdbcParameterBindings firstJdbcParameterBindings,
+			ExecutionContext executionContext) {
+
+		final var sessionFactory = executionContext.getSession().getFactory();
+		// Execute a query in the form -
+		//
+		// insert into <target> (...)
+		// 		select ...
+		// 		from <id-table> temptable_
+		// 		where not exists (
+		// 			select 1
+		//			from <target> dml_
+		//			where dml_.<key> = temptable_.<key>
+		// 		)
+
+		// Create a new QuerySpec for the "insert source" select query.  This
+		// is mostly a copy of the incoming `idTableSubQuery` along with the
+		// NOT-EXISTS predicate
+		final var insertSourceSelectQuerySpec = makeInsertSourceSelectQuerySpec( idTableSubQuery );
+
+		// create the `select 1 ...` sub-query and apply the not-exists predicate
+		insertSourceSelectQuerySpec.applyPredicate(
+				new ExistsPredicate(
+						createExistsSubQuerySpec(
+								targetTableExpression,
+								tableKeyColumnVisitationSupplier,
+								idTableSubQuery,
+								sessionFactory
+						),
+						true,
+						sessionFactory.getTypeConfiguration()
+								.getBasicTypeForJavaType( Boolean.class )
+				)
+		);
+
+		// Collect the target column references from the key expressions
+		final List<ColumnReference> targetColumnReferences = new ArrayList<>();
+		if ( targetTableKeyExpression instanceof SqlTuple sqlTuple ) {
+			final var expressions = sqlTuple.getExpressions();
+			//noinspection unchecked
+			targetColumnReferences.addAll( (Collection<? extends ColumnReference>) expressions );
+		}
+		else {
+			targetColumnReferences.add( (ColumnReference) targetTableKeyExpression );
+		}
+
+		// And transform assignments to target column references and selections
+		for ( var assignment : assignments ) {
+			targetColumnReferences.addAll( assignment.getAssignable().getColumnReferences() );
+			insertSourceSelectQuerySpec.getSelectClause()
+					.addSqlSelection( new SqlSelectionImpl( assignment.getAssignedValue() ) );
+		}
+
+		final var insertSqlAst = new InsertSelectStatement( targetTableReference, getEntityDescriptor() );
+		insertSqlAst.addTargetColumnReferences( targetColumnReferences.toArray( new ColumnReference[0] ) );
+		insertSqlAst.setSourceSelectStatement( insertSourceSelectQuerySpec );
+
+		return sqlAstTranslatorFactory.buildTranslator( new SqlAstTranslationRequest.QueryMutation( sessionFactory, insertSqlAst ) )
+				.translate( firstJdbcParameterBindings, executionContext.getQueryOptions() );
+	}
+
+	protected QuerySpec createExistsSubQuerySpec(
+			String targetTableExpression,
+			Supplier<Consumer<SelectableConsumer>> tableKeyColumnVisitationSupplier,
+			QuerySpec idTableSubQuery,
+			SessionFactoryImplementor sessionFactory) {
+		final var existsTableReference =
+				new NamedTableReference( targetTableExpression, "dml_" );
+
+		// Prepare a not exists sub-query to avoid violating constraints
+		final var existsSubQuerySpec = new QuerySpec( false );
+		existsSubQuerySpec.getSelectClause()
+				.addSqlSelection( new SqlSelectionImpl(
+						new QueryLiteral<>( 1,
+								sessionFactory.getTypeConfiguration()
+										.getBasicTypeForJavaType( Integer.class ) )
+				) );
+		existsSubQuerySpec.getFromClause()
+				.addRoot( new TableGroupImpl( null, null,
+						existsTableReference, getEntityDescriptor() ) );
+
+		final var existsKeyColumnCollector = new TableKeyExpressionCollector( getEntityDescriptor() );
+		tableKeyColumnVisitationSupplier.get().accept( (columnIndex, selection) -> {
+			assert selection.getContainingTableExpression().equals( targetTableExpression );
+			existsKeyColumnCollector.apply( new ColumnReference( existsTableReference, selection ) );
+		} );
+		existsSubQuerySpec.applyPredicate(
+				new ComparisonPredicate(
+						existsKeyColumnCollector.buildKeyExpression(),
+						ComparisonOperator.EQUAL,
+						asExpression( idTableSubQuery.getSelectClause())
+				)
+		);
+		return existsSubQuerySpec;
+	}
+
+	protected static QuerySpec makeInsertSourceSelectQuerySpec(QuerySpec idTableSubQuery) {
+		final var idTableQuerySpec = new QuerySpec( true );
+		final var fromClause = idTableSubQuery.getFromClause();
+		for ( var root : fromClause.getRoots() ) {
+			idTableQuerySpec.getFromClause().addRoot( root );
+		}
+		final var selectClause = idTableSubQuery.getSelectClause();
+		for ( var sqlSelection : selectClause.getSqlSelections() ) {
+			idTableQuerySpec.getSelectClause().addSqlSelection( sqlSelection );
+		}
+		idTableQuerySpec.applyPredicate( idTableSubQuery.getWhereClauseRestrictions() );
+		return idTableQuerySpec;
+	}
+
+	private JdbcOperationQueryMutation createTableUpdate(
+			QuerySpec idTableSubQuery,
+			ExecutionContext executionContext,
+			List<Assignment> assignments,
+			NamedTableReference dmlTableReference,
+			SqlAstTranslatorFactory sqlAstTranslatorFactory,
+			JdbcParameterBindings firstJdbcParameterBindings,
+			Expression keyExpression) {
+		final var sqlAst =
+				new UpdateStatement( dmlTableReference, assignments,
+						new InSubQueryPredicate( keyExpression, idTableSubQuery, false ) );
+		return sqlAstTranslatorFactory.buildTranslator( new SqlAstTranslationRequest.QueryMutation( executionContext.getSession().getFactory(), sqlAst ) )
+				.translate( firstJdbcParameterBindings, executionContext.getQueryOptions() );
+	}
+
+	protected Expression resolveMutatingTableKeyExpression(String tableExpression, Supplier<Consumer<SelectableConsumer>> tableKeyColumnVisitationSupplier) {
+		final var keyColumnCollector = new TableKeyExpressionCollector( getEntityDescriptor() );
+		tableKeyColumnVisitationSupplier.get().accept(
+				(columnIndex, selection) -> {
+					assert selection.getContainingTableExpression().equals( tableExpression );
+					keyColumnCollector.apply( new ColumnReference( (String) null, selection ) );
+				}
+		);
+		return keyColumnCollector.buildKeyExpression();
+	}
+
+	protected Expression asExpression(SelectClause selectClause) {
+		final List<SqlSelection> sqlSelections = selectClause.getSqlSelections();
+		if ( sqlSelections.size() == 1 ) {
+			return sqlSelections.get( 0 ).getExpression();
+		}
+		final List<Expression> expressions = new ArrayList<>( sqlSelections.size() );
+		for ( var sqlSelection : sqlSelections ) {
+			expressions.add( sqlSelection.getExpression() );
+		}
+		return new SqlTuple( expressions, null );
+	}
+
+	protected void collectTableReference(
+			TableReference tableReference,
+			BiConsumer<String, TableReference> consumer) {
+		consumer.accept( tableReference.getIdentificationVariable(), tableReference );
+	}
+
+	protected void collectTableReference(
+			TableReferenceJoin tableReferenceJoin,
+			BiConsumer<String, TableReference> consumer) {
+		collectTableReference( tableReferenceJoin.getJoinedTableReference(), consumer );
+	}
+
+	@Override
+	public int execute(JdbcParameterBindings jdbcParameterBindings, DomainQueryExecutionContext context) {
+		if ( LOG.isTraceEnabled() ) {
+			LOG.tracef(
+					"Starting multi-table update execution - %s",
+					getSqmStatement().getTarget().getModel().getName()
+			);
+		}
+
+		final var executionContext = omittingLockingAndPaging( context );
+		performBeforeTemporaryTableUseActions(
+				idTable,
+				temporaryTableStrategy,
+				executionContext
+		);
+
+		try {
+			final int rows = saveIntoTemporaryTable(
+					matchingIdsIntoIdTableInsert.jdbcOperation(),
+					jdbcParameterBindings,
+					executionContext
+			);
+			for ( var tableUpdater : tableUpdaters ) {
+				updateTable(
+						tableUpdater,
+						rows,
+						jdbcParameterBindings,
+						executionContext
+				);
+			}
+			return rows;
+		}
+		finally {
+			performAfterTemporaryTableUseActions(
+					idTable,
+					sessionUidAccess,
+					getAfterUseAction(),
+					executionContext
+			);
+		}
+	}
+
+	private void updateTable(
+			TableUpdater tableUpdater,
+			int expectedUpdateCount,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext) {
+		if ( tableUpdater != null ) {
+			final int updateCount =
+					executeMutation( tableUpdater.jdbcUpdate, jdbcParameterBindings, executionContext );
+			if ( updateCount != expectedUpdateCount ) {// If the table is optional, execute an insert
+				if ( tableUpdater.jdbcInsert != null ) {
+					final int insertCount =
+							executeMutation( tableUpdater.jdbcInsert, jdbcParameterBindings, executionContext );
+					assert insertCount + updateCount == expectedUpdateCount;
+				}
+			}
+			// Else we are done when the update count matches
+		}
+		// Else no assignments for this table - skip it
+	}
+
+	private int executeMutation(JdbcOperationQueryMutation jdbcUpdate, JdbcParameterBindings jdbcParameterBindings, ExecutionContext executionContext) {
+		return executionContext.getSession().getFactory().getJdbcServices()
+				.getJdbcMutationExecutor().execute(
+						jdbcUpdate,
+						jdbcParameterBindings,
+						sql -> executionContext.getSession().getJdbcCoordinator()
+								.getStatementPreparer().prepareStatement( sql ),
+						(integer, preparedStatement) -> {},
+						executionContext
+				);
+	}
+
+	protected record TableUpdater(
+			JdbcOperationQueryMutation jdbcUpdate,
+			@Nullable JdbcOperationQueryMutation jdbcInsert) {
+	}
+
+	// For Hibernate reactive
+	protected List<TableUpdater> getTableUpdaters() {
+		return tableUpdaters;
+	}
+
+	// For Hibernate reactive
+	protected AfterUseAction getAfterUseAction() {
+		return forceDropAfterUse ? AfterUseAction.DROP : temporaryTableStrategy.getTemporaryTableAfterUseAction();
+	}
+
+	// For Hibernate reactive
+	protected TemporaryTable getIdTable() {
+		return idTable;
+	}
+
+	// For Hibernate reactive
+	protected TemporaryTableStrategy getTemporaryTableStrategy() {
+		return temporaryTableStrategy;
+	}
+
+	// For Hibernate reactive
+	protected CacheableSqmInterpretation<InsertSelectStatement, JdbcOperationQueryMutation> getMatchingIdsIntoIdTableInsert() {
+		return matchingIdsIntoIdTableInsert;
+	}
+
+	// For Hibernate reactive
+	protected Function<SharedSessionContractImplementor, String> getSessionUidAccess() {
+		return sessionUidAccess;
+	}
+
+	// For Hibernate reactive
+	protected @Nullable JdbcParameter getSessionUidParameter() {
+		return sessionUidParameter;
+	}
+}

@@ -1,0 +1,49 @@
+package org.hibernate.query.criteria;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Nulls;
+import jakarta.persistence.criteria.Order;
+
+import org.hibernate.query.SortDirection;
+
+/**
+ * @author Steve Ebersole
+ */
+public interface JpaOrder extends Order, JpaCriteriaNode {
+
+	/**
+	 * The direction, ascending or descending, in which to sort
+	 */
+	@Nonnull
+	SortDirection getSortDirection();
+
+	/**
+	 * Set the precedence of nulls for this order element
+	 */
+	@Nonnull
+	JpaOrder nullPrecedence(@Nonnull Nulls precedence);
+
+	/**
+	 * The precedence for nulls for this order element
+	 */
+	@Nonnull
+	Nulls getNullPrecedence();
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Covariant returns
+
+	/**
+	 * Reverse the sorting direction
+	 */
+	@Nonnull
+	@Override
+	JpaOrder reverse();
+
+	/**
+	 * The expression to sort by
+	 */
+	@Nonnull
+	@Override
+	JpaExpression<?> getExpression();
+}

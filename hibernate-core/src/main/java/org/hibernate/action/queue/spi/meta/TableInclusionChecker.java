@@ -1,0 +1,11 @@
+package org.hibernate.action.queue.spi.meta;
+
+import org.hibernate.Incubating;
+
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "action-queue")
+@FunctionalInterface
+public interface TableInclusionChecker {
+	boolean include(TableDescriptor tableDescriptor);
+}

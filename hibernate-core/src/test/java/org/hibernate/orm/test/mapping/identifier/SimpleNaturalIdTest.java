@@ -1,0 +1,138 @@
+package org.hibernate.orm.test.mapping.identifier;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+
+import jakarta.persistence.Timeout;
+import org.hibernate.KeyType;
+import org.hibernate.LockMode;
+import org.hibernate.Session;
+import org.hibernate.annotations.NaturalId;
+
+import org.hibernate.testing.orm.junit.DialectFeatureChecks;
+import org.hibernate.testing.orm.junit.EntityManagerFactoryScope;
+import org.hibernate.testing.orm.junit.Jpa;
+import org.hibernate.testing.orm.junit.RequiresDialectFeature;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+/**
+ * @author Vlad Mihalcea
+ */
+@Jpa(annotatedClasses = {SimpleNaturalIdTest.Book.class})
+public class SimpleNaturalIdTest {
+
+	@Test
+	public void test(EntityManagerFactoryScope scope) {
+		scope.inTransaction( entityManager -> {
+			Book book = new Book();
+			book.setId(1L);
+			book.setTitle("High-Performance Java Persistence");
+			book.setAuthor("Vlad Mihalcea");
+			book.setIsbn("978-9730228236");
+
+			entityManager.persist(book);
+		});
+		scope.inTransaction( entityManager -> {
+			//tag::naturalid-simple-load-access-example[]
+			Book book = entityManager
+				.unwrap(Session.class)
+				.bySimpleNaturalId(Book.class)
+				.load("978-9730228236");
+			//end::naturalid-simple-load-access-example[]
+
+			assertEquals("High-Performance Java Persistence", book.getTitle());
+		});
+		scope.inTransaction( entityManager -> {
+			//tag::naturalid-load-access-example[]
+			Book book = entityManager
+				.unwrap(Session.class)
+				.byNaturalId(Book.class)
+				.using("isbn", "978-9730228236")
+				.load();
+			//end::naturalid-load-access-example[]
+
+			assertEquals("High-Performance Java Persistence", book.getTitle());
+		});
+	}
+
+	@Test
+	@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsLockTimeouts.class )
+	void testLoading(EntityManagerFactoryScope scope) {
+		scope.inTransaction( (entityManager) -> {
+			//tag::naturalid-loading-example[]
+			var book = entityManager.find( Book.class,
+					"978-9730228236",
+					KeyType.NATURAL,
+					LockMode.PESSIMISTIC_WRITE,
+					Timeout.seconds( 1 ) );
+			var books = entityManager.unwrap( Session.class ).findMultiple( Book.class,
+					List.of("978-9730228236"),
+					KeyType.NATURAL,
+					LockMode.PESSIMISTIC_WRITE,
+					Timeout.seconds( 1 ) );
+			//end::naturalid-loading-example[]
+		} );
+	}
+
+	@AfterEach
+	void tearDown(EntityManagerFactoryScope scope) {
+		scope.dropData();
+	}
+
+	//tag::naturalid-simple-basic-attribute-mapping-example[]
+	@Entity(name = "Book")
+	public static class Book {
+
+		@Id
+		private Long id;
+
+		private String title;
+
+		private String author;
+
+		@NaturalId
+		private String isbn;
+
+		//Getters and setters are omitted for brevity
+	//end::naturalid-simple-basic-attribute-mapping-example[]
+
+		public Long getId() {
+			return id;
+		}
+
+		public void setId(Long id) {
+			this.id = id;
+		}
+
+		public String getTitle() {
+			return title;
+		}
+
+		public void setTitle(String title) {
+			this.title = title;
+		}
+
+		public String getAuthor() {
+			return author;
+		}
+
+		public void setAuthor(String author) {
+			this.author = author;
+		}
+
+		public String getIsbn() {
+			return isbn;
+		}
+
+		public void setIsbn(String isbn) {
+			this.isbn = isbn;
+		}
+	//tag::naturalid-simple-basic-attribute-mapping-example[]
+	}
+	//end::naturalid-simple-basic-attribute-mapping-example[]
+}

@@ -1,0 +1,212 @@
+[[entity]]
+=== Entity classes and attribute access
+:domain-entity-core-test-base: {core-project-dir}/src/test/java/org/hibernate/orm/test
+:domain-entity-example-dir-mapping: {domain-entity-core-test-base}/mapping
+:domain-entity-example-dir-locking: {domain-entity-core-test-base}/locking
+:example-dir-proxy: {domain-entity-core-test-base}/proxy
+:example-dir-persister: {domain-entity-core-test-base}/persister
+:domain-entity-extrasdir: extras
+
+Entity classes represent objects with persistent identity.
+The following sections describe class requirements and how Hibernate accesses persistent attributes.
+See <<identifiers>> for identifier mappings and <<domain-relational-mapping>> for table and column mappings.
+
+[[entity-pojo]]
+==== POJO Models
+
+Section _2.1 The Entity Class_ of the _Jakarta Persistence specification_ defines its requirements for an entity class.
+Applications that wish to remain portable across Jakarta Persistence providers should adhere to these requirements:
+
+> - The entity class must be annotated with the `@Entity` annotation or declared as an `entity` in its XML descriptor.
+>
+> - The entity class must be a top-level class or a static inner class.
+> An enum, record, or interface may not be designated as an entity.
+>
+> - The entity class must have a `public` or `protected` constructor with no parameters, which is called by the persistence provider runtime to instantiate the entity.
+>
+> - The entity class must be non-`final`. Every method and persistent instance variable of the entity class must also be non-`final`.
+>
+> An entity might be an abstract class, or it might be a concrete class.
+> An entity may extend a non-entity class, or it may extend another entity class.
+> A non-entity class may extend an entity class.
+>
+> The persistent state of an entity is represented by instance variables, which may correspond to JavaBeans properties.
+> An instance variable may be directly accessed only within the methods of the entity, by the entity instance itself.
+> An instance variable of an entity must _not_ be directly accessed by a client of the entity.
+> The state of the entity is available to clients only through the methods of the entity--that is, via accessor (getter/setter) methods, or via other business methods.
+
+Hibernate, however, is not as strict in its requirements. Differences from the list above include:
+
+- Fields may be declared `final` in many cases; see <<entity-pojo-final-fields>> below.
+
+- The constructor with no parameters may be declared with package visibility, or, when the <<BytecodeEnhancement,bytecode enhancer>> is used, it may be omitted completely.
+
+- Final classes and classes with final methods are tolerated but not recommended unless the bytecode enhancer is used.
+
+
+The following sections explain these requirements.
+
+[[entity-pojo-final]]
+==== Prefer non-final classes
+
+A central feature of Hibernate is the ability to lazily load entity state via _proxies_.
+This feature depends on:
+
+- the entity class being non-`final` (or implementing an interface that declares the external operations of the entity), and
+- the non-`private` methods and accessor methods being non-`final`.
+
+Hibernate _can_ persist a `final` entity class that does not implement any interface, but it is then not able to use proxies for lazily fetching to-one associations to that entity type, limiting options for performance tuning.
+
+The bytecode enhancer automatically makes any entity class non-`final`, along with all its methods.
+
+[[entity-pojo-final-fields]]
+==== Prefer non-final persistent fields
+
+While the JPA specification requires persistent fields to be non-`final`, Hibernate tolerates `final` persistent fields.
+However, `final` persistent fields are not guaranteed to work in every situation.
+
+Hibernate typically instantiates entities using a no-argument constructor and then sets persistent fields individually through reflection.
+Setting a `final` field through reflection is deprecated starting with JDK 26 and will be denied in a future JDK version.
+When Hibernate detects `final` persistent fields that will need to be set through reflection, it logs a warning on boot.
+
+The <<BytecodeEnhancement,bytecode enhancer>> automatically removes the `final` modifier from persistent fields,
+resolving these warnings.
+Alternatively, remove the `final` modifier from the persistent field declarations.
+
+`final` fields are supported for types that use constructor-based instantiation:
+
+* record types used as `@Embeddable` (including `@EmbeddedId`) or as `@IdClass`,
+* embeddable or `@IdClass` types with an <<embeddable-instantiator,`@Instantiator`-annotated constructor>>,
+
+since those are instantiated through their constructor without any reflective field mutation.
+
+The configuration property `hibernate.mapping.final_persistent_fields` controls the behavior of this check.
+Valid values are `warn` (the default), `error` (fail on boot), and `ignore` (suppress the check).
+
+[[entity-pojo-constructor]]
+==== Implement a no-argument constructor
+
+The entity class should have a constructor with no parameters.
+Both Hibernate and Jakarta Persistence require this.
+Hibernate allows the constructor to be declared with `public`, `protected`, or package visibility.
+
+The bytecode enhancer automatically adds a constructor with no parameters if it is missing.
+
+[[domain-version-attributes]]
+==== Version attributes
+
+A version attribute enables optimistic locking: Hibernate maintains it to detect conflicting updates or deletes to an entity.
+Declare it using `@Version` and let Hibernate initialize and update its value.
+Application code must not assign a new version to force an update.
+See <<locking-optimistic,versioned optimistic locking>> for conflict checks and explicit validation of unchanged entities.
+
+[[locking-optimistic-mapping]]
+An entity hierarchy has at most one version attribute, declared on the root entity or an inherited mapped superclass.
+For an entity mapped to multiple tables, map the version to its primary table.
+
+Jakarta Persistence supports `int`, `Integer`, `short`, `Short`, `long`, `Long`, `java.sql.Timestamp`, `java.time.Instant`, and `java.time.LocalDateTime` as version types.
+Hibernate also supports additional types with suitable version semantics; custom types require an appropriate link:{doc-javadoc-url}org/hibernate/usertype/UserVersionType.html[`UserVersionType`].
+
+[[locking-optimistic-version-example]]
+.Numeric and temporal version mappings
+====
+[source,java,indent=0]
+----
+include::{domain-entity-example-dir-locking}/LockingGuideTests.java[tags=locking-guide-version-mapping]
+----
+
+[source,java,indent=0]
+----
+include::{domain-entity-example-dir-locking}/OptimisticLockingInstantTest.java[tags=locking-optimistic-version-number-example]
+----
+====
+
+[[domain-version-numeric]]
+===== Numeric versions and automatic advancement
+
+[[locking-optimistic-version-number]]
+A numeric version records successive revisions of an entity without depending on clock precision.
+Hibernate initializes it when the entity is persisted and advances it when a version-affecting change is written.
+
+[[locking-optimistic-version-number-example]]
+Not every attribute or relationship change increments the entity's version.
+<<domain-version-exclusions,Excluded attributes>> do not themselves trigger an increment, and relationship effects depend on <<associations-one-to-many-bidirectional,association ownership>> and mapping.
+An inverse-side relationship change does not by itself imply an increment of that entity's version.
+
+Explicit force-increment locks can advance a version even without an ordinary entity change.
+See <<locking-LockMode,lock modes and requesting locks>> for their timing, prerequisites, and upgrade behavior.
+
+[[domain-version-temporal]]
+===== Temporal versions and generation
+
+[[locking-optimistic-timestamp]]
+A temporal version, such as the `Instant` mapping above, uses timestamps instead of a sequence of revision numbers.
+Numeric versions are generally preferable for conflict detection: finite timestamp precision or repeated clock values can produce the same version for separate changes.
+
+[[locking-optimistic-version-timestamp-example]]
+Database timestamps also depend on the database's clock and timestamp semantics; they are not guaranteed unique revisions.
+
+Hibernate normally generates a temporal version in the VM.
+`@CurrentTimestamp(source = SourceType.DB)` uses the database clock, while `source = SourceType.VM` uses the VM clock.
+The default source of `@CurrentTimestamp` is `DB`.
+For a version attribute, obtaining the database timestamp can occur before the write; do not assume that every database-generated value uses identical SQL or retrieval behavior.
+See <<mapping-generated-CurrentTimestamp,`@CurrentTimestamp` generation>> for the general annotation contract.
+
+[[locking-optimistic-version-timestamp-source-mapping-example]]
+.Database-clock version mapping
+====
+[source,java,indent=0]
+----
+include::{domain-entity-example-dir-locking}/VersionSourceTest.java[tags=locking-optimistic-version-timestamp-source-mapping-example]
+----
+====
+
+[[locking-optimistic-version-timestamp-source-persist-example]]
+.Persisting an entity with a database-clock version
+====
+[source,java,indent=0]
+----
+include::{domain-entity-example-dir-locking}/VersionSourceTest.java[tags=locking-optimistic-version-timestamp-source-persist-example]
+----
+
+[source,sql,indent=0]
+----
+include::{domain-entity-extrasdir}/locking-optimistic-version-timestamp-source-persist-example.sql[]
+----
+====
+
+The SQL illustrates timestamp retrieval followed by an insert for this version mapping.
+For trigger-generated values, Hibernate also provides `@Generated(event = {INSERT, UPDATE})` and custom generation annotations using `OnExecutionGenerator`.
+The generator must match the database's actual generation events and version semantics.
+Force-increment requests need compatible generation behavior; automatic update generation alone does not establish that support.
+See <<mapping-generated,generated properties>> and <<mapping-generated-Generated,`@Generated`>> for general generation contracts, and <<locking-LockMode,lock modes>> for explicit force-increment requests.
+
+[[domain-version-initial-values]]
+===== Initial values and detached state
+
+A null initial wrapper version can serve as an unsaved-state marker, especially with assigned identifiers.
+It is not a way to reattach a detached entity: preserve its version when transferring state.
+Hibernate may reject an entity with a generated identifier and an uninitialized version as inconsistent detached state.
+See <<pc-merge,merge>> for applying detached changes and <<long-conversations,conversations spanning multiple transactions>> for work across requests.
+
+[[domain-version-exclusions]]
+===== Excluding attributes from versioning
+
+Use standard `@ExcludedFromVersioning` for an attribute whose changes should not increment the version.
+An excluded change does not itself trigger an increment; this does not remove the version check from a versioned update.
+
+NOTE: Prefer `@ExcludedFromVersioning` to Hibernate's deprecated `@OptimisticLock(excluded=true)`.
+
+[[locking-optimistic-exclude-attribute-mapping-example]]
+.Excluding an attribute
+====
+[source,java,indent=0]
+----
+include::{domain-entity-example-dir-locking}/LockingGuideTests.java[tags=locking-guide-exclusion-mapping]
+----
+====
+
+Exclusion does not protect an attribute against lost updates.
+See <<locking-optimistic-exclude-attribute,concurrent changes to excluded attributes>> for an example of the resulting overwrite, and <<locking-optimistic-versionless,versionless optimistic locking>> for the effect on `ALL`/`DIRTY` predicates.
+
+include::access.adoc[]

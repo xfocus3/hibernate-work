@@ -1,0 +1,15 @@
+package org.hibernate.sql.ast.spi.query.expression;
+
+import java.util.List;
+
+import org.hibernate.sql.ast.spi.query.select.SortSpecification;
+
+/**
+ * Models an ordered set-aggregate function expression at the SQL AST level.
+ *
+ * @author Christian Beikov
+ */
+public interface OrderedSetAggregateFunctionExpression extends AggregateFunctionExpression {
+
+	List<SortSpecification> getWithinGroup();
+}

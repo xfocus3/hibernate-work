@@ -1,0 +1,73 @@
+package org.hibernate.orm.test.mapping.javatime;
+
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+
+import org.hibernate.mapping.BasicValue;
+import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.Property;
+import org.hibernate.type.descriptor.jdbc.DateJdbcType;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+import org.hibernate.type.descriptor.jdbc.TimeJdbcType;
+import org.hibernate.type.descriptor.jdbc.TimestampJdbcType;
+
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.DomainModelScope;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.junit.jupiter.api.Test;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Tests the default, legacy JDBC handling of {@linkplain java.time Java Time} types.
+ *
+ * @author Steve Ebersole
+ */
+@SuppressWarnings("JUnitMalformedDeclaration")
+@DomainModel( annotatedClasses = JavaTimeJdbcTypeBaselineTests.EntityWithJavaTimeValues.class )
+@SessionFactory
+public class JavaTimeJdbcTypeBaselineTests {
+	@Test
+	void testMappings(DomainModelScope scope) {
+		final PersistentClass entityBinding = scope.getEntityBinding( EntityWithJavaTimeValues.class );
+
+		checkAttribute( entityBinding, "theLocalDate", DateJdbcType.class, "LocalDate" );
+		checkAttribute( entityBinding, "theLocalDateTime", TimestampJdbcType.class, "LocalDateTime" );
+		checkAttribute( entityBinding, "theLocalTime", TimeJdbcType.class, "LocalTime" );
+	}
+
+	private void checkAttribute(
+			PersistentClass entityBinding,
+			String attributeName,
+			Class<?> expectedJdbcTypeDescriptorType,
+			String expectedTypeName) {
+		final Property property = entityBinding.getProperty( attributeName );
+		final BasicValue value = (BasicValue) property.getValue();
+		final BasicValue.Resolution<?> resolution = value.resolve();
+		final JdbcType jdbcType = resolution.getJdbcType();
+		assertThat( jdbcType ).isInstanceOf( expectedJdbcTypeDescriptorType );
+		assertThat( resolution.getLegacyResolvedBasicType().getName() ).isEqualTo( expectedTypeName );
+	}
+
+	@Entity(name="EntityWithJavaTimeValues")
+	@Table(name="EntityWithJavaTimeValues")
+	public static class EntityWithJavaTimeValues {
+		@Id
+		private Integer id;
+		private String name;
+
+		private Instant theInstant;
+
+		private LocalDateTime theLocalDateTime;
+
+		private LocalDate theLocalDate;
+
+		private LocalTime theLocalTime;
+	}
+}

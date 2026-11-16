@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1060" height="620" viewBox="0 0 1060 620" role="img" aria-labelledby="title description">
+  <title id="title">Jakarta Persistence and Hibernate API relationships</title>
+  <desc id="description">SessionFactory extends EntityManagerFactory, and Transaction extends EntityTransaction.
+    EntityManager and EntityAgent extend EntityHandler. SharedSessionContract extends EntityHandler.
+    Session extends EntityManager and SharedSessionContract. StatelessSession extends EntityAgent and SharedSessionContract.
+    Implementation classes implement their corresponding Hibernate interfaces. Arrows point to the supertype.</desc>
+  <defs>
+    <linearGradient id="jpa" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffff0"/>
+      <stop offset="1" stop-color="#ffffa8"/>
+    </linearGradient>
+    <linearGradient id="hibernate" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffff5"/>
+      <stop offset="1" stop-color="#d7d5ac"/>
+    </linearGradient>
+    <linearGradient id="implementation" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5f5f5"/>
+      <stop offset="1" stop-color="#dedede"/>
+    </linearGradient>
+    <marker id="supertype" markerWidth="12" markerHeight="12" refX="11" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M1 1 L11 6 L1 11 Z" fill="white" stroke="#37752b" stroke-width="1.5"/>
+    </marker>
+  </defs>
+  <rect width="1060" height="620" fill="#f0f0f0"/>
+  <g font-family="Arial, sans-serif" font-size="16" fill="#202020">
+    <text x="175" y="25" text-anchor="middle">Jakarta Persistence interfaces</text>
+    <text x="530" y="25" text-anchor="middle">Hibernate interfaces</text>
+    <text x="885" y="25" text-anchor="middle">Hibernate implementations</text>
+    <path id="factory-extends-jpa" d="M425 60 H280" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="factory-implementation" d="M780 60 H635" fill="none" stroke="#37752b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#supertype)"/>
+    <path id="transaction-extends-jpa" d="M425 140 H280" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="transaction-implementation" d="M780 140 H635" fill="none" stroke="#37752b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#supertype)"/>
+    <path id="shared-contract-extends-handler" d="M530 290 V240" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="manager-extends-handler" d="M125 400 V220 H425" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="agent-extends-handler" d="M935 400 V220 H635" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="session-extends-manager" d="M290 420 H230" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="stateless-session-extends-agent" d="M770 420 H830" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="session-extends-shared-contract" d="M395 400 V360 H480 V330" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="stateless-session-extends-shared-contract" d="M665 400 V360 H580 V330" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <path id="session-implementation" d="M395 510 V440" fill="none" stroke="#37752b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#supertype)"/>
+    <path id="stateless-session-implementation" d="M665 510 V440" fill="none" stroke="#37752b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#supertype)"/>
+    <g id="entity-manager-factory">
+      <rect x="70" y="40" width="210" height="40" rx="2" fill="url(#jpa)" stroke="#aaa"/>
+      <text x="175" y="65" text-anchor="middle">EntityManagerFactory</text>
+    </g>
+    <g id="session-factory">
+      <rect x="425" y="40" width="210" height="40" rx="2" fill="url(#hibernate)" stroke="#aaa"/>
+      <text x="530" y="65" text-anchor="middle">SessionFactory</text>
+    </g>
+    <g id="session-factory-impl">
+      <rect x="780" y="40" width="210" height="40" rx="2" fill="url(#implementation)" stroke="#aaa"/>
+      <text x="885" y="65" text-anchor="middle">SessionFactoryImpl</text>
+    </g>
+    <g id="entity-transaction">
+      <rect x="70" y="120" width="210" height="40" rx="2" fill="url(#jpa)" stroke="#aaa"/>
+      <text x="175" y="145" text-anchor="middle">EntityTransaction</text>
+    </g>
+    <g id="transaction">
+      <rect x="425" y="120" width="210" height="40" rx="2" fill="url(#hibernate)" stroke="#aaa"/>
+      <text x="530" y="145" text-anchor="middle">Transaction</text>
+    </g>
+    <g id="transaction-impl">
+      <rect x="780" y="120" width="210" height="40" rx="2" fill="url(#implementation)" stroke="#aaa"/>
+      <text x="885" y="145" text-anchor="middle">TransactionImpl</text>
+    </g>
+    <g id="entity-handler">
+      <rect x="425" y="200" width="210" height="40" rx="2" fill="url(#jpa)" stroke="#aaa"/>
+      <text x="530" y="225" text-anchor="middle">EntityHandler</text>
+    </g>
+    <g id="shared-session-contract">
+      <rect x="425" y="290" width="210" height="40" rx="2" fill="url(#hibernate)" stroke="#aaa"/>
+      <text x="530" y="315" text-anchor="middle">SharedSessionContract</text>
+    </g>
+    <g id="entity-manager">
+      <rect x="20" y="400" width="210" height="40" rx="2" fill="url(#jpa)" stroke="#aaa"/>
+      <text x="125" y="425" text-anchor="middle">EntityManager</text>
+    </g>
+    <g id="session">
+      <rect x="290" y="400" width="210" height="40" rx="2" fill="url(#hibernate)" stroke="#aaa"/>
+      <text x="395" y="425" text-anchor="middle">Session</text>
+    </g>
+    <g id="stateless-session">
+      <rect x="560" y="400" width="210" height="40" rx="2" fill="url(#hibernate)" stroke="#aaa"/>
+      <text x="665" y="425" text-anchor="middle">StatelessSession</text>
+    </g>
+    <g id="entity-agent">
+      <rect x="830" y="400" width="210" height="40" rx="2" fill="url(#jpa)" stroke="#aaa"/>
+      <text x="935" y="425" text-anchor="middle">EntityAgent</text>
+    </g>
+    <g id="session-impl">
+      <rect x="290" y="510" width="210" height="40" rx="2" fill="url(#implementation)" stroke="#aaa"/>
+      <text x="395" y="535" text-anchor="middle">SessionImpl</text>
+    </g>
+    <g id="stateless-session-impl">
+      <rect x="560" y="510" width="210" height="40" rx="2" fill="url(#implementation)" stroke="#aaa"/>
+      <text x="665" y="535" text-anchor="middle">StatelessSessionImpl</text>
+    </g>
+    <path d="M90 590 H150" fill="none" stroke="#37752b" stroke-width="1.5" marker-end="url(#supertype)"/>
+    <text x="165" y="595">extends</text>
+    <path d="M310 590 H370" fill="none" stroke="#37752b" stroke-width="1.5" stroke-dasharray="6 4" marker-end="url(#supertype)"/>
+    <text x="385" y="595">implements</text>
+    <text x="970" y="595" text-anchor="end">Arrows point to the supertype</text>
+  </g>
+</svg>

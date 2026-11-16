@@ -1,0 +1,154 @@
+package org.hibernate.jpa.internal;
+
+import java.io.Serializable;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.PersistenceUnitUtil;
+import jakarta.persistence.metamodel.Attribute;
+
+import org.hibernate.Hibernate;
+import org.hibernate.MappingException;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.jpa.internal.util.PersistenceUtilHelper;
+import org.hibernate.persister.entity.EntityPersister;
+
+import static jakarta.persistence.spi.LoadState.NOT_LOADED;
+import static org.hibernate.engine.internal.ManagedTypeHelper.asManagedEntity;
+import static org.hibernate.engine.internal.ManagedTypeHelper.isManagedEntity;
+import static org.hibernate.jpa.internal.util.PersistenceUtilHelper.getLoadState;
+import static org.hibernate.jpa.internal.util.PersistenceUtilHelper.isLoadedWithReference;
+import static org.hibernate.jpa.internal.util.PersistenceUtilHelper.isLoadedWithoutReference;
+import static org.hibernate.proxy.HibernateProxy.extractLazyInitializer;
+
+/**
+ * @author Steve Ebersole
+ */
+public class PersistenceUnitUtilImpl implements PersistenceUnitUtil, Serializable {
+
+	private final SessionFactoryImplementor sessionFactory;
+	private final transient PersistenceUtilHelper.MetadataCache cache = new PersistenceUtilHelper.MetadataCache();
+
+	public PersistenceUnitUtilImpl(SessionFactoryImplementor sessionFactory) {
+		this.sessionFactory = sessionFactory;
+	}
+
+	@Override
+	public boolean isLoaded(@Nonnull Object entity, @Nonnull String attributeName) {
+		return switch ( isLoadedWithoutReference( entity, attributeName, cache ) ) {
+			case LOADED -> true;
+			case NOT_LOADED -> false;
+			default -> isLoadedWithReference( entity, attributeName, cache ) != NOT_LOADED;
+		};
+	}
+
+	@Override
+	public <E> boolean isLoaded(@Nonnull E entity, @Nonnull Attribute<? super E, ?> attribute) {
+		return Hibernate.isPropertyInitialized( entity, attribute.getName() );
+	}
+
+	@Override
+	public boolean isLoaded(@Nonnull Object entity) {
+		return getLoadState( entity ) != NOT_LOADED;
+	}
+
+	@Override
+	public void load(@Nonnull Object entity, @Nonnull String attributeName) {
+		Hibernate.initializeProperty( entity, attributeName );
+	}
+
+	@Override
+	public <E> void load(@Nonnull E entity, @Nonnull Attribute<? super E, ?> attribute) {
+		load( entity, attribute.getName() );
+	}
+
+	@Override
+	public void load(@Nonnull Object entity) {
+		Hibernate.initialize( entity );
+	}
+
+	@Override
+	public boolean isInstance(@Nonnull Object entity, @Nonnull Class<?> entityClass) {
+		return entityClass.isAssignableFrom( Hibernate.getClassLazy( entity ) );
+	}
+
+	@Override
+	@Nonnull
+	public <T> Class<? extends T> getClass(@Nonnull T entity) {
+		return Hibernate.getClassLazy( entity );
+	}
+
+	@Override
+	public Object getIdentifier(@Nonnull Object entity) {
+		//noinspection ConstantValue
+		if ( entity == null ) {
+			throw new IllegalArgumentException( "Entity may not be null" );
+		}
+
+		final var lazyInitializer = extractLazyInitializer( entity );
+		if ( lazyInitializer != null ) {
+			return lazyInitializer.getInternalIdentifier();
+		}
+		else if ( isManagedEntity( entity ) ) {
+			final var entityEntry = asManagedEntity( entity ).$$_hibernate_getEntityEntry();
+			if ( entityEntry != null ) {
+				return entityEntry.getId();
+			}
+			else {
+				return getIdentifierFromPersister( entity );
+			}
+		}
+		else {
+			return getIdentifierFromPersister( entity );
+		}
+	}
+
+	@Override
+	public Object getVersion(@Nonnull Object entity) {
+		//noinspection ConstantValue
+		if ( entity == null ) {
+			throw new IllegalArgumentException( "Entity may not be null" );
+		}
+
+		final var lazyInitializer = extractLazyInitializer( entity );
+		if ( lazyInitializer != null ) {
+			return getVersionFromPersister( lazyInitializer.getImplementation() );
+		}
+		else if ( isManagedEntity( entity ) ) {
+			final var entityEntry = asManagedEntity( entity ).$$_hibernate_getEntityEntry();
+			if ( entityEntry != null ) {
+				return entityEntry.getVersion();
+			}
+			else {
+				return getVersionFromPersister( entity );
+			}
+		}
+		else {
+			return getVersionFromPersister( entity );
+		}
+	}
+
+	private Object getIdentifierFromPersister(Object entity) {
+		return getPersister( entity ).getIdentifier( entity );
+	}
+
+	private Object getVersionFromPersister(Object entity) {
+		return getPersister( entity ).getVersion( entity );
+	}
+
+	private EntityPersister getPersister(Object entity) {
+		final var entityClass = Hibernate.getClass( entity );
+		try {
+			final var entityPersister =
+					sessionFactory.getMappingMetamodel()
+							.getEntityDescriptor( entityClass );
+			if ( entityPersister == null ) {
+				throw new IllegalArgumentException( entityClass.getName() + " is not an entity" );
+			}
+			return entityPersister;
+		}
+		catch (MappingException ex) {
+			throw new IllegalArgumentException( entityClass.getName() + " is not an entity", ex );
+		}
+	}
+
+}

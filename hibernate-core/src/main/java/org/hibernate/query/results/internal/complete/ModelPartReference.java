@@ -1,0 +1,21 @@
+package org.hibernate.query.results.internal.complete;
+
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.query.results.spi.FetchBuilder;
+import org.hibernate.query.results.spi.ResultBuilder;
+
+/**
+ * A {@link ResultBuilder} or {@link FetchBuilder} that refers to some part
+ * of the user's domain model
+ *
+ * @author Steve Ebersole
+ */
+public interface ModelPartReference {
+	NavigablePath getNavigablePath();
+
+	/**
+	 * The part of the domain model that is referenced
+	 */
+	ModelPart getReferencedPart();
+}

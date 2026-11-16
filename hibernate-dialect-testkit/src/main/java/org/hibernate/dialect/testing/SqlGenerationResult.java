@@ -1,0 +1,22 @@
+package org.hibernate.dialect.testing;
+
+import java.util.List;
+import java.util.Objects;
+
+import org.hibernate.Incubating;
+import org.hibernate.SPI;
+
+import static org.hibernate.SPI.Role.USE;
+
+/// Immutable result of translating one HQL statement.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "dialect-testkit")
+@SPI(USE)
+public record SqlGenerationResult(String hql, List<GeneratedStatement> statements) {
+	public SqlGenerationResult {
+		hql = Objects.requireNonNull( hql, "hql" );
+		statements = List.copyOf( Objects.requireNonNull( statements, "statements" ) );
+	}
+}

@@ -1,0 +1,63 @@
+[[dynamic-model]]
+==== Dynamic models
+:example-dir-dynamic: {core-project-dir}/src/test/java/org/hibernate/orm/test/mapping/dynamic
+:example-dir-resources: {core-project-dir}/src/test/resources/org/hibernate/orm/test/mapping/dynamic
+:domain-dynamic-model-extrasdir: extras
+
+[IMPORTANT]
+====
+Jakarta Persistence supports only POJO entity models.
+Use POJO entities for portability across Jakarta Persistence providers.
+Hibernate also supports dynamic entity models.
+====
+
+[[mapping-model-dynamic]]
+===== Dynamic mapping models
+
+Persistent entities do not necessarily have to be represented as POJO/JavaBean classes.
+Hibernate also supports dynamic models represented by nested `Map` instances at runtime.
+These models require mapping files instead of persistent classes.
+
+An entity has one representation within a given `SessionFactory`.
+This is a change from previous versions which allowed multiple entity modes for an entity and a choice of which mode to load.
+Entity modes can now be mixed within a domain model; a dynamic entity might reference a POJO entity and vice versa.
+
+[[mapping-model-dynamic-example]]
+.Dynamic domain model Hibernate mapping
+====
+[source,xml]
+----
+include::{example-dir-resources}/Book.hbm.xml[tag=mapping-model-dynamic-example, indent=0]
+----
+====
+
+[[mapping-model-dynamic-setting-example]]
+The mapping declares `entity-name="Book"` without a Java class, so Hibernate represents this entity using a `Map`.
+No default entity-mode setting is required.
+Operations on the dynamic entity use its mapped entity name, as shown below.
+
+Persisting the following dynamic `Book` entity generates the SQL statement shown below:
+
+[[mapping-model-dynamic-persist-example]]
+.Persist dynamic entity
+====
+[source,java]
+----
+include::{example-dir-dynamic}/DynamicEntityTest.java[tag=mapping-model-dynamic-example, indent=0]
+----
+
+[source,sql]
+----
+include::{domain-dynamic-model-extrasdir}/dynamic/mapping-model-dynamic-example.sql[indent=0]
+----
+====
+
+[NOTE]
+====
+Dynamic models support rapid prototyping without implementing entity classes.
+They lack compile-time type checking, so type errors are detected at runtime.
+The mappings can still define a normalized database schema, allowing POJO entity classes to be introduced later.
+
+Dynamic models also support integration use cases.
+For example, Envers uses them to represent historical data.
+====

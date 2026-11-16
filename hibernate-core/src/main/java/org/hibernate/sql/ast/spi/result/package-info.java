@@ -1,0 +1,8 @@
+/// Incubating contracts for producing domain results from a SQL AST.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "6.0", group = "result-processing")
+package org.hibernate.sql.ast.spi.result;
+
+import org.hibernate.Incubating;

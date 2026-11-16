@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<hibernate-mapping package="org.hibernate.orm.test.ondelete.toone.hbm">
+
+    <class name="Parent">
+        <id name="id" type="long">
+            <generator class="assigned"/>
+        </id>
+    </class>
+
+    <class name="Child">
+        <id name="id" type="long">
+            <generator class="assigned"/>
+        </id>
+        <many-to-one name="parent" class="Parent" on-delete="cascade"/>
+    </class>
+
+</hibernate-mapping>

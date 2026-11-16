@@ -1,0 +1,188 @@
+[[obtaining]]
+== Obtaining Hibernate
+
+Hibernate is broken into a number of modules/artifacts under the `org.hibernate.orm`
+group.  The main artifact is named `hibernate-core`.
+
+[NOTE,subs="attributes+"]
+====
+This guide uses {fullVersion} as the Hibernate version for illustration purposes.  Be sure to change
+this version, if necessary, to the version you wish to use.
+====
+
+We can declare a dependency on this artifact using https://www.gradle.org[Gradle]
+
+[source,groovy,subs="attributes+"]
+----
+dependencies {
+  implementation "org.hibernate.orm:hibernate-core:{fullVersion}"
+}
+----
+
+or https://maven.org[Maven]:
+
+[source,xml,subs="attributes+"]
+----
+<dependency>
+    <groupId>org.hibernate.orm</groupId>
+    <artifactId>hibernate-core</artifactId>
+    <version>{fullVersion}</version>
+</dependency>
+----
+
+[[modules]]
+=== Hibernate ORM modules
+
+As mentioned earlier, Hibernate ORM is broken into a number of modules with the intent of isolating
+transitive dependencies based on the features being used or not.
+
+[cols="40m,~"]
+.API-oriented modules
+|===
+|hibernate-core| The core object/relational mapping engine
+|hibernate-envers| Entity versioning and auditing (deprecated since Hibernate ORM 8.0; prefer core temporal and audit support for new development)
+|hibernate-spatial| Support for spatial/GIS data types using https://github.com/GeoLatte/geolatte-geom[GeoLatte]
+|hibernate-processor| An annotation processor that generates a JPA-compliant metamodel, plus optional Hibernate extras
+|hibernate-vector| Support for mathematical vector types and functions useful for AI/ML topics like vector similarity search and Retrieval-Augmented Generation (RAG)
+|===
+
+[cols="40m,~"]
+.Integration-oriented modules
+|===
+|hibernate-agroal| Support for https://agroal.github.io/[Agroal] connection pooling
+|hibernate-c3p0| Support for https://www.mchange.com/projects/c3p0/[C3P0] connection pooling
+|hibernate-hikaricp| Support for https://github.com/brettwooldridge/HikariCP/[HikariCP] connection pooling
+|hibernate-ucp| Support for https://docs.oracle.com/en/database/oracle/oracle-database/26/jjucp/intro.html[Oracle Universal Connection Pool] connection pooling
+|hibernate-jcache| Integration with https://jcp.org/en/jsr/detail?id=107$$[JCache], allowing any compliant implementation as a second-level cache provider
+|hibernate-graalvm| Experimental extension to make it easier to compile applications as a https://www.graalvm.org/[GraalVM] native image
+|hibernate-micrometer| Integration with https://micrometer.io[Micrometer] metrics
+|hibernate-community-dialects| Additional link:{doc-dialect-url}#community-dialects[community-supported SQL dialects]
+|===
+
+[cols="40m,~"]
+.Testing-oriented modules
+|===
+|hibernate-testing| A series of JUnit extensions for testing Hibernate ORM functionality
+|===
+
+[cols="40m,~"]
+.Third-party modules
+|===
+// Yes, this is a full row containing asciidoc containing an admonition. I don't know have a better idea to add an admonition between a table's title and its content.
+2+a|
+[NOTE]
+====
+Third-party modules, and in particular link:{doc-dialect-url}#third-party-dialects[third-party dialects], are tested by their own authors,
+and may not be compatible with all versions of Hibernate ORM.
+
+1. Check the module's own documentation to know more about its compatibility constraints.
+The https://hibernate.org/orm/releases/#compatibility-matrix[compatibility matrix on the Hibernate website] may also be of help.
+2. Submit any question or bug reports about these dialects to the dialect's authors: the Hibernate team cannot help.
+
+====
+|`org.mongodb:mongodb-hibernate:{version}`| https://github.com/mongodb/mongo-hibernate/[MongoDB Extension for Hibernate ORM]
+|`com.google.cloud:google-cloud-spanner-hibernate-dialect:{version}`| https://github.com/GoogleCloudPlatform/google-cloud-spanner-hibernate[Google Cloud Spanner Dialect for Hibernate ORM]
+|===
+
+[[platform]]
+=== Platform and BOM
+
+Hibernate provides two dependency management artifacts to keep artifact versions aligned.
+
+[[hibernate-platform]]
+==== `hibernate-platform`
+
+The platform manages versions of all published Hibernate ORM modules together with their key third-party
+dependencies (Jakarta Persistence, Jakarta Transactions, ByteBuddy, etc.).
+Use it when you want a single import to align everything.
+
+Gradle::
+[source,groovy,subs="attributes+"]
+----
+dependencies {
+  implementation platform "org.hibernate.orm:hibernate-platform:{fullVersion}"
+
+  // use the versions from the platform
+  implementation "org.hibernate.orm:hibernate-core"
+  implementation "jakarta.transaction:jakarta.transaction-api"
+}
+----
++
+See the https://docs.gradle.org/current/userguide/java_platform_plugin.html#sec:java_platform_consumption[Gradle documentation] for capabilities of applying a platform.
+
+Maven::
+[source,xml,subs="attributes+"]
+----
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.hibernate.orm</groupId>
+      <artifactId>hibernate-platform</artifactId>
+      <version>{fullVersion}</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+<dependencies>
+  <dependency>
+    <groupId>org.hibernate.orm</groupId>
+    <artifactId>hibernate-core</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>jakarta.transaction</groupId>
+    <artifactId>jakarta.transaction-api</artifactId>
+  </dependency>
+</dependencies>
+----
+
+[[hibernate-bom]]
+==== `hibernate-bom`
+
+The BOM manages versions of the published Hibernate ORM modules only, without constraining third-party
+dependency versions.
+Use it when your project already manages third-party dependency versions separately (for example through
+another platform or a parent POM) and you only need to align the Hibernate artifacts.
+
+NOTE: Hibernate ORM is not guaranteed to function correctly if its third-party dependencies are not
+at the versions it was built and tested with.
+When using `hibernate-bom` instead of `hibernate-platform`, it is your responsibility to ensure that
+those dependency versions are compatible.
+
+Gradle::
+[source,groovy,subs="attributes+"]
+----
+dependencies {
+  implementation platform "org.hibernate.orm:hibernate-bom:{fullVersion}"
+
+  // use the versions from the BOM
+  implementation "org.hibernate.orm:hibernate-core"
+}
+----
+Maven::
+[source,xml,subs="attributes+"]
+----
+<dependencyManagement>
+  <dependencies>
+    <dependency>
+      <groupId>org.hibernate.orm</groupId>
+      <artifactId>hibernate-bom</artifactId>
+      <version>{fullVersion}</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencies>
+</dependencyManagement>
+<dependencies>
+  <dependency>
+    <groupId>org.hibernate.orm</groupId>
+    <artifactId>hibernate-core</artifactId>
+  </dependency>
+</dependencies>
+----
+
+[[examples]]
+=== Example sources
+The bundled examples mentioned in this tutorial can be downloaded from link:{doc-quick-start-url}hibernate-tutorials.zip[here].
+
+Alternatively, the example source code can also be obtained from https://github.com/hibernate/hibernate-orm/tree/{fullVersion}/documentation/src/main/asciidoc/quickstart/tutorials[Github]

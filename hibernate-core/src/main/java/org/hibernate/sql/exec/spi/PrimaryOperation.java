@@ -1,0 +1,20 @@
+package org.hibernate.sql.exec.spi;
+
+import java.util.Set;
+
+import org.hibernate.Incubating;
+
+/**
+ * A primary operation to be executed using JDBC.
+ *
+ * @see org.hibernate.sql.exec.internal.JdbcSelectWithActions
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.0", group = "sql-execution")
+public interface PrimaryOperation extends JdbcOperation {
+	/**
+	 * The names of tables this operation refers to
+	 */
+	Set<String> getAffectedTableNames();
+}

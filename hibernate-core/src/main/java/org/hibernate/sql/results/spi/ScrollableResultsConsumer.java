@@ -1,0 +1,96 @@
+package org.hibernate.sql.results.spi;
+
+
+import org.hibernate.ScrollableResults;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.scrollable.FetchingScrollableResultsImpl;
+import org.hibernate.internal.scrollable.ScrollableResultsImpl;
+import org.hibernate.internal.scrollable.WindowedScrollableResultsImpl;
+import org.hibernate.sql.results.graph.entity.EntityResult;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesMapping;
+import org.hibernate.sql.results.jdbc.spi.JdbcValues;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesSourceProcessingOptions;
+import org.hibernate.sql.results.jdbc.spi.RowProcessingState;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesSourceProcessingState;
+
+/**
+ * @author Steve Ebersole
+ */
+public class ScrollableResultsConsumer<R> implements ResultsConsumer<ScrollableResults<R>, R> {
+	/**
+	 * Singleton access to the standard scrollable-results consumer instance
+	 *
+	 * @deprecated in favor of {@link #instance()}
+	 */
+	@SuppressWarnings( "rawtypes" )
+	@Deprecated( forRemoval = true )
+	public static final ScrollableResultsConsumer INSTANCE = new ScrollableResultsConsumer();
+
+	@SuppressWarnings("unchecked")
+	public static <R> ScrollableResultsConsumer<R> instance() {
+		return INSTANCE;
+	}
+
+	@Override
+	public ScrollableResults<R> consume(
+			JdbcValues jdbcValues,
+			SharedSessionContractImplementor session,
+			JdbcValuesSourceProcessingOptions processingOptions,
+			JdbcValuesSourceProcessingState jdbcValuesSourceProcessingState,
+			RowProcessingState rowProcessingState,
+			RowReader<R> rowReader) {
+		rowReader.startLoading( rowProcessingState );
+		final var scrollableResults =
+				containsCollectionFetches( jdbcValues.getValuesMapping() )
+						? new FetchingScrollableResultsImpl<>(
+								jdbcValues,
+								processingOptions,
+								jdbcValuesSourceProcessingState,
+								rowProcessingState,
+								rowReader,
+								session
+						)
+						: new ScrollableResultsImpl<>(
+								jdbcValues,
+								processingOptions,
+								jdbcValuesSourceProcessingState,
+								rowProcessingState,
+								rowReader,
+								session
+						);
+		if ( shouldApplyInMemoryWindow( jdbcValuesSourceProcessingState ) ) {
+			final var limit = jdbcValuesSourceProcessingState.getQueryOptions().peekOriginalLimit();
+			return new WindowedScrollableResultsImpl<>(
+					scrollableResults,
+					limit.getFirstRowJpa(),
+					limit.getMaxRows()
+			);
+		}
+		else {
+			return scrollableResults;
+		}
+	}
+
+	private boolean shouldApplyInMemoryWindow(JdbcValuesSourceProcessingState jdbcValuesSourceProcessingState) {
+		final var queryOptions = jdbcValuesSourceProcessingState.getQueryOptions();
+		final var limit = queryOptions.peekOriginalLimit();
+		return queryOptions.isLimitInMemoryEnabled() == Boolean.TRUE
+			&& limit != null
+			&& !limit.isEmpty();
+	}
+
+	@Override
+	public boolean canResultsBeCached() {
+		return false;
+	}
+
+	private boolean containsCollectionFetches(JdbcValuesMapping valuesMapping) {
+		for ( var domainResult : valuesMapping.getDomainResults() ) {
+			if ( domainResult instanceof EntityResult<?> entityResult
+					&& entityResult.containsCollectionFetches() ) {
+				return true;
+			}
+		}
+		return false;
+	}
+}

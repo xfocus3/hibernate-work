@@ -1,0 +1,463 @@
+package org.hibernate.engine.spi;
+
+import org.hibernate.AssertionFailure;
+import org.hibernate.HibernateException;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.persister.collection.CollectionPersister;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.util.Collection;
+
+import jakarta.annotation.Nullable;
+
+import static java.util.Collections.emptyList;
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.pretty.MessageHelper.collectionInfoString;
+
+/**
+ * We need an entry to tell us all about the current state
+ * of a collection with respect to its persistent state
+ *
+ * @author Gavin King
+ */
+public final class CollectionEntry implements Serializable {
+	private static final byte REACHED = 1;
+	private static final byte PROCESSED = 1 << 1;
+
+	//ATTRIBUTES MAINTAINED BETWEEN FLUSH CYCLES
+
+	// session-start/post-flush persistent state
+	private @Nullable Serializable snapshot;
+	// allow the CollectionSnapshot to be serialized
+	private @Nullable String role;
+	private boolean readOnly;
+
+	// "loaded" means the reference that is consistent
+	// with the current database state
+	private transient @Nullable CollectionPersister loadedPersister;
+	private @Nullable Object loadedKey;
+
+	// if we instantiate a collection during the flush() process,
+	// we must ignore it for the rest of the flush()
+	private transient boolean ignore;
+
+	// "current" means the reference that was found during flush()
+	private transient @Nullable CollectionPersister currentPersister;
+	private transient @Nullable Object currentKey;
+
+	// Compact traversal state valid only for the current flush cycle
+	private transient byte flushState;
+
+	/**
+	 * For newly wrapped collections, or dereferenced collection wrappers
+	 */
+	public CollectionEntry(CollectionPersister persister, PersistentCollection<?> collection) {
+		// new collections that get found + wrapped
+		// during flush shouldn't be ignored
+		ignore = false;
+		// a newly wrapped collection is NOT dirty
+		// (or we get unnecessary version updates)
+		collection.clearDirty();
+		snapshot = persister.isMutable() ? collection.getSnapshot( persister ) : null;
+		role = persister.getRole();
+		collection.setSnapshot( loadedKey, role, snapshot );
+	}
+
+	/**
+	 * For collections just loaded from the database
+	 */
+	public CollectionEntry(
+			final PersistentCollection<?> collection,
+			@Nullable final CollectionPersister loadedPersister,
+			@Nullable final Object loadedKey,
+			final boolean ignore,
+			final boolean readOnly) {
+		this.ignore = ignore;
+		this.readOnly = readOnly;
+		//collection.clearDirty()
+		this.loadedKey = loadedKey;
+		this.loadedPersister = loadedPersister;
+		this.role = loadedPersister == null ? null : loadedPersister.getRole();
+		collection.setSnapshot( loadedKey, role, null );
+		//postInitialize() will be called after initialization
+	}
+
+	/**
+	 * For uninitialized detached collections
+	 */
+	public CollectionEntry(@Nullable CollectionPersister loadedPersister, @Nullable Object loadedKey) {
+		// detached collection wrappers that get found + reattached
+		// during flush shouldn't be ignored
+		ignore = false;
+		//collection.clearDirty()
+		this.loadedKey = loadedKey;
+		this.loadedPersister = loadedPersister;
+		this.role = loadedPersister == null ? null : loadedPersister.getRole();
+	}
+
+	/**
+	 * For initialized detached collections
+	 */
+	public CollectionEntry(PersistentCollection<?> collection, SessionFactoryImplementor factory) {
+		// detached collections that get found + reattached
+		// during flush shouldn't be ignored
+		ignore = false;
+		loadedKey = collection.getKey();
+		role = collection.getRole();
+		loadedPersister =
+				factory.getMappingMetamodel()
+						.getCollectionDescriptor( castNonNull( role ) );
+		snapshot = collection.getStoredSnapshot();
+	}
+
+	/**
+	 * Used from custom serialization.
+	 *
+	 * @see #serialize
+	 * @see #deserialize
+	 */
+	private CollectionEntry(
+			@Nullable String role,
+			@Nullable Serializable snapshot,
+			@Nullable Object loadedKey,
+			boolean readOnly,
+			@Nullable SessionFactoryImplementor factory) {
+		this.role = role;
+		this.snapshot = snapshot;
+		this.loadedKey = loadedKey;
+		this.readOnly = readOnly;
+		if ( role != null ) {
+			afterDeserialize( factory );
+		}
+	}
+
+	/**
+	 * Determine if the collection is "really" dirty, by checking dirtiness
+	 * of the collection elements, if necessary
+	 */
+	private void dirty(PersistentCollection<?> collection) {
+		if ( forceDirty( collection ) ) {
+			collection.dirty();
+		}
+	}
+
+	private boolean forceDirty(PersistentCollection<?> collection) {
+		final var loadedPersister = this.loadedPersister;
+		return loadedPersister != null
+			&& collection.wasInitialized()
+			&& !collection.isDirty() //optimization
+			&& isModifiable() //optimization
+			&& isElementMutable( collection, loadedPersister ) //optimization
+			&& !collection.equalsSnapshot( loadedPersister );
+	}
+
+	private static boolean isElementMutable(
+			PersistentCollection<?> collection,
+			CollectionPersister loadedPersister) {
+		return collection.isDirectlyAccessible()
+			|| loadedPersister.getElementType().isMutable();
+	}
+
+	private boolean isModifiable() {
+		return !readOnly
+			&& loadedPersister != null
+			&& loadedPersister.isMutable();
+	}
+
+	public void preFlush(PersistentCollection<?> collection) {
+		flushState = 0;
+		if ( loadedKey == null ) {
+			loadedKey = collection.getKey();
+		}
+
+		final var loadedPersister = this.loadedPersister;
+		if ( collection.isDirty()
+				&& loadedPersister != null
+				&& !isModifiable() ) {
+			throw new HibernateException( "Immutable collection was modified: " +
+					collectionInfoString( loadedPersister.getRole(), getLoadedKey() ) );
+		}
+
+		dirty( collection );
+
+		if ( CORE_LOGGER.isTraceEnabled()
+				&& loadedPersister != null
+				&& collection.isDirty() ) {
+			CORE_LOGGER.collectionDirty(
+					collectionInfoString( loadedPersister.getRole(), getLoadedKey() ) );
+		}
+	}
+
+	/// Was this collection reached during the current flush?
+	///
+	/// @since 8.0
+	public boolean wasReachedDuringFlush() {
+		return (flushState & REACHED) != 0;
+	}
+
+	/// Marks this collection as reached during the current flush.
+	///
+	/// @since 8.0
+	public void markReachedDuringFlush() {
+		flushState |= REACHED;
+	}
+
+	/// Was this collection processed during the current flush?
+	///
+	/// @since 8.0
+	public boolean wasProcessedDuringFlush() {
+		return (flushState & PROCESSED) != 0;
+	}
+
+	/// Marks this collection as processed during the current flush.
+	///
+	/// @since 8.0
+	public void markProcessedDuringFlush() {
+		if ( wasProcessedDuringFlush() ) {
+			throw new AssertionFailure( "collection was processed twice by flush()" );
+		}
+		flushState |= PROCESSED;
+	}
+
+	/// Clears traversal state before collection reachability is re-evaluated within the same flush.
+	///
+	/// @since 8.0
+	public void resetFlushState() {
+		flushState = 0;
+	}
+
+	public void postInitialize(PersistentCollection<?> collection, SharedSessionContractImplementor session) {
+		final var loadedPersister = this.loadedPersister;
+		snapshot = loadedPersister != null && isModifiable() ? collection.getSnapshot( loadedPersister ) : null;
+		collection.setSnapshot( loadedKey, role, snapshot );
+		collection.afterInitializationSnapshot();
+		if ( loadedPersister != null
+				&& session.getLoadQueryInfluencers().effectivelyBatchLoadable( loadedPersister ) ) {
+			session.getPersistenceContextInternal().getBatchFetchQueue()
+					.removeBatchLoadableCollection( this );
+		}
+	}
+
+	/**
+	 * Called after a successful flush
+	 */
+	public void postFlush(PersistentCollection<?> collection, CollectionFlushActionTracker collectionFlushActionTracker) {
+		if ( !ignore && !wasProcessedDuringFlush() ) {
+			throw new HibernateException( "Collection '" + collection.getRole() + "' was not processed by flush"
+					+ " (this is likely due to unsafe use of the session, for example, current use in multiple threads, or updates during entity lifecycle callbacks)");
+		}
+		ignore = false;
+		collection.setSnapshot( loadedKey, role, snapshot );
+	}
+
+	/**
+	 * Called after execution of an action
+	 */
+	public void afterAction(PersistentCollection<?> collection) {
+		loadedKey = currentKey;
+		loadedPersister = currentPersister;
+		role = currentPersister == null ? null : currentPersister.getRole();
+		if ( collection.wasInitialized()
+				&& hasQueuedCollectionAction( collection ) ) {
+			// update the snapshot
+			snapshot = isModifiable()
+					? collection.getSnapshot( castNonNull( loadedPersister ) )
+					: null;
+		}
+		collection.postAction();
+	}
+
+	public @Nullable Object getKey() {
+		return getLoadedKey();
+	}
+
+	public @Nullable String getRole() {
+		return role;
+	}
+
+	public @Nullable Serializable getSnapshot() {
+		return snapshot;
+	}
+
+	public boolean isReadOnly() {
+		return readOnly;
+	}
+
+	private boolean fromMerge;
+
+	/**
+	 * Reset the stored snapshot for both the persistent collection and this collection entry.
+	 * Used during the merge of detached collections.
+	 *
+	 * @param collection the persistent collection to be updated
+	 * @param storedSnapshot the new stored snapshot
+	 */
+	public void resetStoredSnapshot(PersistentCollection<?> collection, Serializable storedSnapshot) {
+		CORE_LOGGER.resetStoredSnapshot( storedSnapshot, this );
+		if ( !fromMerge ) {
+			snapshot = storedSnapshot;
+			collection.setSnapshot( loadedKey, role, snapshot );
+			fromMerge = true;
+		}
+	}
+
+	public void setReadOnly(boolean readOnly, PersistentCollection<?> collection) {
+		if ( this.readOnly != readOnly ) {
+			this.readOnly = readOnly;
+			if ( readOnly ) {
+				snapshot = null;
+				collection.setSnapshot( loadedKey, role, null );
+			}
+			else {
+				final var loadedPersister = this.loadedPersister;
+				if ( collection.wasInitialized()
+						&& loadedPersister != null
+						&& loadedPersister.isMutable() ) {
+					snapshot = collection.getSnapshot( loadedPersister );
+					collection.setSnapshot( loadedKey, role, snapshot );
+				}
+			}
+		}
+	}
+
+	void afterDeserialize(@Nullable SessionFactoryImplementor factory) {
+		loadedPersister = factory == null ? null
+				: factory.getMappingMetamodel()
+						.getCollectionDescriptor( castNonNull( role ) );
+	}
+
+	public boolean wasDereferenced() {
+		return loadedKey == null;
+	}
+
+	private boolean hasQueuedCollectionAction(PersistentCollection<?> collection) {
+		final var session = collection.getSession();
+		if ( session == null ) {
+			return false;
+		}
+		final var collectionFlushActionTracker =
+				session.getPersistenceContextInternal()
+						.getCollectionFlushActionTracker();
+		return collectionFlushActionTracker != null
+			&& collectionFlushActionTracker.hasQueuedCollectionAction( collection );
+	}
+
+	public boolean isIgnore() {
+		return ignore;
+	}
+
+	@Nullable
+	public CollectionPersister getCurrentPersister() {
+		return currentPersister;
+	}
+
+	public void setCurrentPersister(@Nullable CollectionPersister currentPersister) {
+		this.currentPersister = currentPersister;
+	}
+
+	/**
+	 * This is only available late during the flush
+	 * cycle
+	 */
+	@Nullable
+	public Object getCurrentKey() {
+		return currentKey;
+	}
+
+	public void setCurrentKey(@Nullable Object currentKey) {
+		this.currentKey = currentKey;
+	}
+
+	/**
+	 * This is only available late during the flush cycle
+	 */
+	@Nullable
+	public CollectionPersister getLoadedPersister() {
+		return loadedPersister;
+	}
+
+	@Nullable
+	public Object getLoadedKey() {
+		return loadedKey;
+	}
+
+	public void setRole(@Nullable String role) {
+		this.role = role;
+	}
+
+	@Override
+	public String toString() {
+		final var result =
+				new StringBuilder( "CollectionEntry" )
+						.append( collectionInfoString( role, loadedKey ) );
+		final var currentPersister = this.currentPersister;
+		if ( currentPersister != null ) {
+			result.append( "->" )
+					.append( collectionInfoString( currentPersister.getRole(), currentKey ) );
+		}
+		return result.toString();
+	}
+
+	/**
+	 * Get the collection orphans (entities which were removed from the collection)
+	 */
+	public Collection<?> getOrphans(String entityName, PersistentCollection<?> collection) {
+		if ( readOnly ) {
+			return emptyList();
+		}
+		else {
+			if ( snapshot == null ) {
+				throw new AssertionFailure( "no collection snapshot for orphan delete" );
+			}
+			return collection.getOrphans( snapshot, entityName );
+		}
+	}
+
+	public boolean isSnapshotEmpty(PersistentCollection<?> collection) {
+		//TODO: does this really need to be here?
+		//      does the collection already have
+		//      it's own up-to-date snapshot?
+		return collection.wasInitialized()
+			&& ( loadedPersister == null || isModifiable() )
+			&& ( snapshot == null || collection.isSnapshotEmpty( snapshot ) );
+	}
+
+
+
+	/**
+	 * Custom serialization routine used during serialization of a
+	 * Session/PersistenceContext for increased performance.
+	 *
+	 * @param oos The stream to which we should write the serial data.
+	 */
+	public void serialize(ObjectOutputStream oos) throws IOException {
+		oos.writeObject( role );
+		oos.writeObject( snapshot );
+		oos.writeObject( loadedKey );
+		oos.writeBoolean( readOnly );
+	}
+
+	/**
+	 * Custom deserialization routine used during deserialization of a
+	 * Session/PersistenceContext for increased performance.
+	 *
+	 * @param ois The stream from which to read the entry.
+	 * @param session The session being deserialized.
+	 *
+	 * @return The deserialized CollectionEntry
+	 */
+	public static CollectionEntry deserialize(ObjectInputStream ois, SessionImplementor session)
+			throws IOException, ClassNotFoundException {
+		return new CollectionEntry(
+				(String) ois.readObject(),
+				(Serializable) ois.readObject(),
+				ois.readObject(),
+				ois.readBoolean(),
+				session == null ? null : session.getFactory()
+		);
+	}
+}

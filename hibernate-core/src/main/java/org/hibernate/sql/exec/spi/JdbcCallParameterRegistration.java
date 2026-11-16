@@ -1,0 +1,32 @@
+package org.hibernate.sql.exec.spi;
+
+import java.sql.CallableStatement;
+import jakarta.persistence.ParameterMode;
+
+import org.hibernate.Incubating;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.type.OutputableType;
+import org.hibernate.sql.exec.internal.JdbcCallRefCursorExtractorImpl;
+
+/**
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.0", group = "sql-execution")
+public interface JdbcCallParameterRegistration {
+
+	String getName();
+
+	ParameterMode getParameterMode();
+
+	void registerParameter(
+			CallableStatement callableStatement,
+			SharedSessionContractImplementor session);
+
+	JdbcParameterBinder getParameterBinder();
+
+	JdbcCallParameterExtractor<?> getParameterExtractor();
+
+	JdbcCallRefCursorExtractorImpl getRefCursorExtractor();
+
+	OutputableType<?> getParameterType();
+}

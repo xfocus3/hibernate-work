@@ -1,0 +1,188 @@
+package org.hibernate.query.sqm.sql.internal;
+
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
+
+import org.hibernate.metamodel.mapping.BasicValuedModelPart;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.ModelPartContainer;
+import org.hibernate.metamodel.model.domain.EntityDomainType;
+import org.hibernate.query.sqm.StrictJpaComplianceViolation;
+import org.hibernate.query.sqm.UnknownPathException;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.domain.SqmBasicValuedSimplePath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmTreatedPath;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.SqlAstWalker;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationContext;
+import org.hibernate.sql.ast.spi.result.DomainResultProducer;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.SqlSelectionExpression;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.update.Assignable;
+
+import jakarta.annotation.Nullable;
+
+import static jakarta.persistence.metamodel.Type.PersistenceType.ENTITY;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.query.sqm.internal.SqmUtil.determineAffectedTableName;
+import static org.hibernate.query.sqm.internal.SqmUtil.getTargetMappingIfNeeded;
+
+/**
+ * @author Steve Ebersole
+ */
+public class BasicValuedPathInterpretation<T> extends AbstractSqmPathInterpretation<T> implements Assignable,  DomainResultProducer<T> {
+	/**
+	 * Static factory
+	 */
+	public static <T> BasicValuedPathInterpretation<T> from(
+			SqmBasicValuedSimplePath<T> sqmPath,
+			SqmToSqlAstConverter sqlAstCreationState,
+			boolean jpaQueryComplianceEnabled) {
+		final SqlAstCreationContext creationContext = sqlAstCreationState.getCreationContext();
+
+		final var lhs = sqmPath.getLhs();
+		final var tableGroup =
+				sqlAstCreationState.getFromClauseAccess()
+						.getTableGroup( lhs.getNavigablePath() );
+		final var tableGroupModelPart = tableGroup.getModelPart();
+
+		final var mappingMetamodel = creationContext.getMappingMetamodel();
+		final EntityMappingType treatTarget;
+		final ModelPartContainer modelPartContainer;
+		if ( lhs instanceof SqmTreatedPath<?, ?> treatedPath
+				&& treatedPath.getTreatTarget().getPersistenceType() == ENTITY ) {
+			final var treatTargetDomainType = (EntityDomainType<?>) treatedPath.getTreatTarget();
+			final var treatEntityDescriptor =
+					mappingMetamodel.findEntityDescriptor( treatTargetDomainType.getHibernateEntityName() );
+			if ( tableGroupModelPart.getPartMappingType() instanceof EntityMappingType entityMappingType
+					&& treatEntityDescriptor.isTypeOrSuperType( entityMappingType ) ) {
+				modelPartContainer = tableGroupModelPart;
+				treatTarget = treatEntityDescriptor;
+			}
+			else {
+				modelPartContainer = treatEntityDescriptor;
+				treatTarget = null;
+			}
+		}
+		else {
+			modelPartContainer = tableGroupModelPart;
+			treatTarget =
+					jpaQueryComplianceEnabled && lhs.getNodeType() instanceof EntityDomainType<?> entityDomainType
+							? mappingMetamodel.findEntityDescriptor( entityDomainType.getHibernateEntityName() )
+							: null;
+		}
+
+		// Use the target type to find the sub part if needed, otherwise just use the container
+		final var modelPart =
+				getTargetMappingIfNeeded( sqmPath, modelPartContainer, sqlAstCreationState )
+						.findSubPart( sqmPath.getReferencedPathSource().getPathName(), treatTarget );
+		if ( modelPart == null ) {
+			modelPartError( sqmPath, jpaQueryComplianceEnabled, tableGroup );
+		}
+
+		final var navigablePath = sqmPath.getNavigablePath();
+		final var mapping = castNonNull( modelPart.asBasicValuedModelPart() );
+		final var tableReference =
+				tableGroup.resolveTableReference( navigablePath, mapping, mapping.getContainingTableExpression() );
+		final var expression =
+				sqlAstCreationState.getSqlExpressionResolver()
+						.resolveSqlExpression( tableReference, mapping );
+		return new BasicValuedPathInterpretation<>( columnReference( expression ), navigablePath, mapping, tableGroup );
+	}
+
+	private static <T> void modelPartError(
+			SqmBasicValuedSimplePath<T> sqmPath,
+			boolean jpaQueryComplianceEnabled,
+			TableGroup tableGroup) {
+		if ( jpaQueryComplianceEnabled ) {
+			// to get the better error, see if we got nothing because of treat handling
+			final var subPart =
+					tableGroup.getModelPart()
+							.findSubPart( sqmPath.getReferencedPathSource().getPathName(), null );
+			if ( subPart != null ) {
+				throw new StrictJpaComplianceViolation( StrictJpaComplianceViolation.Type.IMPLICIT_TREAT );
+			}
+		}
+
+		throw new UnknownPathException( "Path '" + sqmPath.getNavigablePath() + "' did not reference a known model part" );
+	}
+
+	private static ColumnReference columnReference(Expression expression) {
+		if ( expression instanceof ColumnReference reference ) {
+			return reference;
+		}
+		else if ( expression instanceof SqlSelectionExpression selection ) {
+			final var selectedExpression = selection.getSelection().getExpression();
+			assert selectedExpression instanceof ColumnReference;
+			return (ColumnReference) selectedExpression;
+		}
+		else {
+			throw new UnsupportedOperationException( "Unsupported basic-valued path expression : " + expression );
+		}
+	}
+
+	private final ColumnReference columnReference;
+	private final @Nullable String affectedTableName;
+
+	public BasicValuedPathInterpretation(
+			ColumnReference columnReference,
+			NavigablePath navigablePath,
+			BasicValuedModelPart mapping,
+			TableGroup tableGroup) {
+		this( columnReference, navigablePath, mapping, tableGroup,
+				determineAffectedTableName( tableGroup, mapping ) );
+	}
+
+	public BasicValuedPathInterpretation(
+			ColumnReference columnReference,
+			NavigablePath navigablePath,
+			BasicValuedModelPart mapping,
+			TableGroup tableGroup,
+			@Nullable String affectedTableName) {
+		super( navigablePath, mapping, tableGroup );
+		assert columnReference != null;
+		this.columnReference = columnReference;
+		this.affectedTableName = affectedTableName;
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// DomainResultProducer
+
+	@Override
+	public Expression getSqlExpression() {
+		return columnReference;
+	}
+
+	@Override
+	public @Nullable String getAffectedTableName() {
+		return affectedTableName;
+	}
+
+	@Override
+	public ColumnReference getColumnReference() {
+		return columnReference;
+	}
+
+	@Override
+	public void accept(SqlAstWalker sqlTreeWalker) {
+		columnReference.accept( sqlTreeWalker );
+	}
+
+	@Override
+	public String toString() {
+		return "BasicValuedPathInterpretation(" + getNavigablePath() + ")";
+	}
+
+	@Override
+	public void visitColumnReferences(Consumer<ColumnReference> columnReferenceConsumer) {
+		columnReferenceConsumer.accept( columnReference );
+	}
+
+	@Override
+	public List<ColumnReference> getColumnReferences() {
+		return Collections.singletonList( columnReference );
+	}
+}

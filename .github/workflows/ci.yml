@@ -1,0 +1,127 @@
+# See MAINTAINERS.md for details about all available CI jobs.
+
+name: CI
+
+on:
+  push:
+    branches-ignore:
+      # We don't want to run CI on branches for dependabot, just on the PR.
+      - 'dependabot/**'
+      # Ignore upstream maintenance/version branches (e.g. 6.6, 7.0);
+      # CI for those branches is handled through PRs.
+      - '[0-9]*.[0-9]*'
+  pull_request:
+    branches:
+      - 'main'
+      # Ignore dependabot PRs that are not just about build dependencies or workflows;
+      # we'll reject such PRs and send one ourselves.
+      - '!dependabot/**'
+      - 'dependabot/maven/build-dependencies-**'
+      - 'dependabot/github_actions/workflow-actions-**'
+  workflow_dispatch:
+
+permissions: { }
+
+# See https://github.com/hibernate/hibernate-orm/pull/4615 for a description of the behavior we're getting.
+concurrency:
+  # Consider that two builds are in the same concurrency group (cannot run concurrently)
+  # if they use the same workflow and are about the same branch ("ref") or pull request.
+  group: "workflow = ${{ github.workflow }}, ref = ${{ github.event.ref }}, pr = ${{ github.event.pull_request.id }}"
+  # Cancel previous builds in the same concurrency group even if they are in progress
+  # for pull requests or pushes to forks (not the upstream repository).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.repository != 'hibernate/hibernate-orm' }}
+
+jobs:
+
+  # --- Main build + test matrix (reusable workflow) ---
+  # Initial build compiles sources and renders docs; test matrix entries run in parallel after.
+
+  build:
+    # Skip push builds on forks for the main branch;
+    # this avoids duplicate CI when syncing the fork, since the upstream repo already runs CI on push to main.
+    if: github.repository == 'hibernate/hibernate-orm' || !endsWith(github.ref, '/main')
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+    with:
+      initial-build-runs-on: "runs-on/fleet=linux-standard/env=ibm"
+      # --- Databases ---
+      # Sybase runs are slower than the others; give them a wider window.
+      # CockroachDB is long-running; label-triggered on PRs, always in nightly.
+      # Running with HANA requires at least 8GB memory just for the database,
+      # which we don't have on free GH Actions runners; see Jenkins nightly.
+      #
+      # --- Label-triggered entries (PR only) ---
+      # tidb and informix are only included when the PR has the corresponding label.
+      # Nightly JDK versions are included with the 'jdk' label (all) or
+      # 'jdk-<version>' labels (specific versions).
+      #
+      # --- JDKs ---
+      # We generally build with JDK 25, but our baseline is Java 17,
+      # so we test with JDK 17, to be sure everything works.
+      # We also verify that the project compiles with JDK 17 (JDK 17 build).
+      # We want to enable preview features when testing newer builds of OpenJDK:
+      # even if we don't use these features, just enabling them can cause
+      # side effects and it's useful to test that.
+      matrix-json: >-
+        [
+          { "name": "h2" },
+          { "name": "hsqldb", "rdbms": "hsqldb" },
+          { "name": "mysql", "rdbms": "mysql" },
+          { "name": "mariadb", "rdbms": "mariadb" },
+          { "name": "postgis", "rdbms": "postgis" },
+          { "name": "spannerpgsql", "rdbms": "spannerpgsql",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "spanner", "rdbms": "spanner",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "edb", "rdbms": "edb",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "oracle", "rdbms": "oracle",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "db2", "rdbms": "db2",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "mssql", "rdbms": "mssql",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "sybase", "rdbms": "sybase",
+            "timeout": 120,
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "JDK", "java-test-version": "17",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "JDK", "java-test-version": "21",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "JDK", "java-test-version": "27",
+            "java-launcher-args": "--enable-preview --illegal-final-field-mutation=deny",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "JDK 17 build", "java-build-version": "17",
+            "gradle-args": "-PskipErrorProne=true -x test",
+            "runs-on": "runs-on/fleet=linux-standard/env=commonhaus" },
+          { "name": "Persistence TCK - postgresql", "rdbms": "postgresql",
+            "build-script": "ci/build-tck-github.sh",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "Data TCK - h2", "rdbms": "h2",
+            "build-script": "ci/build-data-tck-github.sh",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" },
+          { "name": "Data TCK - postgresql", "rdbms": "postgresql",
+            "build-script": "ci/build-data-tck-github.sh",
+            "runs-on": "runs-on/fleet=linux-standard/env=ibm" }
+          ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'tidb') && ', { "name": "tidb", "rdbms": "tidb" }' || '' }}
+          ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'informix') && ', { "name": "informix", "rdbms": "informix", "gradle-args": "-Ptest.threads=1" }' || '' }}
+          ${{ github.event_name == 'pull_request' && (contains(github.event.pull_request.labels.*.name, 'jdk') || contains(github.event.pull_request.labels.*.name, 'jdk-28')) && ', { "name": "JDK", "java-test-version": "28", "java-test-from": "jdk.java.net", "java-launcher-args": "--enable-preview --illegal-final-field-mutation=deny -Dnet.bytebuddy.experimental=true", "gradle-args": "-PskipJacoco=true" }' || '' }}
+        ]
+      otp-matrix-json: >-
+        [
+          { "name": "Oracle 26ai Autonomous (Test Pilot)",
+            "rdbms": "autonomous-transaction-processing-serverless-26ai" },
+          { "name": "Oracle 19c Autonomous (Test Pilot)",
+            "rdbms": "autonomous-transaction-processing-serverless-19c" },
+          { "name": "Oracle 19c (Test Pilot)",
+            "rdbms": "base-database-service-19c" },
+          { "name": "Oracle 21c (Test Pilot)",
+            "rdbms": "base-database-service-21c" },
+          { "name": "Oracle 26ai (Test Pilot)",
+            "rdbms": "base-database-service-26ai" },
+          { "name": "Oracle 26ai RAC (Test Pilot)",
+            "rdbms": "base-database-service-26ai-rac" }
+        ]
+      run-sonar: true
+    secrets: inherit

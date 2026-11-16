@@ -1,0 +1,221 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.mapping.DiscriminatorConverter;
+import org.hibernate.metamodel.mapping.DiscriminatorType;
+import org.hibernate.metamodel.mapping.EmbeddableDiscriminatorMapping;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.type.BasicType;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.sql.ast.spi.creation.SqlExpressionResolver.createColumnReferenceKey;
+
+
+/**
+ * @author Steve Ebersole
+ */
+public class ExplicitColumnDiscriminatorMappingImpl extends AbstractDiscriminatorMapping
+		implements EmbeddableDiscriminatorMapping {
+	private final String name;
+	private final String tableExpression;
+	@Nullable private final String columnName;
+	@Nullable private final String columnFormula;
+	private final boolean isPhysical;
+	private final boolean isUpdateable;
+	private final @Nullable String customReadExpression;
+	private final @Nullable Long length;
+	private final @Nullable Integer arrayLength;
+	private final @Nullable Integer precision;
+	private final @Nullable Integer scale;
+
+	public ExplicitColumnDiscriminatorMappingImpl(
+			ManagedMappingType mappingType,
+			String name,
+			String tableExpression,
+			String columnExpression,
+			boolean isFormula,
+			boolean isPhysical,
+			boolean isUpdateable,
+			String customReadExpression,
+			Long length,
+			Integer precision,
+			Integer scale,
+			DiscriminatorType<?> discriminatorType) {
+		this(
+				mappingType,
+				name,
+				tableExpression,
+					columnExpression,
+					isFormula,
+					isPhysical,
+					isUpdateable,
+					customReadExpression,
+					length,
+					null,
+				precision,
+				scale,
+				discriminatorType );
+	}
+
+	public ExplicitColumnDiscriminatorMappingImpl(
+			ManagedMappingType mappingType,
+			String name,
+			String tableExpression,
+			String columnExpression,
+			boolean isFormula,
+			boolean isPhysical,
+			boolean isUpdateable,
+			@Nullable String customReadExpression,
+			@Nullable Long length,
+			@Nullable Integer arrayLength,
+			@Nullable Integer precision,
+			@Nullable Integer scale,
+			DiscriminatorType<?> discriminatorType) {
+		//noinspection unchecked
+		super( mappingType,
+				(DiscriminatorType<Object>) discriminatorType,
+				(BasicType<Object>) discriminatorType.getUnderlyingJdbcMapping() );
+		this.name = name;
+		this.tableExpression = tableExpression;
+		this.isPhysical = isPhysical;
+		this.customReadExpression = customReadExpression;
+		this.length = length;
+		this.arrayLength = arrayLength;
+		this.precision = precision;
+		this.scale = scale;
+		if ( isFormula ) {
+			columnName = null;
+			columnFormula = columnExpression;
+			this.isUpdateable = false;
+		}
+		else {
+			columnName = columnExpression;
+			columnFormula = null;
+			this.isUpdateable = isUpdateable;
+		}
+	}
+
+	@Nonnull
+	@Override
+	public DiscriminatorType<?> getMappedType() {
+		return (DiscriminatorType<?>) super.getMappedType();
+	}
+
+	@Nonnull
+	@Override
+	public DiscriminatorConverter<?, ?> getValueConverter() {
+		return getMappedType().getValueConverter();
+	}
+
+	@Nonnull
+	@Override
+	public Expression resolveSqlExpression(
+			@Nonnull NavigablePath navigablePath,
+			@Nullable JdbcMapping jdbcMappingToUse,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull SqlAstCreationState creationState) {
+		final var tableReference = tableGroup.resolveTableReference( navigablePath, tableExpression );
+		return creationState.getSqlExpressionResolver()
+				.resolveSqlExpression(
+						createColumnReferenceKey( tableGroup.getPrimaryTableReference(),
+								getSelectionExpression(), jdbcMappingToUse ),
+						processingState -> new ColumnReference( tableReference, this )
+				);
+	}
+
+	@Nonnull
+	@Override
+	public String getContainingTableExpression() {
+		return tableExpression;
+	}
+
+	@Nonnull
+	@Override
+	public String getSelectableName() {
+		return name;
+	}
+
+	@Nonnull
+	@Override
+	public String getSelectionExpression() {
+		return columnName == null ? castNonNull( columnFormula ) : columnName;
+	}
+
+	@Override
+	public @Nullable String getCustomReadExpression() {
+		return customReadExpression;
+	}
+
+	@Override
+	public @Nullable String getCustomWriteExpression() {
+		return null;
+	}
+
+	@Override
+	public @Nullable Long getLength() {
+		return length;
+	}
+
+	@Override
+	public @Nullable Integer getArrayLength() {
+		return arrayLength;
+	}
+
+	@Override
+	public @Nullable Integer getPrecision() {
+		return precision;
+	}
+
+	@Override
+	public @Nullable Integer getScale() {
+		return scale;
+	}
+
+	@Override
+	public @Nullable Integer getTemporalPrecision() {
+		return null;
+	}
+
+	@Override
+	public boolean isFormula() {
+		return columnFormula != null;
+	}
+
+	@Override
+	public boolean isNullable() {
+		return false;
+	}
+
+	@Override
+	public boolean isInsertable() {
+		return isPhysical;
+	}
+
+	@Override
+	public boolean isUpdateable() {
+		return isUpdateable;
+	}
+
+	@Override
+	public boolean isPartitioned() {
+		return false;
+	}
+
+	@Override
+	public boolean hasPartitionedSelectionMapping() {
+		return false;
+	}
+
+	@Override
+	public boolean hasPhysicalColumn() {
+		return isPhysical;
+	}
+}

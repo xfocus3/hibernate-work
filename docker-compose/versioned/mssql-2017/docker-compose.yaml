@@ -1,0 +1,14 @@
+services:
+  mssql:
+    image: ${DB_IMAGE_MSSQL_2017:-mcr.microsoft.com/mssql/server:2017-latest@sha256:0c4125534a82ec1c648c469084e21a751b17136c96bdbaa9d66d32ba41bac6ee}
+    container_name: mssql
+    environment:
+      SA_PASSWORD: Hibernate_orm_test
+      ACCEPT_EULA: "Y"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P Hibernate_orm_test -Q 'SELECT 1'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

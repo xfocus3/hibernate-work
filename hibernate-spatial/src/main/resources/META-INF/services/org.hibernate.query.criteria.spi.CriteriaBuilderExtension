@@ -1,0 +1,2 @@
+org.hibernate.spatial.criteria.internal.GeolatteSpatialCriteriaExtension
+org.hibernate.spatial.criteria.internal.JTSSpatialCriteriaExtension

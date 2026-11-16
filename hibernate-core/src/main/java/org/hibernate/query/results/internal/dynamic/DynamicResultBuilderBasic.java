@@ -1,0 +1,9 @@
+package org.hibernate.query.results.internal.dynamic;
+
+import org.hibernate.query.results.spi.ResultBuilderBasicValued;
+
+/**
+ * @author Steve Ebersole
+ */
+public interface DynamicResultBuilderBasic extends DynamicResultBuilder, ResultBuilderBasicValued {
+}

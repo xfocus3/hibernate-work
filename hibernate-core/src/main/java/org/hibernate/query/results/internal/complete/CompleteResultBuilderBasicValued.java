@@ -1,0 +1,11 @@
+package org.hibernate.query.results.internal.complete;
+
+import org.hibernate.query.results.spi.ResultBuilderBasicValued;
+
+/**
+ * Nominal extension to ResultBuilder for cases involving scalar results
+ *
+ * @author Steve Ebersole
+ */
+public interface CompleteResultBuilderBasicValued extends CompleteResultBuilder, ResultBuilderBasicValued {
+}

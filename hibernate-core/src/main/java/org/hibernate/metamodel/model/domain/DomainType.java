@@ -1,0 +1,54 @@
+package org.hibernate.metamodel.model.domain;
+
+import org.hibernate.SPI;
+
+import static org.hibernate.SPI.Role.USE;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.query.sqm.spi.SqmExpressible;
+import org.hibernate.type.descriptor.java.JavaType;
+
+/**
+ * Describes any type forming part of the application domain model.
+ * <p>
+ * This is the base type for Hibernate's extension of the standard metamodel
+ * of the {@linkplain jakarta.persistence.metamodel.Type JPA type system}.
+ * <p>
+ * Encapsulates a {@link JavaType} describing the more rudimentary aspects
+ * of the Java type. The {@code DomainType} is a higher-level construct
+ * incorporating information such as bean properties, constructors, and so on.
+ *
+ * @implNote The actual JPA type system is more akin to {@link SimpleDomainType}.
+ *           This contract represents a "higher level" abstraction, allowing
+ *           descriptors for collections (which JPA does not define) as well
+ *           as Hibernate-specific features (like dynamic models and
+ *           {@link org.hibernate.annotations.Any @Any}).
+ *
+ * @author Steve Ebersole
+ */
+public interface DomainType<J> {
+
+	/**
+	 * The {@link JavaType} representing this domain type.
+	 */
+	@SPI(USE)
+	JavaType<J> getExpressibleJavaType();
+
+	/**
+	 * The Java class which represents by this domain type.
+	 *
+	 * @see jakarta.persistence.metamodel.Type#getJavaType
+	 */
+	@Nonnull
+	Class<J> getJavaType();
+
+	/**
+	 * The name of the type. Usually, but not always, the name of a Java class.
+	 *
+	 * @see ManagedDomainType#getTypeName()
+	 * @see SqmExpressible#getTypeName()
+	 */
+	default String getTypeName() {
+		return getExpressibleJavaType().getTypeName();
+	}
+}

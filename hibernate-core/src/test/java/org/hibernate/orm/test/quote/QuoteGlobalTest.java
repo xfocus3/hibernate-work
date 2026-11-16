@@ -1,0 +1,123 @@
+package org.hibernate.orm.test.quote;
+
+import org.hibernate.Transaction;
+import org.hibernate.boot.spi.MetadataImplementor;
+import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.mapping.Column;
+import org.hibernate.mapping.Index;
+import org.hibernate.mapping.Selectable;
+import org.hibernate.mapping.Table;
+import org.hibernate.mapping.UniqueKey;
+
+import org.hibernate.testing.orm.junit.JiraKey;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.Setting;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+
+/**
+ * @author Emmanuel Bernard
+ * @author Brett Meyer
+ */
+@DomainModel(
+		annotatedClasses = {
+				User.class,
+				Role.class,
+				Phone.class,
+				Person.class,
+				House.class
+		},
+		xmlMappings = "org/hibernate/orm/test/quote/DataPoint.hbm.xml"
+)
+@SessionFactory
+@ServiceRegistry(
+		settings = @Setting(name = AvailableSettings.GLOBALLY_QUOTED_IDENTIFIERS, value = "true")
+)
+public class QuoteGlobalTest {
+
+	@Test
+	@JiraKey(value = "HHH-7890")
+	public void testQuotedUniqueConstraint(SessionFactoryScope scope) {
+		if ( scope.getSessionFactory().getJdbcServices().getDialect().getUniqueDelegate().representation( new org.hibernate.dialect.unique.spi.UniqueKeyRepresentationRequest( false, false, false ) ) == org.hibernate.dialect.unique.spi.UniqueKeyRepresentation.CONSTRAINT ) {
+			for ( UniqueKey uk :
+					scope.getMetadataImplementor().getEntityBinding( Person.class.getName() )
+							.getTable().getUniqueKeys().values() ) {
+				assertEquals( 1, uk.getColumns().size() );
+				assertTrue( uk.getColumn( 0 ).isQuoted() );
+				assertEquals( "name", uk.getColumn( 0 ).getName() );
+				return;
+			}
+		}
+		else {
+			Index uniqueIndex = scope.getMetadataImplementor().getEntityBinding( Person.class.getName() )
+					.getTable().getIndexes().values().stream().filter( Index::isUnique ).findAny().orElse(  null );
+			assertNotNull(  uniqueIndex );
+			List<Selectable> selectables = uniqueIndex.getSelectables();
+			assertEquals( 1, selectables.size() );
+			Column column = (Column) selectables.get( 0 );
+			assertTrue( column.isQuoted() );
+			assertEquals( "name", column.getName() );
+			return;
+		}
+		fail( "GLOBALLY_QUOTED_IDENTIFIERS caused the unique key creation to fail." );
+	}
+
+	@Test
+	public void testQuoteManyToMany(SessionFactoryScope scope) {
+		scope.inSession(
+				session -> {
+					try {
+						Transaction tx = session.beginTransaction();
+						User u = new User();
+						session.persist( u );
+						Role r = new Role();
+						session.persist( r );
+						u.getRoles().add( r );
+						session.flush();
+						session.clear();
+						u = session.get( User.class, u.getId() );
+						assertEquals( 1, u.getRoles().size() );
+						tx.rollback();
+						String role = User.class.getName() + ".roles";
+						assertEquals(
+								"User_Role",
+								scope.getMetadataImplementor()
+										.getCollectionBinding( role )
+										.getCollectionTable()
+										.getName()
+						);
+					}
+					finally {
+						if ( session.getTransaction().isActive() ) {
+							session.getTransaction().rollback();
+						}
+					}
+				}
+		);
+	}
+
+	@Test
+	@JiraKey(value = "HHH-8520")
+	public void testHbmQuoting(SessionFactoryScope scope) {
+		final var metadataImplementor = scope.getMetadataImplementor();
+		doTestHbmQuoting( DataPoint.class, metadataImplementor );
+		doTestHbmQuoting( AssociatedDataPoint.class, metadataImplementor );
+	}
+
+	private void doTestHbmQuoting(Class<?> clazz, MetadataImplementor metadataImplementor) {
+		Table table = metadataImplementor.getEntityBinding( clazz.getName() ).getTable();
+		assertTrue( table.isQuoted() );
+		for ( Column column : table.getColumns() ) {
+			assertTrue( column.isQuoted() );
+		}
+	}
+}

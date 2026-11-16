@@ -1,0 +1,41 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.engine.jdbc.Size;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * Models the type of a thing that can be used as an expression in a SQL query
+ *
+ * @author Christian Beikov
+ */
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface SqlTypedMapping {
+	@Nullable Long getLength();
+	@Nullable Integer getArrayLength();
+	@Nullable Integer getPrecision();
+	@Nullable Integer getScale();
+	@Nullable Integer getTemporalPrecision();
+	default boolean isLob() {
+		return getJdbcMapping().getJdbcType().isLob();
+	}
+	@Nonnull
+	JdbcMapping getJdbcMapping();
+
+	@Nonnull
+	default Size toSize() {
+		final Size size = new Size();
+		size.setArrayLength( getArrayLength() );
+		size.setLength( getLength() );
+		if ( getTemporalPrecision() != null ) {
+			size.setPrecision( getTemporalPrecision() );
+		}
+		else {
+			size.setPrecision( getPrecision() );
+		}
+		size.setScale( getScale() );
+		return size;
+	}
+}

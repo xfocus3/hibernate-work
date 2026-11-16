@@ -1,0 +1,158 @@
+package org.hibernate.persister.internal;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.util.Locale;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.HibernateException;
+import org.hibernate.MappingException;
+import org.hibernate.cache.spi.access.CollectionDataAccess;
+import org.hibernate.cache.spi.access.EntityDataAccess;
+import org.hibernate.cache.spi.access.NaturalIdDataAccess;
+import org.hibernate.mapping.Collection;
+import org.hibernate.mapping.PersistentClass;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.persister.spi.PersisterClassResolver;
+import org.hibernate.persister.spi.PersisterFactory;
+import org.hibernate.service.spi.ServiceRegistryAwareService;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * The standard Hibernate {@link PersisterFactory} implementation
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ */
+public final class PersisterFactoryImpl implements PersisterFactory, ServiceRegistryAwareService {
+	/**
+	 * The constructor signature for {@link EntityPersister} implementations
+	 */
+	public static final Class<?>[] ENTITY_PERSISTER_CONSTRUCTOR_ARGS = new Class[] {
+			PersistentClass.class,
+			EntityDataAccess.class,
+			NaturalIdDataAccess.class,
+			RuntimeModelCreationContext.class
+	};
+
+	/**
+	 * The constructor signature for {@link CollectionPersister} implementations
+	 */
+	public static final Class<?>[] COLLECTION_PERSISTER_CONSTRUCTOR_ARGS = new Class[] {
+			Collection.class,
+			CollectionDataAccess.class,
+			RuntimeModelCreationContext.class
+	};
+
+	private PersisterClassResolver persisterClassResolver;
+
+	@Override
+	public void injectServices(@Nonnull ServiceRegistryImplementor serviceRegistry) {
+		this.persisterClassResolver = serviceRegistry.getService( PersisterClassResolver.class );
+	}
+
+	@Nonnull
+	@Override
+	public EntityPersister createEntityPersister(
+			@Nonnull PersistentClass entityBinding,
+			@Nullable EntityDataAccess entityCacheAccessStrategy,
+			@Nullable NaturalIdDataAccess naturalIdCacheAccessStrategy,
+			@Nonnull RuntimeModelCreationContext creationContext) {
+		final var persisterClass = persisterClassResolver.getEntityPersisterClass( entityBinding );
+		final var constructor = resolveEntityPersisterConstructor( persisterClass );
+		try {
+			return constructor.newInstance( entityBinding, entityCacheAccessStrategy, naturalIdCacheAccessStrategy, creationContext );
+		}
+		catch (MappingException e) {
+			throw e;
+		}
+		catch (InvocationTargetException e) {
+			final var target = e.getTargetException();
+			if ( target instanceof HibernateException hibernateException ) {
+				throw hibernateException;
+			}
+			else {
+				throw new MappingException(
+						String.format(
+								Locale.ROOT,
+								"Could not instantiate persister %s (%s)",
+								persisterClass.getName(),
+								entityBinding.getEntityName()
+						),
+						target
+				);
+			}
+		}
+		catch (Exception e) {
+			throw new MappingException(
+					String.format(
+							Locale.ROOT,
+							"Could not instantiate persister %s (%s)",
+							persisterClass.getName(),
+							entityBinding.getEntityName()
+					),
+					e
+			);
+		}
+	}
+
+	@Nonnull
+	private Constructor<? extends EntityPersister> resolveEntityPersisterConstructor(@Nonnull Class<? extends EntityPersister> persisterClass) {
+		try {
+			return persisterClass.getConstructor( ENTITY_PERSISTER_CONSTRUCTOR_ARGS );
+		}
+		catch (NoSuchMethodException noConstructorException) {
+			throw new MappingException( "Could not find appropriate constructor for " + persisterClass.getName(), noConstructorException );
+		}
+
+	}
+
+	@Nonnull
+	@Override
+	public CollectionPersister createCollectionPersister(
+			@Nonnull Collection collectionBinding,
+			@Nullable CollectionDataAccess cacheAccessStrategy,
+			@Nonnull RuntimeModelCreationContext creationContext) {
+		final var persisterClass = persisterClassResolver.getCollectionPersisterClass( collectionBinding );
+		final var constructor = resolveCollectionPersisterConstructor( persisterClass );
+		try {
+			return constructor.newInstance( collectionBinding, cacheAccessStrategy, creationContext );
+		}
+		catch (MappingException e) {
+			throw e;
+		}
+		catch (InvocationTargetException e) {
+			final Throwable target = e.getTargetException();
+			if ( target instanceof HibernateException hibernateException ) {
+				throw hibernateException;
+			}
+			else {
+				throw new MappingException(
+						String.format(
+								"Could not instantiate collection persister implementor `%s` for collection-role `%s`",
+								persisterClass.getName(),
+								collectionBinding.getRole()
+						),
+						target
+				);
+			}
+		}
+		catch (Exception e) {
+			throw new MappingException( "Could not instantiate collection persister " + persisterClass.getName(), e );
+		}
+	}
+
+	@Nonnull
+	private Constructor<? extends CollectionPersister> resolveCollectionPersisterConstructor(@Nonnull Class<? extends CollectionPersister> persisterClass) {
+		try {
+			return persisterClass.getConstructor( COLLECTION_PERSISTER_CONSTRUCTOR_ARGS );
+		}
+		catch (NoSuchMethodException noConstructorException) {
+			throw new MappingException( "Could not find appropriate constructor for " + persisterClass.getName(), noConstructorException );
+		}
+	}
+}

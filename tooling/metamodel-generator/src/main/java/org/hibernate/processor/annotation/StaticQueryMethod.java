@@ -1,0 +1,458 @@
+package org.hibernate.processor.annotation;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.processor.model.MetaAttribute;
+import org.hibernate.processor.model.Metamodel;
+
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.element.AnnotationValue;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.VariableElement;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.hibernate.processor.annotation.AbstractAnnotatedMethod.parameterName;
+import static org.hibernate.processor.annotation.QueryOptionsSupport.stringLiteral;
+import static org.hibernate.processor.util.Constants.LIST;
+import static org.hibernate.processor.util.Constants.MAP;
+import static org.hibernate.processor.util.Constants.STATEMENT_REFERENCE;
+import static org.hibernate.processor.util.Constants.STATIC_STATEMENT_REFERENCE;
+import static org.hibernate.processor.util.Constants.STATIC_TYPED_QUERY_REFERENCE;
+import static org.hibernate.processor.util.Constants.TIMEOUT;
+import static org.hibernate.processor.util.Constants.TYPED_QUERY_REFERENCE;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.processor.util.TypeUtils.getAnnotationValue;
+
+/**
+ * @author Gavin King
+ */
+class StaticQueryMethod implements MetaAttribute {
+	private final AnnotationMetaEntity annotationMetaEntity;
+	private final ExecutableElement method;
+	private final String methodName;
+	private final String queryMethodName;
+	private final boolean statement;
+	private final boolean nativeQuery;
+	private final @Nullable String resultTypeName;
+	private final @Nullable String resultTypeClass;
+	private final List<String> queryParamTypes;
+	private final List<String> paramNames;
+	private final List<String> paramTypes;
+	private final @Nullable AnnotationMirror queryOptions;
+
+	StaticQueryMethod(
+			AnnotationMetaEntity annotationMetaEntity,
+			ExecutableElement method,
+			String methodName,
+			String queryMethodName,
+			boolean statement,
+			boolean nativeQuery,
+			@Nullable String resultTypeName,
+			@Nullable String resultTypeClass,
+			List<String> queryParamTypes,
+			List<String> paramNames,
+			List<String> paramTypes,
+			@Nullable AnnotationMirror queryOptions) {
+		this.annotationMetaEntity = annotationMetaEntity;
+		this.method = method;
+		this.methodName = methodName;
+		this.queryMethodName = queryMethodName;
+		this.statement = statement;
+		this.nativeQuery = nativeQuery;
+		this.resultTypeName = resultTypeName;
+		this.resultTypeClass = resultTypeClass;
+		this.queryParamTypes = queryParamTypes;
+		this.paramNames = paramNames;
+		this.paramTypes = paramTypes;
+		this.queryOptions = queryOptions;
+	}
+
+	@Override
+	public boolean hasTypedAttribute() {
+		return true;
+	}
+
+	@Override
+	public boolean hasStringAttribute() {
+		return false;
+	}
+
+	@Override
+	public String getAttributeDeclarationString() {
+		final var declaration = new StringBuilder();
+		comment( declaration );
+		modifiers( declaration );
+		returnType( declaration );
+		parameters( declaration );
+		declaration
+				.append(" {\n\treturn new ")
+				.append(annotationMetaEntity.importType(
+						statement ? STATIC_STATEMENT_REFERENCE : STATIC_TYPED_QUERY_REFERENCE ))
+				.append(statement ? "(" : "<>(");
+		constructorArguments( declaration );
+		declaration
+				.append("\n\t);\n}");
+		return declaration.toString();
+	}
+
+	private void comment(StringBuilder declaration) {
+		declaration
+				.append("\n/**")
+				.append("\n * Return a reference to the query named {@code ")
+				.append(queryName())
+				.append("}.")
+				.append("\n *")
+				.append("\n * @see ")
+				.append(annotationMetaEntity.getQualifiedName())
+				.append("#")
+				.append(queryMethodName)
+				.append("(")
+				.append(parameterList())
+				.append(")")
+				.append("\n **/\n");
+	}
+
+	private String queryName() {
+		return queryName( annotationMetaEntity.getQualifiedName(), queryMethodName, queryParamTypes );
+	}
+
+	static String queryName(String typeName, String methodName, List<String> paramTypes) {
+		final var name =
+				new StringBuilder( javadocTypeName( typeName ) )
+						.append( '#' )
+						.append( methodName )
+						.append( '(' );
+		for ( int i = 0; i < paramTypes.size(); i++ ) {
+			if ( i > 0 ) {
+				name.append( ',' );
+			}
+			name.append( javadocTypeName( erasedType( paramTypes.get( i ) ) ) );
+		}
+		return name.append( ')' ).toString();
+	}
+
+	private static String javadocTypeName(String typeName) {
+		return typeName.endsWith( "$" ) ? typeName : typeName.replace( '$', '.' );
+	}
+
+	private void modifiers(StringBuilder declaration) {
+		declaration.append("public static ");
+	}
+
+	private void returnType(StringBuilder declaration) {
+		if ( statement ) {
+			declaration
+					.append(annotationMetaEntity.importType(STATEMENT_REFERENCE))
+					.append(' ');
+		}
+		else {
+			declaration
+					.append(annotationMetaEntity.importType(TYPED_QUERY_REFERENCE))
+					.append('<')
+					.append(annotationMetaEntity.importType(castNonNull(resultTypeName)))
+					.append("> ");
+		}
+		declaration.append(methodName);
+	}
+
+	private String parameterList() {
+		final var parameters = new StringBuilder();
+		for ( int i = 0; i < queryParamTypes.size(); i++ ) {
+			if ( i > 0 ) {
+				parameters.append( ',' );
+			}
+			final var erasedType = erasedType( queryParamTypes.get( i ) );
+			parameters.append( annotationMetaEntity.importType( erasedType ) );
+		}
+		return parameters.toString();
+	}
+
+	private void parameters(StringBuilder declaration) {
+		declaration.append('(');
+		for ( int i = 0; i < paramNames.size(); i++ ) {
+			if ( i > 0 ) {
+				declaration.append(", ");
+			}
+			declaration
+					.append(annotationMetaEntity.importType(parameterType( i )))
+					.append(' ')
+					.append(parameterName(paramNames.get( i )));
+		}
+		declaration.append(')');
+	}
+
+	private String parameterType(int index) {
+		final var paramType = paramTypes.get( index );
+		if ( method.isVarArgs() && index == paramTypes.size() - 1 && paramType.endsWith("[]") ) {
+			return paramType.substring( 0, paramType.length() - 2 ) + "...";
+		}
+		else {
+			return paramType;
+		}
+	}
+
+	private void constructorArguments(StringBuilder declaration) {
+		constructorArguments(
+				annotationMetaEntity,
+				declaration,
+				queryName(),
+				queryMethodName,
+				statement,
+				nativeQuery,
+				resultTypeClass,
+				paramNames,
+				paramTypes,
+				queryOptions
+		);
+	}
+
+	static void constructorArguments(
+			AnnotationMetaEntity annotationMetaEntity,
+			StringBuilder declaration,
+			String queryName,
+			String annotatedMemberName,
+			boolean statement,
+			boolean nativeQuery,
+			@Nullable String resultTypeClass,
+			List<String> paramNames,
+			List<String> paramTypes,
+			@Nullable AnnotationMirror queryOptions) {
+		declaration
+				.append("\n\t\t\t")
+				.append(stringLiteral(queryName))
+				.append(",\n\t\t\t")
+				.append(annotationMetaEntity.importType(annotationMetaEntity.getQualifiedName()))
+				.append(".class,\n\t\t\t")
+				.append(stringLiteral(annotatedMemberName));
+		if ( !statement ) {
+			declaration
+					.append(",\n\t\t\t")
+					.append(annotationMetaEntity.importType(erasedType(castNonNull(resultTypeClass))))
+					.append(".class");
+		}
+		declaration
+				.append(",\n\t\t\t")
+				.append(classList( annotationMetaEntity, paramTypes ))
+				.append(",\n\t\t\t")
+				.append(nameList( annotationMetaEntity, paramNames ))
+				.append(",\n\t\t\t")
+				.append(argumentList( annotationMetaEntity, paramNames ));
+		queryOptions( annotationMetaEntity, declaration, statement, nativeQuery, queryOptions );
+	}
+
+	private static String classList(AnnotationMetaEntity annotationMetaEntity, List<String> paramTypes) {
+		final var list =
+				new StringBuilder()
+						.append(annotationMetaEntity.importType(LIST))
+						.append(".of(");
+		for ( int i = 0; i < paramTypes.size(); i++ ) {
+			if ( i > 0 ) {
+				list.append(", ");
+			}
+			list
+					.append(annotationMetaEntity.importType(erasedType(paramTypes.get( i ))))
+					.append(".class");
+		}
+		return list.append(')').toString();
+	}
+
+	private static String nameList(AnnotationMetaEntity annotationMetaEntity, List<String> paramNames) {
+		final var list = new StringBuilder()
+				.append(annotationMetaEntity.importType(LIST))
+				.append(".of(");
+		for ( int i = 0; i < paramNames.size(); i++ ) {
+			if ( i > 0 ) {
+				list.append(", ");
+			}
+			list.append(stringLiteral(paramNames.get( i )));
+		}
+		return list.append(')').toString();
+	}
+
+	private static String argumentList(AnnotationMetaEntity annotationMetaEntity, List<String> paramNames) {
+		final var list = new StringBuilder()
+				.append(annotationMetaEntity.staticImport("java.util.Collections", "unmodifiableList"))
+				.append('(')
+				.append(annotationMetaEntity.staticImport("java.util.Arrays", "asList"))
+				.append('(');
+		for ( int i = 0; i < paramNames.size(); i++ ) {
+			if ( i > 0 ) {
+				list.append(", ");
+			}
+			list
+					.append("(Object) ")
+					.append(parameterName(paramNames.get( i )));
+		}
+		return list.append("))").toString();
+	}
+
+	private static void queryOptions(
+			AnnotationMetaEntity annotationMetaEntity,
+			StringBuilder declaration,
+			boolean statement,
+			boolean nativeQuery,
+			@Nullable AnnotationMirror optionsAnnotation) {
+		if ( optionsAnnotation != null ) {
+			final var entityGraph = statement || nativeQuery ? null : entityGraph( optionsAnnotation );
+			final var hints = hints( annotationMetaEntity, optionsAnnotation );
+			final var options = options( annotationMetaEntity, statement, optionsAnnotation );
+			if ( entityGraph != null || hints != null || !options.isEmpty() ) {
+				if ( statement ) {
+					declaration
+							.append(",\n\t\t\t")
+							.append(hints == null ? emptyMap( annotationMetaEntity ) : hints);
+				}
+				else {
+					declaration
+							.append(",\n\t\t\t")
+							.append(entityGraph == null ? "null" : entityGraph)
+							.append(",\n\t\t\t")
+							.append(hints == null ? emptyMap( annotationMetaEntity ) : hints);
+				}
+				for ( var option : options ) {
+					declaration
+							.append(",\n\t\t\t")
+							.append(option);
+				}
+			}
+		}
+	}
+
+	private static @Nullable String entityGraph(AnnotationMirror queryOptions) {
+		final var entityGraph = getAnnotationValue( queryOptions, "entityGraph" );
+		if ( entityGraph != null ) {
+			final var value = entityGraph.getValue().toString();
+			if ( !value.isEmpty() ) {
+				return stringLiteral( value );
+			}
+		}
+		return null;
+	}
+
+	private static String emptyMap(AnnotationMetaEntity annotationMetaEntity) {
+		return annotationMetaEntity.importType(MAP) + ".of()";
+	}
+
+	private static @Nullable String hints(AnnotationMetaEntity annotationMetaEntity, AnnotationMirror queryOptions) {
+		final var hints = getAnnotationValue( queryOptions, "hints" );
+		if ( hints != null ) {
+			@SuppressWarnings("unchecked")
+			final var values =
+					(List<? extends AnnotationValue>)
+							hints.getValue();
+			if ( !values.isEmpty() ) {
+				final var builder =
+						new StringBuilder()
+								.append(annotationMetaEntity.importType(MAP))
+								.append(".ofEntries(");
+				for ( int i = 0; i < values.size(); i++ ) {
+					if ( i > 0 ) {
+						builder.append(", ");
+					}
+					final var hint = (AnnotationMirror) values.get( i ).getValue();
+					builder
+							.append(annotationMetaEntity.importType(MAP))
+							.append(".entry(")
+							.append(stringLiteral(annotationString( hint, "name" )))
+							.append(", ")
+							.append(stringLiteral(annotationString( hint, "value" )))
+							.append(')');
+				}
+				return builder.append(')').toString();
+			}
+		}
+		return null;
+	}
+
+	private static String annotationString(AnnotationMirror annotation, String member) {
+		final var value = getAnnotationValue( annotation, member );
+		return value == null ? "" : value.getValue().toString();
+	}
+
+	private static List<String> options(
+			AnnotationMetaEntity annotationMetaEntity,
+			boolean statement,
+			AnnotationMirror queryOptions) {
+		final var options = new ArrayList<String>();
+		addEnumOption( annotationMetaEntity, options, queryOptions, "flush" );
+		addTimeoutOption( annotationMetaEntity, options, queryOptions );
+		if ( !statement ) {
+			addEnumOption( annotationMetaEntity, options, queryOptions, "cacheStoreMode" );
+			addEnumOption( annotationMetaEntity, options, queryOptions, "cacheRetrieveMode" );
+			addEnumOption( annotationMetaEntity, options, queryOptions, "lockMode" );
+			addEnumOption( annotationMetaEntity, options, queryOptions, "lockScope" );
+		}
+		return options;
+	}
+
+	private static void addTimeoutOption(
+			AnnotationMetaEntity annotationMetaEntity,
+			List<String> options,
+			AnnotationMirror queryOptions) {
+		final var timeout = getAnnotationValue( queryOptions, "timeout" );
+		if ( timeout != null ) {
+			options.add(annotationMetaEntity.importType(TIMEOUT)
+					+ ".milliseconds(" + timeout.getValue() + ")");
+		}
+	}
+
+	private static void addEnumOption(
+			AnnotationMetaEntity annotationMetaEntity,
+			List<String> options,
+			AnnotationMirror queryOptions,
+			String member) {
+		final var option = getAnnotationValue( queryOptions, member );
+		if ( option != null && option.getValue() instanceof VariableElement variable ) {
+			final var type = (TypeElement) variable.getEnclosingElement();
+			options.add(annotationMetaEntity.importType(type.getQualifiedName().toString())
+					+ "." + variable.getSimpleName());
+		}
+	}
+
+	static String erasedType(String type) {
+		var result = type;
+		while ( result.startsWith( "@" ) ) {
+			final var index = result.lastIndexOf( ' ' );
+			if ( index > 0 ) {
+				result = result.substring( index + 1 );
+			}
+			else {
+				break;
+			}
+		}
+		final var typeArgumentIndex = result.indexOf( '<' );
+		if ( typeArgumentIndex >= 0 ) {
+			result = result.substring( 0, typeArgumentIndex );
+		}
+		if ( result.endsWith("...") ) {
+			result = result.substring( 0, result.length() - 3 ) + "[]";
+		}
+		return result;
+	}
+
+	@Override
+	public String getAttributeNameDeclarationString() {
+		throw new UnsupportedOperationException("operation not supported");
+	}
+
+	@Override
+	public String getMetaType() {
+		return statement ? STATEMENT_REFERENCE : TYPED_QUERY_REFERENCE;
+	}
+
+	@Override
+	public String getPropertyName() {
+		return methodName;
+	}
+
+	@Override
+	public String getTypeDeclaration() {
+		return statement ? STATEMENT_REFERENCE : TYPED_QUERY_REFERENCE;
+	}
+
+	@Override
+	public Metamodel getHostingEntity() {
+		return annotationMetaEntity;
+	}
+}

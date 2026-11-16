@@ -1,0 +1,14 @@
+package org.hibernate.query.sqm.tree.spi.domain;
+
+import org.hibernate.Incubating;
+import org.hibernate.metamodel.model.domain.PluralPersistentAttribute;
+import org.hibernate.query.sqm.spi.SqmJoinable;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+
+
+@Incubating(since = "6.2")
+public interface SqmPluralPersistentAttribute<D, C, E>
+		extends PluralPersistentAttribute<D, C, E>, SqmPersistentAttribute<D,C>, SqmJoinable<D,E>, SqmPathSource<E> {
+	@Override
+	SqmPathSource<E> getElementPathSource();
+}

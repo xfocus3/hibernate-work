@@ -1,0 +1,10 @@
+plugins {
+    id "local.java-module"
+}
+
+description = 'Asciidoctor extensions for Hibernate ORM'
+
+dependencies {
+    implementation(libs.asciidoctor.hibernateExtensions)
+    implementation(libs.asciidoctor.asciidoctorj)
+}

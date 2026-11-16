@@ -1,0 +1,18 @@
+package org.hibernate.sql.ast.spi.query.expression;
+
+import org.hibernate.Incubating;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.sql.ast.spi.query.cte.CteContainer;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+
+/**
+ * @author Christian Beikov
+ */
+@Incubating(since = "6.0")
+public interface QueryTransformer {
+
+	QuerySpec transform(
+			CteContainer cteContainer,
+			QuerySpec querySpec,
+			SqmToSqlAstConverter converter);
+}

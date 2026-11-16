@@ -1,0 +1,346 @@
+package org.hibernate.boot.model.source.internal;
+
+import java.util.EnumSet;
+
+import org.hibernate.boot.spi.EffectiveMappingDefaults;
+import org.hibernate.cache.spi.access.AccessType;
+import org.hibernate.internal.util.StringHelper;
+import org.hibernate.metamodel.CollectionClassification;
+
+import jakarta.persistence.CascadeType;
+
+import static org.hibernate.boot.model.internal.BinderHelper.renderCascadeTypeList;
+import static org.hibernate.internal.util.collections.CollectionHelper.isEmpty;
+
+/**
+ * Represents a "nested level" in the mapping defaults stack.
+ *
+ * @author Steve Ebersole
+ */
+public class OverriddenMappingDefaults implements EffectiveMappingDefaults {
+	private final String implicitSchemaName;
+	private final String implicitCatalogName;
+	private final boolean implicitlyQuoteIdentifiers;
+	private final String implicitIdColumnName;
+	private final String implicitTenantIdColumnName;
+	private final String implicitDiscriminatorColumnName;
+	private final String implicitPackageName;
+	private final boolean autoImportEnabled;
+	private final jakarta.persistence.AccessType implicitPropertyAccessType;
+	private final String implicitPropertyAccessorName;
+	private final boolean entitiesImplicitlyLazy;
+	private final boolean pluralAttributesImplicitlyLazy;
+	private final AccessType implicitCacheAccessType;
+	private final String implicitCascadeStyleName;
+	private final CollectionClassification implicitListClassification;
+
+	/**
+	 * @deprecated Use {@link Builder} for other defaults and {@link org.hibernate.annotations.DefaultListSemantics}
+	 * for list semantics.
+	 * Scheduled for removal in 9.0.
+	 */
+	@Deprecated(since = "8.0", forRemoval = true)
+	public OverriddenMappingDefaults(
+			String implicitSchemaName,
+			String implicitCatalogName,
+			boolean implicitlyQuoteIdentifiers,
+			String implicitIdColumnName,
+			String implicitTenantIdColumnName,
+			String implicitDiscriminatorColumnName,
+			String implicitPackageName,
+			boolean autoImportEnabled,
+			String implicitCascadeStyleName,
+			jakarta.persistence.AccessType implicitPropertyAccessType,
+			String implicitPropertyAccessorName,
+			boolean entitiesImplicitlyLazy,
+			boolean pluralAttributesImplicitlyLazy,
+			AccessType implicitCacheAccessType,
+			CollectionClassification implicitListClassification) {
+		this.implicitSchemaName = implicitSchemaName;
+		this.implicitCatalogName = implicitCatalogName;
+		this.implicitlyQuoteIdentifiers = implicitlyQuoteIdentifiers;
+		this.implicitIdColumnName = implicitIdColumnName;
+		this.implicitTenantIdColumnName = implicitTenantIdColumnName;
+		this.implicitDiscriminatorColumnName = implicitDiscriminatorColumnName;
+		this.implicitPackageName = implicitPackageName;
+		this.autoImportEnabled = autoImportEnabled;
+		this.implicitCascadeStyleName = implicitCascadeStyleName;
+		this.implicitPropertyAccessType = implicitPropertyAccessType;
+		this.implicitPropertyAccessorName = implicitPropertyAccessorName;
+		this.entitiesImplicitlyLazy = entitiesImplicitlyLazy;
+		this.pluralAttributesImplicitlyLazy = pluralAttributesImplicitlyLazy;
+		this.implicitCacheAccessType = implicitCacheAccessType;
+		this.implicitListClassification = implicitListClassification;
+	}
+
+	@Override
+	public String getDefaultSchemaName() {
+		return implicitSchemaName;
+	}
+
+	@Override
+	public String getDefaultCatalogName() {
+		return implicitCatalogName;
+	}
+
+	@Override
+	public boolean isDefaultQuoteIdentifiers() {
+		return implicitlyQuoteIdentifiers;
+	}
+
+	@Override
+	public String getDefaultIdColumnName() {
+		return implicitIdColumnName;
+	}
+
+	@Override
+	public String getDefaultDiscriminatorColumnName() {
+		return implicitDiscriminatorColumnName;
+	}
+
+	@Override
+	public String getDefaultTenantIdColumnName() {
+		return implicitTenantIdColumnName;
+	}
+
+	@Override
+	public String getDefaultPackageName() {
+		return implicitPackageName;
+	}
+
+	@Override
+	public boolean isDefaultAutoImport() {
+		return autoImportEnabled;
+	}
+
+	@Override
+	public EnumSet<CascadeType> getDefaultCascadeTypes() {
+		final EnumSet<CascadeType> cascadeTypes = EnumSet.noneOf( CascadeType.class );
+		if ( implicitCascadeStyleName != null ) {
+			for ( String cascadeStyleName : StringHelper.split( ",", implicitCascadeStyleName ) ) {
+				final CascadeType cascadeType = switch ( cascadeStyleName ) {
+					case "all" -> CascadeType.ALL;
+					case "all-delete-orphan" -> CascadeType.ALL;
+					case "persist" -> CascadeType.PERSIST;
+					case "merge" -> CascadeType.MERGE;
+					case "refresh" -> CascadeType.REFRESH;
+					case "evict" -> CascadeType.DETACH;
+					case "delete" -> CascadeType.REMOVE;
+					case "remove" -> CascadeType.REMOVE;
+					case "delete-orphan" -> CascadeType.REMOVE;
+					default -> null;
+				};
+				if ( cascadeType != null ) {
+					cascadeTypes.add( cascadeType );
+				}
+			}
+		}
+		return cascadeTypes;
+	}
+
+	public String getDefaultCascadeStyleName() {
+		return implicitCascadeStyleName;
+	}
+
+	@Override
+	public jakarta.persistence.AccessType getDefaultPropertyAccessType() {
+		return implicitPropertyAccessType;
+	}
+
+	@Override
+	public String getDefaultAccessStrategyName() {
+		return implicitPropertyAccessorName;
+	}
+
+	@Override
+	public boolean isDefaultEntityLaziness() {
+		return entitiesImplicitlyLazy;
+	}
+
+	@Override
+	public boolean isDefaultCollectionLaziness() {
+		return pluralAttributesImplicitlyLazy;
+	}
+
+	@Override
+	public AccessType getDefaultCacheAccessType() {
+		return implicitCacheAccessType;
+	}
+
+	@Override
+	@Deprecated(since = "8.0", forRemoval = true)
+	public CollectionClassification getDefaultListClassification() {
+		return implicitListClassification;
+	}
+
+	public static class Builder {
+		private String implicitSchemaName;
+		private String implicitCatalogName;
+		private boolean implicitlyQuoteIdentifiers;
+		private String implicitIdColumnName;
+		private String implicitTenantIdColumnName;
+		private String implicitDiscriminatorColumnName;
+		private String implicitPackageName;
+		private boolean autoImportEnabled;
+		private String implicitCascadeStyleName;
+		private jakarta.persistence.AccessType implicitPropertyAccessType;
+		private String implicitPropertyAccessorName;
+		private boolean entitiesImplicitlyLazy;
+		private boolean pluralAttributesImplicitlyLazy;
+		private AccessType implicitCacheAccessType;
+		private CollectionClassification implicitListClassification;
+
+		public Builder(EffectiveMappingDefaults parentDefaults) {
+			this.implicitSchemaName = parentDefaults.getDefaultSchemaName();
+			this.implicitCatalogName = parentDefaults.getDefaultCatalogName();
+			this.implicitlyQuoteIdentifiers = parentDefaults.isDefaultQuoteIdentifiers();
+			this.implicitIdColumnName = parentDefaults.getDefaultIdColumnName();
+			this.implicitTenantIdColumnName = parentDefaults.getDefaultTenantIdColumnName();
+			this.implicitDiscriminatorColumnName = parentDefaults.getDefaultDiscriminatorColumnName();
+			this.implicitPackageName = parentDefaults.getDefaultPackageName();
+			this.autoImportEnabled = parentDefaults.isDefaultAutoImport();
+
+			this.implicitCascadeStyleName = toCascadeString( parentDefaults.getDefaultCascadeTypes() );
+			this.implicitPropertyAccessType = parentDefaults.getDefaultPropertyAccessType();
+			this.implicitPropertyAccessorName = parentDefaults.getDefaultAccessStrategyName();
+			this.entitiesImplicitlyLazy = parentDefaults.isDefaultEntityLaziness();
+			this.pluralAttributesImplicitlyLazy = parentDefaults.isDefaultCollectionLaziness();
+			this.implicitCacheAccessType = parentDefaults.getDefaultCacheAccessType();
+		}
+
+		private static String toCascadeString(EnumSet<CascadeType> defaultCascadeTypes) {
+			return isEmpty( defaultCascadeTypes ) ? "none" : renderCascadeTypeList( defaultCascadeTypes );
+		}
+
+		public Builder setImplicitSchemaName(String implicitSchemaName) {
+			if ( StringHelper.isNotEmpty( implicitSchemaName ) ) {
+				this.implicitSchemaName = implicitSchemaName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitCatalogName(String implicitCatalogName) {
+			if ( StringHelper.isNotEmpty( implicitCatalogName ) ) {
+				this.implicitCatalogName = implicitCatalogName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitlyQuoteIdentifiers(boolean implicitlyQuoteIdentifiers) {
+			this.implicitlyQuoteIdentifiers = implicitlyQuoteIdentifiers;
+			return this;
+		}
+
+		public Builder setImplicitIdColumnName(String implicitIdColumnName) {
+			if ( StringHelper.isNotEmpty( implicitIdColumnName ) ) {
+				this.implicitIdColumnName = implicitIdColumnName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitTenantIdColumnName(String implicitTenantIdColumnName) {
+			if ( StringHelper.isNotEmpty( implicitTenantIdColumnName ) ) {
+				this.implicitTenantIdColumnName = implicitTenantIdColumnName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitDiscriminatorColumnName(String implicitDiscriminatorColumnName) {
+			if ( StringHelper.isNotEmpty( implicitDiscriminatorColumnName ) ) {
+				this.implicitDiscriminatorColumnName = implicitDiscriminatorColumnName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitPackageName(String implicitPackageName) {
+			if ( StringHelper.isNotEmpty( implicitPackageName ) ) {
+				this.implicitPackageName = implicitPackageName;
+			}
+			return this;
+		}
+
+		public Builder setAutoImportEnabled(boolean autoImportEnabled) {
+			this.autoImportEnabled = autoImportEnabled;
+			return this;
+		}
+
+		public Builder setImplicitCascadeStyleName(String implicitCascadeStyleName) {
+			if ( StringHelper.isNotEmpty( implicitCascadeStyleName ) ) {
+				this.implicitCascadeStyleName = implicitCascadeStyleName;
+			}
+			return this;
+		}
+
+		public Builder setImplicitPropertyAccessType(jakarta.persistence.AccessType accessType) {
+			if ( accessType != null ) {
+				this.implicitPropertyAccessType = accessType;
+			}
+			return this;
+		}
+
+		public Builder setImplicitPropertyAccessorName(String implicitPropertyAccessorName) {
+			if ( StringHelper.isNotEmpty( implicitPropertyAccessorName ) ) {
+				this.implicitPropertyAccessorName = implicitPropertyAccessorName;
+			}
+			return this;
+		}
+
+		public Builder setEntitiesImplicitlyLazy(boolean entitiesImplicitlyLazy) {
+			this.entitiesImplicitlyLazy = entitiesImplicitlyLazy;
+			return this;
+		}
+
+		public Builder setPluralAttributesImplicitlyLazy(boolean pluralAttributesImplicitlyLazy) {
+			this.pluralAttributesImplicitlyLazy = pluralAttributesImplicitlyLazy;
+			return this;
+		}
+
+		public Builder setImplicitCacheAccessType(AccessType implicitCacheAccessType) {
+			if ( implicitCacheAccessType != null ) {
+				this.implicitCacheAccessType = implicitCacheAccessType;
+			}
+			return this;
+		}
+
+		/**
+		 * @deprecated Use {@link org.hibernate.annotations.DefaultListSemantics} on a package or module.
+		 * Scheduled for removal in 9.0.
+		 */
+		@Deprecated(since = "8.0", forRemoval = true)
+		public CollectionClassification getImplicitListClassification() {
+			return implicitListClassification;
+		}
+
+		/**
+		 * @deprecated Use {@link org.hibernate.annotations.DefaultListSemantics} on a package or module.
+		 * Scheduled for removal in 9.0.
+		 */
+		@Deprecated(since = "8.0", forRemoval = true)
+		public Builder setImplicitListClassification(CollectionClassification implicitListClassification) {
+			if ( implicitListClassification != null ) {
+				this.implicitListClassification = implicitListClassification;
+			}
+			return this;
+		}
+
+		public OverriddenMappingDefaults build() {
+			return new OverriddenMappingDefaults(
+					implicitSchemaName,
+					implicitCatalogName,
+					implicitlyQuoteIdentifiers,
+					implicitIdColumnName,
+					implicitTenantIdColumnName,
+					implicitDiscriminatorColumnName,
+					implicitPackageName,
+					autoImportEnabled,
+					implicitCascadeStyleName,
+					implicitPropertyAccessType,
+					implicitPropertyAccessorName,
+					entitiesImplicitlyLazy,
+					pluralAttributesImplicitlyLazy,
+					implicitCacheAccessType,
+					implicitListClassification
+			);
+		}
+	}
+}

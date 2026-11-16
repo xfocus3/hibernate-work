@@ -1,0 +1,23 @@
+package org.hibernate.boot.jaxb.cfg.internal;
+
+import org.hibernate.internal.util.StringHelper;
+
+import jakarta.persistence.PersistenceUnitTransactionType;
+
+/**
+ * JAXB marshal/unmarshal support for {@linkplain PersistenceUnitTransactionType}.
+ *
+ * @author Steve Ebersole
+ */
+public class TransactionTypeMarshalling {
+	public static PersistenceUnitTransactionType fromXml(String name) {
+		if ( StringHelper.isEmpty( name ) ) {
+			return PersistenceUnitTransactionType.RESOURCE_LOCAL;
+		}
+		return PersistenceUnitTransactionType.valueOf( name );
+	}
+
+	public static String toXml(PersistenceUnitTransactionType transactionType) {
+		return transactionType == null ? null : transactionType.name();
+	}
+}

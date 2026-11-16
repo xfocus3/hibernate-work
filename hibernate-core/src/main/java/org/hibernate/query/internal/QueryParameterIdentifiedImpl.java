@@ -1,0 +1,66 @@
+package org.hibernate.query.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.query.named.spi.NamedQueryMemento;
+import org.hibernate.query.spi.AbstractQueryParameter;
+import org.hibernate.query.sqm.tree.spi.expression.SqmJpaCriteriaParameterWrapper;
+import org.hibernate.type.BindableType;
+
+
+/**
+ * QueryParameter impl for unnamed JPA Criteria-parameters.
+ */
+public class QueryParameterIdentifiedImpl<T> extends AbstractQueryParameter<T> {
+	/**
+	 * Create an identified parameter descriptor from the SQM parameter
+	 *
+	 * @param parameter The source parameter info
+	 *
+	 * @return The parameter descriptor
+	 */
+	public static <T> QueryParameterIdentifiedImpl<T> fromSqm(SqmJpaCriteriaParameterWrapper<T> parameter) {
+		assert parameter.getName() == null;
+		assert parameter.getPosition() == null;
+		return new QueryParameterIdentifiedImpl<>(
+				parameter.getUnnamedParameterId(),
+				parameter.allowMultiValuedBinding(),
+				parameter.getAnticipatedType(),
+				parameter.getJpaCriteriaParameter().getJavaTypeIfKnown()
+		);
+	}
+
+	private final int unnamedParameterId;
+
+	private QueryParameterIdentifiedImpl(
+			int unnamedParameterId,
+			boolean allowMultiValuedBinding,
+			@Nullable BindableType<T> anticipatedType,
+			@Nullable Class<T> declaredJavaType) {
+		super( allowMultiValuedBinding, anticipatedType, declaredJavaType );
+		this.unnamedParameterId = unnamedParameterId;
+	}
+
+	public int getUnnamedParameterId() {
+		return unnamedParameterId;
+	}
+
+	@Override
+	@Nonnull
+	public NamedQueryMemento.ParameterMemento toMemento() {
+		return session -> new QueryParameterIdentifiedImpl<>(
+				unnamedParameterId, allowsMultiValuedBinding(), getHibernateType(), declaredJavaType );
+	}
+
+	@Override
+	public boolean equals(Object o) {
+		return this == o
+			|| o instanceof QueryParameterIdentifiedImpl<?> that
+				&& unnamedParameterId == that.unnamedParameterId;
+	}
+
+	@Override
+	public int hashCode() {
+		return unnamedParameterId;
+	}
+}

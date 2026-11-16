@@ -1,0 +1,22 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.Incubating;
+
+/**
+ * Extension to {@link TupleTransformer} exposing the transformation target type.
+ *
+ * @apiNote This is mainly intended for use in equality checking while applying
+ *          result deduplication for queries.
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "8.0")
+public interface TypedTupleTransformer<T> extends TupleTransformer<T> {
+	/**
+	 * The type resulting from this transformation
+	 */
+	@Nonnull
+	Class<T> getTransformedType();
+}

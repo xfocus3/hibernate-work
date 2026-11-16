@@ -1,0 +1,28 @@
+include::{root-project-dir}/.asciidoctorconfig.adoc[]
+:doctype: book
+:icons: font
+:html-meta-canonical-link: https://docs.hibernate.org/stable/orm/querylanguage/html_single/
+
+
+:example-dir-model: {testing-project-dir}/src/main/java/org/hibernate/testing/orm/domain/userguide
+:example-dir-hql: {core-project-dir}/src/test/java/org/hibernate/orm/test/hql
+:extrasdir: extras
+
+= A Guide to Hibernate Query Language
+:toc2:
+:toclevels: 3
+:sectanchors:
+
+include::Preface.adoc[]
+
+:numbered:
+
+include::Concepts.adoc[]
+include::Expressions.adoc[]
+include::From.adoc[]
+include::Relational.adoc[]
+include::appendices/ArrayFunctions.adoc[]
+include::appendices/JsonFunctions.adoc[]
+include::appendices/XmlFunctions.adoc[]
+include::Credits.adoc[]
+

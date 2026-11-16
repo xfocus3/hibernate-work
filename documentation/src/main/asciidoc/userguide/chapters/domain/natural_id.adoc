@@ -1,0 +1,138 @@
+[[naturalid]]
+==== Natural Ids
+:domain-natural-id-core-test-base-dir: {core-project-dir}/src/test/java/org/hibernate/orm/test
+:example-dir-naturalid: {domain-natural-id-core-test-base-dir}/mapping/identifier
+:jcache-project-dir: {root-project-dir}/hibernate-jcache
+:example-dir-caching: {jcache-project-dir}/src/test/java/org/hibernate/orm/test/caching
+:domain-natural-id-extrasdir: extras
+
+Natural ids are unique identifiers in the domain model that have a meaning in the real world too.
+A natural id remains useful even when the primary key is a surrogate identifier.
+Hibernate supports efficient <<find-by-natural-id,loading by natural id>> as well as loading by primary key.
+
+[[naturalid-mapping]]
+===== Natural Id Mapping
+
+Natural ids are defined in terms of one or more persistent attributes.
+
+[[naturalid-simple-basic-attribute-mapping-example]]
+.Natural id using single basic attribute
+====
+[source,java]
+----
+include::{example-dir-naturalid}/SimpleNaturalIdTest.java[tags=naturalid-simple-basic-attribute-mapping-example,indent=0]
+----
+====
+
+[[naturalid-single-embedded-attribute-mapping-example]]
+.Natural id using single embedded attribute
+====
+[source,java]
+----
+include::{example-dir-naturalid}/CompositeNaturalIdTest.java[tags=naturalid-single-embedded-attribute-mapping-example,indent=0]
+----
+====
+
+[[naturalid-multiple-attribute-mapping-example]]
+.Natural id using multiple persistent attributes
+====
+[source,java]
+----
+include::{example-dir-naturalid}/MultipleNaturalIdTest.java[tags=naturalid-multiple-attribute-mapping-example,indent=0]
+----
+====
+
+Natural ids defined using multiple persistent attributes may also define a link:{doc-javadoc-url}org/hibernate/annotations/NaturalIdClass.html[`@NaturalIdClass`] which can be used for <<find-by-natural-id,find operations>>.
+
+[[naturalidclass-example]]
+.Natural id with @NaturalIdClass
+====
+[source,java]
+----
+include::{domain-natural-id-core-test-base-dir}/mapping/naturalid/idclass/SimpleNaturalIdClassTests.java[tags=naturalidclass-mapping-example,indent=0]
+----
+====
+
+
+[[natural-id-mutability]]
+===== Natural id mutability
+
+A natural id may be mutable or immutable. By default, the `@NaturalId` annotation marks the attribute as immutable.
+An immutable natural id is expected to never change its value.
+Hibernate checks at flush time that the value has not changed.
+
+If the value(s) of the natural id attribute(s) may change, `@NaturalId(mutable = true)` should be used instead.
+
+[[naturalid-mutable-mapping-example]]
+.Mutable natural id mapping
+====
+[source,java]
+----
+include::{example-dir-naturalid}/MutableNaturalIdTest.java[tags=naturalid-mutable-mapping-example,indent=0]
+----
+====
+
+
+[[natural-id-caching]]
+===== Natural id resolution caching
+
+Within a `Session`, Hibernate maintains a cross-reference from natural id values to entity identifier values.
+These resolutions can also be stored in the second-level cache when second-level caching is enabled.
+
+[[naturalid-caching]]
+.Natural id caching
+====
+[source,java]
+----
+include::{example-dir-caching}/CacheableNaturalIdTest.java[tags=naturalid-cacheable-mapping-example,indent=0]
+----
+====
+
+[IMPORTANT]
+====
+Think carefully before caching resolutions for natural ids which are partially or fully <<natural-id-mutability,mutable>> in the second level cache as this will often have a negative impact on performance.
+====
+
+
+[[naturalid-api]]
+===== Loading by natural id
+
+[[find-by-natural-id]]Hibernate provides a means to load one or more entities by natural id using the `KeyType.NATURAL` `FindOption` passed to `find()` or `findMultiple()`.
+
+
+[[find-by-natural-id-example]]
+.Loading by natural id
+====
+[source,java]
+----
+include::{example-dir-naturalid}/SimpleNaturalIdTest.java[tags=naturalid-loading-example,indent=0]
+----
+====
+
+When loading by natural id, the type of value accepted depends on the definition of the natural id.
+
+* For single-attribute natural ids, whether defined by a basic or embedded type, the attribute type should be used.
+* For multi-attribute natural ids, Hibernate will accept a number of forms:
+
+** If a link:{doc-javadoc-url}org/hibernate/annotations/NaturalIdClass.html[`@NaturalIdClass`] is defined, an instance of the natural id class may be used.
+** An array of the individual attribute values, ordered alphabetically by name, may be used.
+** A `Map` of the individual attribute values, keyed by the attribute name, may be used.
+
+If a mutable natural id changes, its cached resolution can become stale until the session is flushed.
+Before loading by natural id, Hibernate checks for pending changes and synchronizes the resolutions to avoid incorrect results.
+
+[IMPORTANT]
+====
+This _discovery and adjustment_ (synchronization) has a performance impact.
+Use `NaturalIdSynchronization.DISABLED` to skip this check only when no mutable natural ids associated with the current `Session` have changed.
+This option applies only to mutable natural ids.
+====
+
+[[naturalid-mutable-synchronized-example]]
+.Mutable natural id synchronization use-case
+====
+[source,java]
+----
+include::{example-dir-naturalid}/MutableNaturalIdTest.java[tags=naturalid-mutable-synchronized-example,indent=0]
+----
+====

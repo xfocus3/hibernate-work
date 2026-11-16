@@ -1,0 +1,19 @@
+package org.hibernate.query.sqm.tree.spi.domain;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.metamodel.model.domain.EmbeddableDomainType;
+
+@Incubating(since = "6.2")
+public interface SqmEmbeddableDomainType<E> extends EmbeddableDomainType<E>, SqmTreatableDomainType<E> {
+	@Override
+	default @Nullable SqmDomainType<E> getSqmType() {
+		return this;
+	}
+
+	@Override
+	default SqmEmbeddableDomainType<E> getPathType() {
+		return this;
+	}
+
+}

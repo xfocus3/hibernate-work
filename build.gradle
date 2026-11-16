@@ -1,0 +1,100 @@
+buildscript {
+//	repositories {
+//		mavenCentral()
+//	}
+
+	dependencies {
+		classpath libs.buildscript.forbiddenapis
+	}
+}
+
+
+plugins {
+	id "local.module"
+
+    alias(libs.plugins.versionInjection) apply false
+    alias(libs.plugins.hibernateDatabaseService) apply false
+
+    alias(libs.plugins.errorprone) apply false
+    alias(libs.plugins.nullaway) apply false
+    alias(libs.plugins.spotless)
+	alias(libs.plugins.hibernateBuildJdks)
+
+    alias(libs.plugins.nexusPublish)
+
+    alias(libs.plugins.idea)
+    alias(libs.plugins.ideaExt)
+    alias(libs.plugins.eclipse)
+    alias(libs.plugins.taskTree)
+}
+
+
+apply from: rootProject.file('shared/config/spotless/source-headers.gradle')
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Releasing
+
+tasks.register( 'releasePrepare' ) {
+	group = "release-prepare"
+	description = "Scripted release 'Release Prepare' stage.  " +
+			"Includes various checks as to the publish-ability of the project: testing, generation, etc.  " +
+			"Sub-projects register their own `releasePrepare` to hook into this stage."
+	// See `:release:releasePrepare` which does a lot of heavy lifting here
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// CI Build Task
+
+tasks.register('ciBuild') {
+	description = "The task performed when one of the 'main' jobs are triggered on the " +
+			"CI server.  Just as above, relies on the fact that subprojects will " +
+			"appropriately define a release task themselves if they have any tasks " +
+			"which should be performed from these CI jobs"
+}
+
+
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Misc...
+
+wrapper {
+	// To upgrade the version of gradle used in the wrapper, run:
+	//     ./gradlew wrapper --gradle-version NEW_VERSION
+
+	// uncomment locally if you need to debug build scripts.
+	// in such cases, having the sources helps
+	//distributionType = Wrapper.DistributionType.ALL
+}
+
+
+idea {
+	module {
+		name = "hibernate-orm"
+	}
+}
+
+tasks.register('copyDependenciesSonar', Copy) {
+    description = "Aggregates all runtime dependencies for Sonar CLI analysis."
+
+    def targetProjects = subprojects.findAll { it.name != 'reporting' }
+
+    targetProjects.each { sub ->
+        evaluationDependsOn(sub.path)
+
+        if (sub.plugins.hasPlugin('java')) {
+            from(sub.configurations.runtimeClasspath)
+        }
+    }
+
+    into(layout.buildDirectory.dir("sonar-dependencies"))
+
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// Apply workaround for Spotless clean bug: https://github.com/diffplug/spotless/issues/2850#issuecomment-5207457291
+allprojects {
+    def everyClean = rootProject.allprojects.collect { p -> p.tasks.matching { it.name == 'clean' } }
+    tasks.matching { it.name.startsWith('spotless') }.configureEach {
+        mustRunAfter everyClean
+    }
+}

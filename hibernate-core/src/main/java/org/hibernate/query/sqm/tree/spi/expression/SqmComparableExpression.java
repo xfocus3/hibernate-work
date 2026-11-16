@@ -1,0 +1,94 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Expression;
+import jakarta.persistence.criteria.Nulls;
+import org.hibernate.query.criteria.JpaComparableExpression;
+import org.hibernate.query.sqm.tree.spi.predicate.SqmPredicate;
+import org.hibernate.query.sqm.tree.spi.select.SqmSortSpecification;
+
+/**
+ * @author Steve Ebersole
+ */
+public interface SqmComparableExpression<C extends Comparable<? super C>>
+		extends JpaComparableExpression<C>, SqmExpression<C> {
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> coalesce(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> coalesce(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> nullif(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> nullif(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate greaterThan(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate greaterThan(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmPredicate greaterThanOrEqualTo(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate greaterThanOrEqualTo(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmPredicate lessThan(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate lessThan(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmPredicate lessThanOrEqualTo(@Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate lessThanOrEqualTo(@Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmPredicate between(@Nonnull Expression<? extends C> x, @Nonnull Expression<? extends C> y);
+
+	@Nonnull
+	@Override
+	SqmPredicate between(@Nonnull C x, @Nonnull C y);
+
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> max();
+
+	@Nonnull
+	@Override
+	SqmComparableExpression<C> min();
+
+	@Nonnull
+	@Override
+	SqmSortSpecification asc();
+
+	@Nonnull
+	@Override
+	SqmSortSpecification asc(@Nonnull Nulls nullPrecedence);
+
+	@Nonnull
+	@Override
+	SqmSortSpecification desc();
+
+	@Nonnull
+	@Override
+	SqmSortSpecification desc(@Nonnull Nulls nullPrecedence);
+}

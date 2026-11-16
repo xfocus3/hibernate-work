@@ -1,0 +1,228 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.Incubating;
+import org.hibernate.cache.MutableCacheKeyBuilder;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.IndexedConsumer;
+
+/**
+ * Contract for things at the domain mapping level that can be bound
+ * into a JDBC {@link java.sql.PreparedStatement}.
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "5.4")
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface Bindable extends JdbcMappingContainer {
+
+	/**
+	 * The number of JDBC mappings
+	 */
+	@Override
+	default int getJdbcTypeCount() {
+		return forEachJdbcType( (index, jdbcMapping) -> {} );
+	}
+
+	/**
+	 * Visit each of JdbcMapping
+	 *
+	 * @apiNote Same as {@link #forEachJdbcType(int, IndexedConsumer)} starting from `0`
+	 */
+	@Override
+	default int forEachJdbcType(@Nonnull IndexedConsumer<JdbcMapping> action) {
+		return forEachJdbcType( 0, action );
+	}
+
+	/**
+	 * Breaks down a value of {@code J} into its simple pieces.  E.g., an embedded
+	 * value gets broken down into an array of its attribute state; a basic
+	 * value converts to itself; etc.
+	 * <p>
+	 * Generally speaking, this is the form in which entity state is kept relative to a
+	 * Session via {@code EntityEntry}.
+	 * <pre>{@code
+	 * &#64;Entity class Person {
+	 *     &#64;Id Integer id;
+	 *     &#64;Embedded Name name;
+	 *     int age;
+	 * }
+	 *
+	 * &#64;Embeddable class Name {
+	 *     String familiarName;
+	 *     String familyName;
+	 * }
+	 * }</pre>
+	 * <p>
+	 * At the top level, we would want to disassemble a {@code Person} value, so we'd
+	 * ask the {@code Bindable} for the {@code Person} entity to disassemble.  Given a
+	 * {@code Person} value:
+	 * <pre>
+	 * Person( id=1, name=Name( 'Steve', 'Ebersole' ), 28 )
+	 * </pre>
+	 * this disassemble would result in a multidimensional array:
+	 * <pre>{@code
+	 * [ ["Steve", "Ebersole"], 28 ]
+	 * }</pre>
+	 * <p>
+	 * Note that the identifier is not part of this disassembled state.  Note also
+	 * how the embedded value results in a sub-array.
+	 *
+	 * @see org.hibernate.engine.spi.EntityEntry
+	 */
+	@Nullable
+	Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session);
+
+	/**
+	 * Add to the MutableCacheKey the values obtained disassembling the value and the hasCode generated from
+	 * the disassembled value.
+	 *
+	 * @param cacheKey the MutableCacheKey used to add the disassembled value and the hashCode
+	 * @param value the value to disassemble
+	 * @param session the SharedSessionContractImplementor
+	 */
+	void addToCacheKey(@Nonnull MutableCacheKeyBuilder cacheKey, @Nullable Object value, @Nullable SharedSessionContractImplementor session);
+
+	/**
+	 * Visit each constituent JDBC value over the result from {@link #disassemble}.
+	 * <p>
+	 * Given the example in {@link #disassemble}, this results in the consumer being
+	 * called for each simple value.  E.g.:
+	 * <pre>{@code
+	 * consumer.consume( "Steve" );
+	 * consumer.consume( "Ebersole" );
+	 * consumer.consume( 28 );
+	 * }</pre>
+	 * <p>
+	 * Think of it as breaking the multidimensional array into a visitable flat array.
+	 * Additionally, it passes through the values {@code X} and {@code Y} to the consumer.
+	 */
+	default <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachDisassembledJdbcValue( value, 0, x, y, valuesConsumer, session );
+	}
+
+	/**
+	 * Like {@link #forEachDisassembledJdbcValue(Object, Object, Object, JdbcValuesBiConsumer, SharedSessionContractImplementor)},
+	 * but additionally receives an offset by which the selectionIndex is incremented when calling {@link JdbcValuesBiConsumer#consume(int, Object, Object, Object, JdbcMapping)}.
+	 */
+	<X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session);
+
+	/**
+	 * A short hand form of {@link #forEachDisassembledJdbcValue(Object, Object, Object, JdbcValuesBiConsumer, SharedSessionContractImplementor)},
+	 * that passes null for the two values {@code X} and {@code Y}.
+	 */
+	default int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			@Nonnull JdbcValuesConsumer valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachDisassembledJdbcValue( value, null, null, valuesConsumer, session );
+	}
+
+	/**
+	 * A short hand form of {@link #forEachDisassembledJdbcValue(Object, int, Object, Object, JdbcValuesBiConsumer, SharedSessionContractImplementor)},
+	 * that passes null for the two values {@code X} and {@code Y} .
+	 */
+	default int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nonnull JdbcValuesConsumer valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachDisassembledJdbcValue( value, offset, null, null, valuesConsumer, session );
+	}
+
+	/**
+	 * Visit each constituent JDBC value extracted from the entity instance itself.
+	 *
+	 * Short-hand form of calling {@link #disassemble} and piping its result to
+	 * {@link #forEachDisassembledJdbcValue(Object, JdbcValuesConsumer, SharedSessionContractImplementor)}
+	 */
+	default <X, Y> int forEachJdbcValue(
+			@Nullable Object value,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachJdbcValue( value, 0, x, y, valuesConsumer, session );
+	}
+
+	/**
+	 * Visit each constituent JDBC value extracted from the entity instance itself.
+	 *
+	 * Short-hand form of calling {@link #disassemble} and piping its result to
+	 * {@link #forEachDisassembledJdbcValue(Object, int, JdbcValuesConsumer, SharedSessionContractImplementor)}
+	 */
+	default <X, Y> int forEachJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachDisassembledJdbcValue( disassemble( value, session ), offset, x, y, valuesConsumer, session );
+	}
+
+	/**
+	 * A short hand form of {@link #forEachJdbcValue(Object, Object, Object, JdbcValuesBiConsumer, SharedSessionContractImplementor)},
+	 * that passes null for the two values {@code X} and {@code Y}.
+	 */
+	default int forEachJdbcValue(
+			@Nullable Object value,
+			@Nonnull JdbcValuesConsumer valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachJdbcValue( value, null, null, valuesConsumer, session );
+	}
+
+	/**
+	 * A short hand form of {@link #forEachJdbcValue(Object, int, Object, Object, JdbcValuesBiConsumer, SharedSessionContractImplementor)},
+	 * that passes null for the two values {@code X} and {@code Y}.
+	 */
+	default int forEachJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nonnull JdbcValuesConsumer valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return forEachJdbcValue( value, offset, null, null, valuesConsumer, session );
+	}
+
+	/**
+	 * Functional interface for consuming the JDBC values.
+	 */
+	@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+	@FunctionalInterface
+	interface JdbcValuesConsumer extends JdbcValuesBiConsumer<Object, Object> {
+		@Override
+		default void consume(int valueIndex, @Nullable Object o, @Nullable Object o2, @Nullable Object jdbcValue, @Nonnull JdbcMapping jdbcMapping) {
+			consume( valueIndex, jdbcValue, jdbcMapping );
+		}
+
+		/**
+		 * Consume a JDBC-level jdbcValue.  The JDBC jdbcMapping descriptor is also passed in
+		 */
+		void consume(int valueIndex, @Nullable Object jdbcValue, @Nonnull JdbcMapping jdbcMapping);
+	}
+
+	/**
+	 * Functional interface for consuming the JDBC values, along with two values of type {@code X} and {@code Y}.
+	 */
+	@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+	@FunctionalInterface
+	interface JdbcValuesBiConsumer<X, Y> {
+		/**
+		 * Consume a JDBC-level jdbcValue.  The JDBC jdbcMapping descriptor is also passed in
+		 */
+		void consume(int valueIndex, @Nullable X x, @Nullable Y y, @Nullable Object jdbcValue, @Nonnull JdbcMapping jdbcMapping);
+	}
+}

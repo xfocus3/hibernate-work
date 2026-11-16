@@ -1,0 +1,28 @@
+[[domain-customizing]]
+==== Mapping annotations and AttributeBinder
+:example-dir-attributebinder: {core-project-dir}/src/test/java/org/hibernate/orm/test/mapping/attributebinder
+:domain-customizing-extrasdir: extras
+
+For mapping requirements beyond the built-in annotations, use the `@AttributeBinderType` meta-annotation
+and the `AttributeBinder` contract to customize Hibernate's boot-time mapping model,
+defined in the `org.hibernate.mapping` package.
+
+An example:
+
+[[domain-customizing-example]]
+.AttributeBinder example
+====
+[source,java]
+----
+include::{example-dir-attributebinder}/YesNo.java[tag=attribute-binder-example, indent=0]
+
+include::{example-dir-attributebinder}/YesNoBinder.java[tag=attribute-binder-example, indent=0]
+----
+====
+
+Both `@YesNo` and `YesNoBinder` are application-defined. Hibernate processes `@YesNo`
+through its `@AttributeBinderType` meta-annotation, which identifies `YesNoBinder` as the binder.
+
+The binder receives the custom annotation instance, providing type-safe access to its members.
+Although `@YesNo` has no members in this example, a custom annotation can define configuration
+that its binder reads and applies.

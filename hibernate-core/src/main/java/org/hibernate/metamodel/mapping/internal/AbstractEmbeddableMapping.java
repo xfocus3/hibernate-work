@@ -1,0 +1,834 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.function.Consumer;
+
+import org.hibernate.MappingException;
+import org.hibernate.SharedSessionContract;
+import org.hibernate.cache.MutableCacheKeyBuilder;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.engine.jdbc.env.spi.JdbcEnvironment;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.internal.util.collections.CollectionHelper;
+import org.hibernate.mapping.Any;
+import org.hibernate.mapping.BasicValue;
+import org.hibernate.mapping.Column;
+import org.hibernate.mapping.Component;
+import org.hibernate.mapping.Selectable;
+import org.hibernate.metamodel.UnsupportedMappingException;
+import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.AttributeMappingsList;
+import org.hibernate.metamodel.mapping.EmbeddableDiscriminatorMapping;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.EmbeddableValuedModelPart;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SelectableMappings;
+import org.hibernate.metamodel.mapping.SelectablePath;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.metamodel.spi.EmbeddableInstantiator;
+import org.hibernate.metamodel.spi.EmbeddableRepresentationStrategy;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.property.access.spi.PropertyValueAccessor;
+import org.hibernate.sql.ast.spi.query.from.TableGroupProducer;
+import org.hibernate.sql.results.graph.Fetchable;
+import org.hibernate.type.AnyType;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.CollectionType;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.Type;
+import org.hibernate.type.descriptor.java.ImmutableMutabilityPlan;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.java.MutabilityPlan;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.metamodel.mapping.internal.MappingModelCreationHelper.buildBasicAttributeMapping;
+import static org.hibernate.metamodel.mapping.internal.MappingModelCreationHelper.getPropertyPath;
+
+
+/**
+ * Base support for EmbeddableMappingType implementations
+ */
+public abstract class AbstractEmbeddableMapping implements EmbeddableMappingType,
+		EmbeddableMappingType.ConcreteEmbeddableType {
+	protected AttributeMappingsList attributeMappings;
+	@SuppressWarnings("NullAway.Init") // Assigned during mapping model initialization.
+	protected SelectableMappings selectableMappings;
+	@Nullable protected PropertyValueAccessor[] accessorCache;
+
+	public AbstractEmbeddableMapping(int attributeMappingSizeHint) {
+		attributeMappings = new ImmutableAttributeMappingList.Builder( attributeMappingSizeHint ).build();
+	}
+
+	@Nonnull
+	@Override
+	public EmbeddableInstantiator getInstantiator() {
+		return getRepresentationStrategy().getInstantiator();
+	}
+
+	@Override
+	public int getSubclassId() {
+		return 0;
+	}
+
+	@Nonnull
+	@Override
+	public Collection<ConcreteEmbeddableType> getConcreteEmbeddableTypes() {
+		return Collections.singleton( this );
+	}
+
+	@Override
+	public boolean declaresAttribute(@Nonnull AttributeMapping attributeMapping) {
+		return true;
+	}
+
+	@Override
+	public boolean declaresAttribute(int attributeIndex) {
+		return true;
+	}
+
+	@Nullable
+	@Override
+	public Object getValue(@Nonnull Object instance, int position) {
+		return castNonNull( accessorCache )[position].get( instance );
+	}
+
+	@Override
+	public void setValue(@Nonnull Object instance, int position, @Nullable Object value) {
+		castNonNull( accessorCache )[position].set( instance, value );
+	}
+
+	@Nullable
+	@Override
+	public Object getDiscriminatorValue() {
+		return null;
+	}
+
+	@Nonnull
+	@Override
+	public JavaType<?> getMappedJavaType() {
+		return getRepresentationStrategy().getMappedJavaType();
+	}
+
+	@Nonnull
+	@Override
+	public Object[] getValues(@Nonnull Object compositeInstance) {
+		if ( compositeInstance == PropertyValueAccessor.UNKNOWN ) {
+			return new Object[getNumberOfAttributeMappings()];
+		}
+
+		final var reader = getRepresentationStrategy().getMultiValueReader();
+		if ( reader != null ) {
+			return reader.get( compositeInstance );
+		}
+
+		return getAttributeValues( compositeInstance );
+	}
+
+	protected Object[] getAttributeValues(Object compositeInstance) {
+		final var results = new Object[getNumberOfAttributeMappings()];
+		for ( int i = 0; i < results.length; i++ ) {
+			results[i] = getValue( compositeInstance, i );
+		}
+		return results;
+	}
+
+	@Override
+	public void setValues(@Nonnull Object component, @Nonnull Object[] values) {
+		final var writer = getRepresentationStrategy().getMultiValueWriter();
+		if ( writer != null ) {
+			writer.set( component, values );
+		}
+		else {
+			setAttributeValues( component, values );
+		}
+	}
+
+	protected void setAttributeValues(Object component, Object[] values) {
+		for ( int i = 0; i < values.length; i++ ) {
+			setValue( component, i, values[i] );
+		}
+	}
+
+	@FunctionalInterface
+	protected interface ConcreteTableResolver {
+		String resolve(Column column, JdbcEnvironment jdbcEnvironment);
+	}
+
+	@FunctionalInterface
+	protected interface SuccessfulCompletionCallback {
+		void success();
+	}
+
+	protected static class IllegalAttributeType extends RuntimeException {
+		public IllegalAttributeType(String message) {
+			super( message );
+		}
+	}
+
+	@FunctionalInterface
+	protected interface AttributeTypeValidator {
+		void check(String name, Type type) throws IllegalAttributeType;
+	}
+
+	protected boolean inverseInitializeCallback(
+			TableGroupProducer declaringTableGroupProducer,
+			SelectableMappings selectableMappings,
+			EmbeddableMappingType inverseMappingType,
+			MappingModelCreationProcess creationProcess,
+			ManagedMappingType declaringType) {
+		final int size = inverseMappingType.getNumberOfAttributeMappings();
+		if ( size == 0 ) {
+			return false;
+		}
+		final var mappings = new ImmutableAttributeMappingList.Builder( size );
+		int currentIndex = 0;
+		// We copy the attributes from the inverse mappings and replace the selection mappings
+		for ( int j = 0; j < size; j++ ) {
+			var attributeMapping = inverseMappingType.getAttributeMapping( j );
+			if ( attributeMapping instanceof BasicAttributeMapping original ) {
+				final var selectableMapping = selectableMappings.getSelectable( currentIndex );
+				attributeMapping = BasicAttributeMapping.withSelectableMapping(
+						declaringType,
+						original,
+						original.getPropertyAccess(),
+						selectableMapping.isInsertable(),
+						selectableMapping.isUpdateable(),
+						selectableMapping
+				);
+				currentIndex++;
+			}
+			else if ( attributeMapping instanceof ToOneAttributeMapping original ) {
+				final var foreignKeyDescriptor = original.getForeignKeyDescriptor();
+				if ( foreignKeyDescriptor == null ) {
+					// This is expected to happen when processing a
+					// PostInitCallbackEntry because the callbacks
+					// are not ordered. The exception is caught in
+					// MappingModelCreationProcess.executePostInitCallbacks()
+					// and the callback is re-queued.
+					throw new IllegalStateException( "Not yet ready: " + original );
+				}
+				final var toOne = original.copy( declaringType, declaringTableGroupProducer );
+				final int offset = currentIndex;
+				toOne.setIdentifyingColumnsTableExpression(
+						selectableMappings.getSelectable( offset ).getContainingTableExpression()
+				);
+				toOne.setForeignKeyDescriptor(
+						foreignKeyDescriptor.withKeySelectionMapping(
+								declaringType,
+								declaringTableGroupProducer,
+								index -> selectableMappings.getSelectable( offset + index ),
+								creationProcess
+						)
+				);
+				toOne.setupCircularFetchModelPart( creationProcess );
+
+				attributeMapping = toOne;
+				currentIndex += attributeMapping.getJdbcTypeCount();
+			}
+			else if ( attributeMapping instanceof EmbeddableValuedModelPart embeddableValuedModelPart ) {
+				final var subMappings = new SelectableMapping[attributeMapping.getJdbcTypeCount()];
+				for ( int i = 0; i < subMappings.length; i++ ) {
+					subMappings[i] = selectableMappings.getSelectable( currentIndex++ );
+				}
+				attributeMapping = MappingModelCreationHelper.createInverseModelPart(
+						embeddableValuedModelPart,
+						declaringType,
+						declaringTableGroupProducer,
+						new SelectableMappingsImpl( subMappings ),
+						creationProcess
+				);
+			}
+			else {
+				throw new UnsupportedMappingException(
+						"Only basic and to-one attributes are supported in composite fks" );
+			}
+			mappings.add( attributeMapping );
+		}
+		attributeMappings = mappings.build();
+		buildGetterSetterCache();
+		return true;
+	}
+
+	protected boolean finishInitialization(
+			NavigableRole navigableRole,
+			Component bootDescriptor,
+			CompositeType compositeType,
+			String rootTableExpression,
+			String[] rootTableKeyColumnNames,
+			EmbeddableMappingType declarer,
+			EmbeddableRepresentationStrategy representationStrategy,
+			AttributeTypeValidator attributeTypeValidator,
+			ConcreteTableResolver concreteTableResolver,
+			Consumer<AttributeMapping> attributeConsumer,
+			SuccessfulCompletionCallback completionCallback,
+			MappingModelCreationProcess creationProcess) {
+		final var  creationContext = creationProcess.getCreationContext();
+		final var typeConfiguration = creationContext.getTypeConfiguration();
+		final var jdbcServices = creationContext.getJdbcServices();
+		final var jdbcEnvironment = jdbcServices.getJdbcEnvironment();
+		final var dialect = jdbcEnvironment.getDialect();
+
+		final var subtypes = compositeType.getSubtypes();
+
+		int attributeIndex = 0;
+		int columnPosition = 0;
+
+		for ( var bootPropertyDescriptor : bootDescriptor.getProperties() ) {
+			final var subtype = subtypes[ attributeIndex ];
+
+			attributeTypeValidator.check( bootPropertyDescriptor.getName(), subtype );
+
+			final var propertyAccess = representationStrategy.resolvePropertyAccess( bootPropertyDescriptor );
+			final AttributeMapping attributeMapping;
+
+			final var value = bootPropertyDescriptor.getValue();
+			if ( subtype instanceof BasicType ) {
+				final BasicValue basicValue = (BasicValue) value;
+				final Selectable selectable = basicValue.getColumn();
+				final String containingTableExpression;
+				final String columnExpression;
+				if ( rootTableKeyColumnNames == null ) {
+					if ( selectable.isFormula() ) {
+						columnExpression = selectable.getTemplate(
+								dialect,
+								creationContext.getTypeConfiguration()
+						);
+					}
+					else {
+						columnExpression = selectable.getText( dialect );
+					}
+
+					if ( selectable instanceof Column column ) {
+						containingTableExpression = concreteTableResolver.resolve( column, jdbcEnvironment );
+					}
+					else {
+						containingTableExpression = rootTableExpression;
+					}
+				}
+				else {
+					containingTableExpression = rootTableExpression;
+					columnExpression = rootTableKeyColumnNames[ columnPosition ];
+				}
+				final var role = navigableRole.append( bootPropertyDescriptor.getName() );
+				final SelectablePath selectablePath;
+				final Long length;
+				final Integer arrayLength;
+				final Integer precision;
+				final Integer scale;
+				final Integer temporalPrecision;
+				final boolean isLob;
+				final boolean nullable;
+				if ( selectable instanceof Column column ) {
+					final var size = column.getColumnSize( creationContext.getDialect(), creationContext.getMetadata() );
+					length = size.getLength();
+					arrayLength = size.getArrayLength();
+					precision = size.getPrecision();
+					scale = size.getScale();
+					temporalPrecision = column.getTemporalPrecision();
+					nullable = column.isNullable();
+					isLob = column.isSqlTypeLob( creationContext.getMetadata() );
+					selectablePath = basicValue.createSelectablePath( column.getQuotedName( dialect ) );
+					MappingModelCreationHelper.resolveAggregateColumnBasicType( creationProcess, role, column );
+				}
+				else {
+					length = null;
+					arrayLength = null;
+					precision = null;
+					scale = null;
+					temporalPrecision = null;
+					nullable = true;
+					isLob = false;
+					selectablePath = new SelectablePath( determineEmbeddablePrefix() + bootPropertyDescriptor.getName() );
+				}
+
+				attributeMapping = buildBasicAttributeMapping(
+						bootPropertyDescriptor.getName(),
+						role,
+						attributeIndex,
+						attributeIndex,
+						bootPropertyDescriptor,
+						declarer,
+						basicValue.getResolution().getLegacyResolvedBasicType(),
+						containingTableExpression,
+						columnExpression,
+						selectablePath,
+						selectable.isFormula(),
+						selectable.getCustomReadExpression(),
+						selectable.getWriteExpr(
+								basicValue.getResolution().getJdbcMapping(),
+								dialect,
+								creationContext.getBootModel()
+						),
+						length,
+						arrayLength,
+						precision,
+						scale,
+						temporalPrecision,
+						isLob,
+						nullable,
+						value.isColumnInsertable( 0 ),
+						value.isColumnUpdateable( 0 ),
+						propertyAccess
+				);
+
+				columnPosition++;
+			}
+			else if ( subtype instanceof AnyType anyType ) {
+				final var bootValueMapping = (Any) value;
+
+				final boolean nullable = bootValueMapping.isNullable();
+				final boolean insertable = value.isColumnInsertable( 0 );
+				final boolean updatable = value.isColumnUpdateable( 0 );
+				final boolean includeInOptimisticLocking = bootPropertyDescriptor.isOptimisticLocked();
+				final var cascadeStyle = compositeType.getCascadeStyle( attributeIndex );
+
+				final var attributeMetadataAccess = new SimpleAttributeMetadata(
+						propertyAccess,
+						getMutabilityPlan( updatable ),
+						nullable,
+						insertable,
+						updatable,
+						includeInOptimisticLocking,
+						true,
+						cascadeStyle
+				);
+
+				attributeMapping = new DiscriminatedAssociationAttributeMapping(
+						navigableRole.append( bootPropertyDescriptor.getName() ),
+						typeConfiguration.getJavaTypeRegistry().resolveDescriptor( Object.class ),
+						declarer,
+						attributeIndex,
+						attributeIndex,
+						attributeMetadataAccess,
+						bootPropertyDescriptor.isLazy() ? FetchTiming.DELAYED : FetchTiming.IMMEDIATE,
+						propertyAccess,
+						bootPropertyDescriptor,
+						anyType,
+						bootValueMapping,
+						creationProcess
+				);
+			}
+			else if ( subtype instanceof CompositeType subCompositeType ) {
+				final int columnSpan =
+						subCompositeType.getColumnSpan( creationContext.getMetadata() );
+				final String subTableExpression;
+				final String[] subRootTableKeyColumnNames;
+				if ( rootTableKeyColumnNames == null ) {
+					subTableExpression = rootTableExpression;
+					subRootTableKeyColumnNames = null;
+				}
+				else {
+					subTableExpression = rootTableExpression;
+					subRootTableKeyColumnNames = new String[ columnSpan ];
+					System.arraycopy( rootTableKeyColumnNames, columnPosition, subRootTableKeyColumnNames, 0, columnSpan );
+				}
+
+				attributeMapping = MappingModelCreationHelper.buildEmbeddedAttributeMapping(
+						bootPropertyDescriptor.getName(),
+						attributeIndex,
+						attributeIndex,
+						bootPropertyDescriptor,
+						declarer,
+						subCompositeType,
+						subTableExpression,
+						subRootTableKeyColumnNames,
+						propertyAccess,
+						compositeType.getCascadeStyle( attributeIndex ),
+						creationProcess
+				);
+
+				columnPosition += columnSpan;
+			}
+			else if ( subtype instanceof CollectionType ) {
+				attributeMapping = MappingModelCreationHelper.buildPluralAttributeMapping(
+						bootPropertyDescriptor.getName(),
+						attributeIndex,
+						attributeIndex,
+						bootPropertyDescriptor,
+						this,
+						propertyAccess,
+						compositeType.getCascadeStyle( attributeIndex ),
+						compositeType.getFetchStyle( attributeIndex ),
+						creationProcess
+				);
+			}
+			else if ( subtype instanceof EntityType ) {
+				attributeMapping = MappingModelCreationHelper.buildSingularAssociationAttributeMapping(
+						bootPropertyDescriptor.getName(),
+						navigableRole.append( bootPropertyDescriptor.getName() ),
+						attributeIndex,
+						attributeIndex,
+						bootPropertyDescriptor,
+						this,
+						creationProcess.getEntityPersister( bootDescriptor.getOwner().getEntityName() ),
+						(EntityType) subtype,
+						representationStrategy.resolvePropertyAccess( bootPropertyDescriptor ),
+						compositeType.getCascadeStyle( attributeIndex ),
+						creationProcess
+				);
+				columnPosition += bootPropertyDescriptor.getColumnSpan();
+			}
+			else {
+				throw new MappingException(
+						String.format(
+								Locale.ROOT,
+								"Unable to determine attribute nature : %s#%s",
+								bootDescriptor.getOwner().getEntityName(),
+								bootPropertyDescriptor.getName()
+						)
+				);
+			}
+
+			attributeConsumer.accept( attributeMapping );
+
+			attributeIndex++;
+		}
+
+		completionCallback.success();
+		return true;
+	}
+
+	protected String determineEmbeddablePrefix() {
+		return getPropertyPath( castNonNull( getNavigableRole() ) );
+	}
+
+	@Override
+	public int getNumberOfFetchables() {
+		return getAttributeMappings().size();
+	}
+
+	@Override
+	public Fetchable getFetchable(int position) {
+		return getAttributeMappings().get( position );
+	}
+
+	@Override
+	public void visitFetchables(Consumer<? super Fetchable> consumer, EntityMappingType treatTargetType) {
+		forEachAttributeMapping( consumer );
+	}
+
+	@Override
+	public void visitFetchables(IndexedConsumer<? super Fetchable> indexedConsumer, EntityMappingType treatTargetType) {
+		this.getAttributeMappings().indexedForEach( indexedConsumer );
+	}
+
+	@Override
+	public int getNumberOfAttributeMappings() {
+		return getAttributeMappings().size();
+	}
+
+	@Nonnull
+	@Override
+	public AttributeMapping getAttributeMapping(int position) {
+		return getAttributeMappings().get( position );
+	}
+
+	@Nullable
+	@Override
+	public AttributeMapping findAttributeMapping(@Nonnull String name) {
+		final var attributes = getAttributeMappings();
+		for ( int i = 0; i < attributes.size(); i++ ) {
+			final var attribute = attributes.get( i );
+			if ( name.equals( attribute.getAttributeName() ) ) {
+				return attribute;
+			}
+		}
+		return null;
+	}
+
+	@Nonnull
+	@Override
+	public AttributeMappingsList getAttributeMappings() {
+		checkIsReady();
+		return attributeMappings;
+	}
+
+	private void checkIsReady() {
+		if ( selectableMappings == null ) {
+			// This is expected to happen when processing a
+			// PostInitCallbackEntry because the callbacks
+			// are not ordered. The exception is caught in
+			// MappingModelCreationProcess.executePostInitCallbacks()
+			// and the callback is re-queued.
+			throw new IllegalStateException( "Not yet ready" );
+		}
+	}
+
+	@Nonnull
+	@Override
+	public SelectableMapping getSelectable(int columnIndex) {
+		return getSelectableMappings().getSelectable( columnIndex );
+	}
+
+	@Override
+	public int forEachSelectable(@Nonnull SelectableConsumer consumer) {
+		return getSelectableMappings().forEachSelectable( 0, consumer );
+	}
+
+	@Override
+	public int forEachSelectable(int offset, @Nonnull SelectableConsumer consumer) {
+		return getSelectableMappings().forEachSelectable( offset, consumer );
+	}
+
+	@Override
+	public int getJdbcTypeCount() {
+		return getSelectableMappings().getJdbcTypeCount();
+	}
+
+	@Override
+	public int forEachJdbcType(int offset, @Nonnull IndexedConsumer<JdbcMapping> action) {
+		return getSelectableMappings().forEachSelectable(
+				offset,
+				(index, selectable) -> action.accept( index, selectable.getJdbcMapping() )
+		);
+	}
+
+	@Nonnull
+	@Override
+	public JdbcMapping getJdbcMapping(int index) {
+		return getSelectable( index ).getJdbcMapping();
+	}
+
+	@Override
+	public void forEachAttributeMapping(@Nonnull final IndexedConsumer<? super AttributeMapping> consumer) {
+		getAttributeMappings().indexedForEach( consumer );
+	}
+
+	@Override
+	public void forEachAttributeMapping(@Nonnull final Consumer<? super AttributeMapping> action) {
+		getAttributeMappings().forEach( action );
+	}
+
+	@Nullable
+	@Override
+	public ModelPart findSubPart(@Nonnull String name, @Nullable EntityMappingType treatTargetType) {
+		return findAttributeMapping( name );
+	}
+
+	@Override
+	public void forEachSubPart(@Nonnull IndexedConsumer<ModelPart> consumer, @Nullable EntityMappingType treatTarget) {
+		final var attributes = getAttributeMappings();
+		for ( int i = 0; i < attributes.size(); i++ ) {
+			consumer.accept( i, attributes.get(i) );
+		}
+	}
+
+	@Override
+	public void visitSubParts(@Nonnull Consumer<ModelPart> consumer, @Nullable EntityMappingType treatTargetType) {
+		forEachAttributeMapping( consumer );
+	}
+
+	@Override
+	public <X, Y> int breakDownJdbcValues(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer, @Nullable SharedSessionContractImplementor session) {
+		int span = 0;
+		if ( domainValue == null ) {
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var attribute = attributeMappings.get( i );
+				span += attribute.breakDownJdbcValues( null, offset + span, x, y, valueConsumer, session );
+			}
+		}
+		else {
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var attribute = attributeMappings.get( i );
+				final Object attributeValue = attribute.getValue( domainValue );
+				span += attribute.breakDownJdbcValues( attributeValue, offset + span, x, y, valueConsumer, session );
+			}
+		}
+		return span;
+	}
+
+	@Nullable
+	@Override
+	public Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			return null;
+		}
+		final int size = attributeMappings.size();
+		final var result = new Object[ size ];
+		for ( int i = 0; i < size; i++ ) {
+			final var attributeMapping = attributeMappings.get( i );
+			final Object object = attributeMapping.getValue( value );
+			result[i] = attributeMapping.disassemble( object, session );
+		}
+
+		return result;
+	}
+
+	@Override
+	public void addToCacheKey(@Nonnull MutableCacheKeyBuilder cacheKey, @Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		final int size = attributeMappings.size();
+		if ( value == null ) {
+			for ( int i = 0; i < size; i++ ) {
+				attributeMappings.get( i ).addToCacheKey( cacheKey, null, session );
+			}
+		}
+		else {
+			for ( int i = 0; i < size; i++ ) {
+				final var attributeMapping = attributeMappings.get( i );
+				attributeMapping.addToCacheKey( cacheKey, attributeMapping.getValue( value ), session );
+			}
+		}
+		if ( isPolymorphic() ) {
+			final EmbeddableDiscriminatorMapping discriminatorMapping = getDiscriminatorMapping();
+			final Object discriminatorValue = value != null ?
+					castNonNull( discriminatorMapping ).getDiscriminatorValue( value.getClass().getName() )
+					: null;
+			castNonNull( discriminatorMapping ).addToCacheKey( cacheKey, discriminatorValue, session );
+		}
+	}
+
+	@Override
+	public <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		int span = 0;
+		if ( value == null ) {
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var mapping = attributeMappings.get( i );
+				span += mapping.forEachDisassembledJdbcValue( null, span + offset, x, y, valuesConsumer, session );
+			}
+		}
+		else {
+			final var values = (Object[]) value;
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var mapping = attributeMappings.get( i );
+				span += mapping.forEachDisassembledJdbcValue( values[i], span + offset, x, y, valuesConsumer, session );
+			}
+		}
+		return span;
+	}
+
+	@Override
+	public <X, Y> int forEachJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		int span = 0;
+		if ( value == null ) {
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var attributeMapping = attributeMappings.get( i );
+				if ( !(attributeMapping instanceof PluralAttributeMapping) ) {
+					span += attributeMapping.forEachJdbcValue( null, span + offset, x, y, valuesConsumer, session );
+				}
+			}
+		}
+		else {
+			for ( int i = 0; i < attributeMappings.size(); i++ ) {
+				final var attributeMapping = attributeMappings.get( i );
+				if ( !(attributeMapping instanceof PluralAttributeMapping) ) {
+					span += attributeMapping.forEachJdbcValue( getValue( value, i ), span + offset, x, y, valuesConsumer, session );
+				}
+			}
+		}
+		return span;
+	}
+
+	protected void addAttribute(
+			ImmutableAttributeMappingList.Builder attributeMappings,
+			AttributeMapping attributeMapping) {
+		// check if we've already seen this attribute...
+		for ( int i = 0; i < attributeMappings.size(); i++ ) {
+			final var previous = attributeMappings.get( i );
+			if ( castNonNull( attributeMapping.getAttributeName() ).equals( previous.getAttributeName() ) ) {
+				attributeMappings.set( i, attributeMapping );
+				return;
+			}
+		}
+
+		attributeMappings.add( attributeMapping );
+	}
+
+	protected SelectableMappings getSelectableMappings() {
+		checkIsReady();
+		return selectableMappings;
+	}
+
+	protected boolean initColumnMappings() {
+		final int propertySpan = attributeMappings.size();
+		final List<SelectableMapping> selectableMappings = CollectionHelper.arrayList( propertySpan );
+
+		attributeMappings.indexedForEach(
+				(index, attributeMapping) -> attributeMapping.forEachSelectable(
+						(columnIndex, selection) -> selectableMappings.add( selection )
+				)
+		);
+
+		if ( getDiscriminatorMapping() != null ) {
+			getDiscriminatorMapping().forEachSelectable( (index, selection) -> selectableMappings.add( selection ) );
+		}
+
+		this.selectableMappings = new SelectableMappingsImpl( selectableMappings.toArray( new SelectableMapping[0] ) );
+		buildGetterSetterCache();
+
+		return true;
+	}
+
+	protected void buildGetterSetterCache() {
+		final int propertySpan = attributeMappings.size();
+		final PropertyValueAccessor[] accessorCache = new PropertyValueAccessor[propertySpan];
+		for ( int i = 0; i < propertySpan; i++ ) {
+			final PropertyAccess propertyAccess = attributeMappings.get( i ).getPropertyAccess();
+			accessorCache[i] = castNonNull( propertyAccess ).getPropertyValueAccessor();
+		}
+		this.accessorCache = accessorCache;
+	}
+
+	private static MutabilityPlan<?> getMutabilityPlan(boolean updateable) {
+		if ( updateable ) {
+			return new MutabilityPlan<>() {
+				@Override
+				public boolean isMutable() {
+					return true;
+				}
+
+				@Nullable
+	@Override
+				public Object deepCopy(@Nullable Object value) {
+					return value;
+				}
+
+				@Nonnull
+	@Override
+				public Serializable disassemble(@Nullable Object value, SharedSessionContract session) {
+					throw new UnsupportedOperationException();
+				}
+
+				@Nonnull
+	@Override
+				public Object assemble(@Nullable Serializable cached, SharedSessionContract session) {
+					throw new UnsupportedOperationException();
+				}
+			};
+		}
+		else {
+			return ImmutableMutabilityPlan.instance();
+		}
+	}
+}

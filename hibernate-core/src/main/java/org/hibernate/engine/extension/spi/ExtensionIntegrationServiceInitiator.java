@@ -1,0 +1,30 @@
+package org.hibernate.engine.extension.spi;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.Incubating;
+import org.hibernate.Remove;
+import org.hibernate.engine.extension.internal.ExtensionIntegrationServiceImpl;
+import org.hibernate.service.spi.SessionFactoryServiceInitiator;
+import org.hibernate.service.spi.SessionFactoryServiceInitiatorContext;
+
+import java.util.Set;
+
+@Incubating(since = "7.4")
+@Remove
+public class ExtensionIntegrationServiceInitiator
+		implements SessionFactoryServiceInitiator<ExtensionIntegrationService> {
+
+	public static final ExtensionIntegrationServiceInitiator INSTANCE = new ExtensionIntegrationServiceInitiator();
+
+	@Override
+	@Nonnull
+	public ExtensionIntegrationService initiateService(@Nonnull SessionFactoryServiceInitiatorContext context) {
+		return ExtensionIntegrationServiceImpl.create( Set.of(), context.getSessionFactory().getClassLoaderService() );
+	}
+
+	@Override
+	@Nonnull
+	public Class<ExtensionIntegrationService> getServiceInitiated() {
+		return ExtensionIntegrationService.class;
+	}
+}

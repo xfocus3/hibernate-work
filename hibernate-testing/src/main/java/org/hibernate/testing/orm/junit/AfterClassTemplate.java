@@ -1,0 +1,18 @@
+package org.hibernate.testing.orm.junit;
+
+import org.hibernate.Incubating;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+/**
+ * Similar to JUnit's {@link org.junit.jupiter.api.AfterAll} but called after
+ * each template invocation in a {@link org.junit.jupiter.api.ClassTemplate} test class.
+ */
+@Target(ElementType.METHOD)
+@Retention(RetentionPolicy.RUNTIME)
+@Incubating(since = "7.2")
+public @interface AfterClassTemplate {
+}

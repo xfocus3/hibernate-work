@@ -1,0 +1,304 @@
+package org.hibernate.orm.test.pc;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import org.hibernate.FindMultipleOption;
+import org.hibernate.KeyType;
+import org.hibernate.annotations.NaturalId;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.FailureExpected;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hibernate.LockMode.PESSIMISTIC_WRITE;
+import static org.hibernate.FindMultipleOption.OrderingMode.ORDERED;
+
+/**
+ * @author Steve Ebersole
+ */
+@SuppressWarnings("JUnitMalformedDeclaration")
+@DomainModel(annotatedClasses = FindMultipleDocTests.Person.class)
+@SessionFactory
+public class FindMultipleDocTests {
+	@BeforeEach
+	void createTestData(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction(  (session) -> {
+			session.persist(  new Person( 1, "Paul" ) );
+			session.persist(  new Person( 2, "John" ) );
+			session.persist(  new Person( 3, "Ringo" ) );
+			session.persist(  new Person( 4, "George" ) );
+			session.persist(  new Person( 5, "David" ) );
+		} );
+	}
+
+	@AfterEach
+	void dropTestData(SessionFactoryScope factoryScope) {
+		factoryScope.dropData();
+	}
+
+	@Test
+	void testBasicFindMultiple(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			//tag::pc-find-multiple-example[]
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3),
+					PESSIMISTIC_WRITE,
+					ORDERED,
+					new FindMultipleOption.BatchSize( 2 )
+			);
+			//end::pc-find-multiple-example[]
+			assertThat( persons ).extracting( Person::getId ).containsExactly( 1, 2, 3 );
+		} );
+	}
+
+	@Test
+	void testBasicGetMultiple(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			//tag::pc-get-multiple-example[]
+			List<Person> persons = session.getMultiple(
+					Person.class,
+					List.of( 1, 2, 3 ),
+					PESSIMISTIC_WRITE,
+					ORDERED
+			);
+			//end::pc-get-multiple-example[]
+			assertThat( persons ).extracting( Person::getId ).containsExactly( 1, 2, 3 );
+		} );
+	}
+
+	@Test
+	void testFindMultipleByNaturalId(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			//tag::pc-find-multiple-natural-id-example[]
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of( "Paul", "John", "Ringo" ),
+					KeyType.NATURAL,
+					PESSIMISTIC_WRITE,
+					ORDERED
+			);
+			//end::pc-find-multiple-natural-id-example[]
+			assertThat( persons ).extracting( Person::getName ).containsExactly( "Paul", "John", "Ringo" );
+		} );
+	}
+
+	@Test
+	void testMissingIdentifiers(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( session -> {
+			assertThat( session.findMultiple( Person.class, List.of( 1, 99 ) ) )
+					.containsExactly( session.find( Person.class, 1 ), null );
+		} );
+		factoryScope.inTransaction( session -> {
+			assertThatThrownBy( () -> session.getMultiple( Person.class, List.of( 1, 99 ) ) )
+					.isInstanceOf( EntityNotFoundException.class );
+		} );
+	}
+
+	@Test
+	void testReplaceRemovals(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.REPLACE,
+					FindMultipleOption.OrderingMode.UNORDERED
+			);
+			assertThat( persons ).hasSize( 5 );
+			assertThat( persons ).containsNull();
+		} );
+	}
+
+	@Test @FailureExpected(reason = "REPLACE has no effect with DISABLED at least for now")
+	void testReplaceRemovalsNoSessionCheck(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.RemovalsMode.REPLACE,
+					FindMultipleOption.OrderingMode.UNORDERED,
+					FindMultipleOption.SessionCheckMode.DISABLED
+			);
+			assertThat( persons ).hasSize( 5 );
+			assertThat( persons ).containsNull();
+		} );
+	}
+
+	@Test
+	void testIncludeRemovals(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.INCLUDE,
+					FindMultipleOption.OrderingMode.UNORDERED
+			);
+			assertThat( persons ).hasSize( 5 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+	}
+
+	@Test
+	void testExcludeRemovalsUnordered(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.EXCLUDE,
+					FindMultipleOption.OrderingMode.UNORDERED
+			);
+			assertThat( persons ).hasSize( 4 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 2 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.EXCLUDE,
+					FindMultipleOption.OrderingMode.UNORDERED
+			);
+			assertThat( persons ).hasSize( 3 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+	}
+
+	@Test @FailureExpected(reason = "EXCLUDE has no effect with DISABLED at least for now")
+	void testExcludeRemovalsUnorderedNoSessionCheck(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.RemovalsMode.EXCLUDE,
+					FindMultipleOption.OrderingMode.UNORDERED,
+					FindMultipleOption.SessionCheckMode.DISABLED
+			);
+			assertThat( persons ).hasSize( 4 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 2 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.RemovalsMode.EXCLUDE,
+					FindMultipleOption.OrderingMode.UNORDERED,
+					FindMultipleOption.SessionCheckMode.DISABLED
+			);
+			assertThat( persons ).hasSize( 3 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+	}
+
+	@Test @FailureExpected(reason = "EXCLUDE incompatible with ORDERED at least for now")
+	void testExcludeRemovalsOrdered(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.EXCLUDE
+			);
+			assertThat( persons ).hasSize( 4 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 2 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.EXCLUDE
+			);
+			assertThat( persons ).hasSize( 3 );
+			assertThat( persons ).doesNotContainNull();
+		} );
+	}
+
+	@Test
+	void testOrderedRemovals(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.INCLUDE,
+					FindMultipleOption.OrderingMode.ORDERED
+			);
+			assertThat( persons ).hasSize( 5 );
+			assertThat( persons ).doesNotContainNull();
+			assertThat( persons ).map( Person::getId ).containsExactly( 1, 2, 3, 4, 5 );
+		} );
+	}
+
+	@Test
+	void testOrderedReplacedRemovals(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> {
+			session.remove( session.find( Person.class, 5 ) );
+
+			List<Person> persons = session.findMultiple(
+					Person.class,
+					List.of(1,2,3,4,5),
+					FindMultipleOption.SessionCheckMode.ENABLED,
+					FindMultipleOption.RemovalsMode.REPLACE,
+					FindMultipleOption.OrderingMode.ORDERED
+			);
+			assertThat( persons ).hasSize( 5 );
+			assertThat( persons ).containsNull();
+		} );
+	}
+
+	@Entity(name="Person")
+	@Table(name="persons")
+	public static class Person {
+		@Id
+		private Integer id;
+		@NaturalId
+		private String name;
+
+		public Person() {
+		}
+		public Person(Integer id, String name) {
+			this.id = id;
+			this.name = name;
+		}
+
+		public Integer getId() {
+			return id;
+		}
+
+		public String getName() {
+			return name;
+		}
+	}
+}

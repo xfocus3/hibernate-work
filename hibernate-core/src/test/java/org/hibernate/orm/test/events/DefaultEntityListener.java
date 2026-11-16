@@ -1,0 +1,30 @@
+package org.hibernate.orm.test.events;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+
+/**
+ * @author Vlad Mihalcea
+ */
+//tag::events-default-listener-mapping-example[]
+public class DefaultEntityListener {
+
+	public void onPersist(Object entity) {
+		if (entity instanceof BaseEntity) {
+			BaseEntity baseEntity = (BaseEntity) entity;
+			baseEntity.setCreatedOn(now());
+		}
+	}
+
+	public void onUpdate(Object entity) {
+		if (entity instanceof BaseEntity) {
+			BaseEntity baseEntity = (BaseEntity) entity;
+			baseEntity.setUpdatedOn(now());
+		}
+	}
+
+	private Timestamp now() {
+		return Timestamp.from( Instant.now() );
+	}
+}
+//end::events-default-listener-mapping-example[]

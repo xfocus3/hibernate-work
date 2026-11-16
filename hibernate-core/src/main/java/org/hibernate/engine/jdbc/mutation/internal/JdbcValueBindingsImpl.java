@@ -1,0 +1,151 @@
+package org.hibernate.engine.jdbc.mutation.internal;
+
+import org.hibernate.action.queue.spi.bind.DelayedValueAccess;
+import org.hibernate.engine.jdbc.mutation.ParameterUsage;
+import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
+import org.hibernate.engine.jdbc.mutation.group.UnknownParameterException;
+import org.hibernate.engine.jdbc.mutation.spi.Binding;
+import org.hibernate.engine.jdbc.mutation.spi.BindingGroup;
+import org.hibernate.engine.jdbc.mutation.spi.JdbcValueBindingsImplementor;
+import org.hibernate.engine.jdbc.mutation.spi.JdbcValueDescriptorAccess;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.sql.spi.mutation.MutationTarget;
+import org.hibernate.sql.spi.mutation.MutationType;
+import org.hibernate.sql.spi.mutation.TableMapping;
+
+import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * @author Steve Ebersole
+ */
+public class JdbcValueBindingsImpl implements JdbcValueBindingsImplementor {
+	private final MutationType mutationType;
+	private final MutationTarget mutationTarget;
+	private final JdbcValueDescriptorAccess jdbcValueDescriptorAccess;
+	private final SharedSessionContractImplementor session;
+
+	private final Map<String, BindingGroup> bindingGroupMap = new HashMap<>();
+
+	public JdbcValueBindingsImpl(
+			MutationType mutationType,
+			MutationTarget mutationTarget,
+			JdbcValueDescriptorAccess jdbcValueDescriptorAccess,
+			SharedSessionContractImplementor session) {
+		this.mutationType = mutationType;
+		this.mutationTarget = mutationTarget;
+		this.jdbcValueDescriptorAccess = jdbcValueDescriptorAccess;
+		this.session = session;
+	}
+
+	@Override
+	public BindingGroup getBindingGroup(String tableName) {
+		final String normalizedTableName = ( tableName );
+		return bindingGroupMap.get( normalizedTableName );
+	}
+
+	@Override
+	public void bindValue(
+			Object value,
+			String tableName,
+			String columnName,
+			ParameterUsage usage) {
+		assert !(value instanceof org.hibernate.engine.internal.FilteredAssociationState.Key)
+				: "Hidden association keys must be decomposed by their attribute mapping before JDBC binding";
+		final String physicalTableName = jdbcValueDescriptorAccess.resolvePhysicalTableName( tableName );
+		final var bindingGroup = resolveBindingGroup( physicalTableName );
+		final int descriptorCount = jdbcValueDescriptorAccess.forEachValueDescriptor(
+				tableName,
+				columnName,
+				usage,
+				descriptor -> bindingGroup.bindValue( columnName, value, descriptor )
+		);
+		if ( descriptorCount == 0 ) {
+			throw new UnknownParameterException( mutationType, mutationTarget, tableName, columnName, usage );
+		}
+	}
+
+	private BindingGroup resolveBindingGroup(String tableName) {
+		final var existing = bindingGroupMap.get( tableName );
+		if ( existing != null ) {
+			assert tableName.equals( existing.getTableName() );
+			return existing;
+		}
+		else {
+			final var created = new BindingGroup( tableName );
+			bindingGroupMap.put( tableName, created );
+			return created;
+		}
+	}
+
+	@Override
+	public void beforeStatement(PreparedStatementDetails statementDetails) {
+		final String normalizedTableName = (
+				statementDetails.getMutatingTableDetails().getTableName() );
+		final var bindingGroup = bindingGroupMap.get( normalizedTableName );
+		if ( bindingGroup == null ) {
+			statementDetails.resolveStatement();
+		}
+		else {
+			bindingGroup.forEachBinding( (binding) -> {
+				try {
+					// Unwrap delayed value accessors used by cycle breaking and generated identifiers
+					Object valueToBindObject = binding.getValue();
+					if ( valueToBindObject instanceof DelayedValueAccess handle ) {
+						valueToBindObject = handle.get();
+					}
+
+					binding.getValueBinder().bind(
+							statementDetails.resolveStatement(),
+							valueToBindObject,
+							binding.getPosition(),
+							session
+					);
+				}
+				catch (SQLException e) {
+					throw session.getJdbcServices().getSqlExceptionHelper().convert(
+							e,
+							String.format(
+									Locale.ROOT,
+									"Unable to bind parameter #%s - %s",
+									binding.getPosition(),
+									binding.getValue()
+							)
+					);
+				}
+			} );
+		}
+	}
+
+	@Override
+	public void afterStatement(TableMapping mutatingTable) {
+		final String normalizedTableName = ( mutatingTable.getTableName() );
+		final var bindingGroup = bindingGroupMap.remove( normalizedTableName );
+		if ( bindingGroup != null ) {
+			bindingGroup.clear();
+		}
+	}
+
+	@Override
+	public Object getBoundValue(String tableName, String columnName, ParameterUsage usage) {
+		final String normalizedTableName = ( tableName );
+		final String normalizedColumnName = ( columnName );
+		final BindingGroup bindingGroup = bindingGroupMap.get( normalizedTableName );
+		if ( bindingGroup == null ) {
+			return null;
+		}
+		final Binding binding = bindingGroup.findBinding( normalizedColumnName, usage );
+		return binding == null ? null : binding.getValue();
+	}
+
+	@Override
+	public void replaceValue(String tableName, String columnName, ParameterUsage usage, Object newValue) {
+		final String normalizedTableName = ( tableName );
+		final String normalizedColumnName = ( columnName );
+		final BindingGroup bindingGroup = bindingGroupMap.get( normalizedTableName );
+		final Binding binding = bindingGroup.getBinding( normalizedColumnName, usage );
+		binding.setValue( newValue );
+	}
+}

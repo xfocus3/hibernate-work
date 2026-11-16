@@ -1,0 +1,393 @@
+[[statistics]]
+== Statistics
+
+:example-dir-statistics: {core-project-dir}/src/test/java/org/hibernate/orm/test/stats
+
+Hibernate statistics describe activity recorded by a `SessionFactory`: entity and collection
+operations, queries, cache access, JDBC resource use, and transaction completion.
+Use them to investigate behavior and compare workloads. They are cumulative measurements,
+not a SQL trace or a durable audit of committed changes.
+
+For event-based monitoring, see <<appendix-monitoring-with-JFR>>.
+That integration is enabled separately from statistics collection.
+
+[[statistics-access]]
+=== Enabling and accessing statistics
+
+Statistics collection is disabled by default because it adds processing and memory overhead.
+// suppress inspection "AsciiDocLinkResolve"
+Enable it with <<settings-hibernate.generate_statistics,`hibernate.generate_statistics`>>:
+
+[[statistics-access-example]]
+.Enabling collection and obtaining factory statistics
+====
+[source,java,indent=0]
+----
+include::{example-dir-statistics}/StatisticsGuideTests.java[tags=statistics-access]
+----
+====
+
+Here, `configuration` is a `HibernatePersistenceConfiguration` with its managed classes
+and connection settings already configured. See <<bootstrap>> for factory creation.
+The `unwrap()` call obtains the Hibernate-specific factory API from an `EntityManagerFactory`.
+If the application already has a `SessionFactory`, call `getStatistics()` directly.
+
+[[statistics-methods]]
+The {doc-javadoc-url}org/hibernate/stat/Statistics.html[`Statistics`] interface exposes
+factory-wide counters and lookup methods for more detailed measurements.
+These measurements aggregate activity across the factory's sessions; they do not isolate
+one request, transaction, tenant, or application node. Separate factories have separate statistics.
+Session open/close counts include both stateful and stateless sessions; which other counters
+change depends on the operations performed.
+
+`Session.getStatistics()` has a different purpose: it describes the entities and collections
+currently associated with that session's persistence context. It does not report cumulative
+factory activity. A `StatelessSession` has no persistence context and does not expose this API.
+
+The examples below use an entity class named `Record`, mapped as `StatisticsRecord`, with an
+assigned integer `id` and a string `label`.
+
+[[statistics-session-example]]
+.Persistence-context size versus cumulative loads
+====
+[source,java,indent=0]
+----
+include::{example-dir-statistics}/StatisticsGuideTests.java[tags=statistics-session]
+----
+====
+
+[[statistics-general]]
+=== Scope, lifecycle, and measurement intervals
+
+Use `isStatisticsEnabled()` to check collection and `setStatisticsEnabled(boolean)` to
+change it at runtime. Disabling collection retains previously recorded values. Enabling it
+again records subsequent activity, without reconstructing work performed while disabled.
+
+`getStart()` returns the `Instant` at which the statistics were created or last reset.
+`clear()` resets the recorded counters and detailed statistics; it does not clear persistence
+contexts, evict cached data, or empty the query-plan cache. The slow-query map has a reset
+exception described in <<statistics-slow-queries>>.
+`logSummary()` writes a summary to the application log at INFO level.
+
+A reset affects every user of that factory. Use it for an isolated measurement, excluding
+setup and cleanup. Read detailed statistics again after reset: an object obtained before
+reset is not a live view of its replacement.
+
+[[statistics-measurement-example]]
+.Measuring a controlled operation and a subsequent delta
+====
+[source,java,indent=0]
+----
+include::{example-dir-statistics}/StatisticsGuideTests.java[tags=statistics-measurement]
+----
+====
+
+The example disables second-level and query-result caching and uses fresh persistence
+contexts. This keeps its loads independent of previously managed or cached objects.
+Its assertions describe this fixture, not every mapping or workload.
+
+For a shared factory, prefer subtracting a counter's before value from its after value to
+resetting everyone else's measurements. A delta still includes concurrent activity, and an
+intervening reset invalidates it. Individual reads do not form an atomic snapshot of all
+counters. Isolate the workload when exact attribution is required.
+
+[[statistics-activity]]
+=== Interpreting activity counters
+
+[[statistics-session]]
+==== Sessions and flushes
+
+`getSessionOpenCount()` and `getSessionCloseCount()` count session openings and closings.
+`getFlushCount()` counts recorded flush operations, whether automatic or explicit.
+A flush is not a commit, and a flush need not issue SQL.
+See <<pc>> for persistence-context and flushing behavior.
+
+[[statistics-jdbc]]
+==== JDBC statements and connections
+
+`getPrepareStatementCount()` counts statement preparation attempts, including attempts
+that fail before a statement is acquired. `getCloseStatementCount()` counts successfully
+closed prepared statements. A difference between these counters does not by itself
+establish a resource leak: a preparation attempt may fail, or a statement may still be in use.
+These are not counts of `execute()` calls, affected rows, JDBC batch additions or executions,
+or network round trips. In particular, a prepared statement may be reused for multiple operations.
+See <<batch-verification>> for instrumentation that verifies JDBC batching.
+
+`getConnectCount()` counts connection acquisitions by sessions, not distinct physical
+connections created by a pool. The same underlying connection may be acquired repeatedly.
+See <<database-connection-handling>> for acquisition and release behavior.
+
+[[statistics-transaction]]
+==== Transactions
+
+`getTransactionCount()` counts transaction completions observed by Hibernate.
+`getSuccessfulTransactionCount()` counts successful completions, and
+`getFailedTransactionCount()` counts unsuccessful completions.
+An unsuccessful completion is not necessarily a confirmed rollback: an external transaction
+manager may report an uncertain outcome. These counters are not a census of every transaction
+in the database. See <<transactions-completion>> for completion and failure handling.
+
+[[statistics-concurrency-control]]
+==== Optimistic failures
+
+`getOptimisticFailureCount()` counts optimistic failures recorded by Hibernate, such as
+stale entity versions reported through `StaleObjectStateException` or
+`jakarta.persistence.OptimisticLockException`. It is not a count of every exception thrown
+by the application or database. Per-entity statistics also expose optimistic failures.
+See <<locking>> for optimistic locking.
+
+[[statistics-domain]]
+=== Entity, collection, and natural-id statistics
+
+[[statistics-session-factory]]
+==== Names and detailed statistics
+
+`getEntityNames()` returns the mapped entity names, and `getCollectionRoleNames()` returns
+the mapped collection roles. A collection role identifies an attribute, for example,
+`com.acme.Order.lines`, rather than just a collection table or Java collection type.
+Use the mapped Hibernate entity name for statistics lookups; for an ordinary class mapping,
+this is the fully qualified class name, which may differ from its JPQL entity name.
+
+[[statistics-aggregates]]
+Obtain detail with `getEntityStatistics(entityName)`, `getCollectionStatistics(role)`, and
+`getNaturalIdStatistics(rootEntityName)`. These return measurements for the named mapping,
+not for one entity or collection instance. Use the root entity name for natural-id statistics
+in an inheritance hierarchy.
+
+[[statistics-entity]]
+==== Entity operations
+
+The factory exposes `getEntityInsertCount()`, `getEntityUpdateCount()`,
+`getEntityUpsertCount()`, and `getEntityDeleteCount()` for recorded entity mutations.
+These are ORM operation counts, not committed database row counts. For example, a flushed
+insert remains counted if its transaction later rolls back. A multi-table entity operation
+need not correspond to just one SQL statement. Bulk mutation queries and direct JDBC work
+do not generate the ordinary per-entity mutation counters.
+
+`getEntityLoadCount()` counts entities loaded, while `getEntityFetchCount()` counts separately
+recorded entity fetches, such as secondary loads used to initialize association references.
+An entity loaded as part of a query can increase the load count without increasing the
+fetch count. Neither counter alone gives the number of SQL statements or all lazy accesses.
+A repeat lookup satisfied by the persistence context does not load another entity.
+See <<fetching>> for fetching strategies.
+
+`EntityStatistics` exposes insert, update, delete, load, fetch, optimistic-failure, and cache
+counts for one mapped entity. There is no corresponding per-entity upsert accessor.
+
+[[statistics-collection]]
+==== Collection operations
+
+`getCollectionLoadCount()` counts collection loads, while `getCollectionFetchCount()` counts
+separately recorded collection fetches. As with entities, loading a collection through a join
+and initializing it with a secondary fetch have different counter effects.
+
+`getCollectionUpdateCount()`, `getCollectionRemoveCount()`, and `getCollectionRecreateCount()`
+count collection operations, not individual affected rows. Recreating one collection may
+insert many rows. `CollectionStatistics` provides the corresponding per-role counters and
+cache access counts. See <<fetching>> for collection fetching behavior.
+
+[[statistics-natural-id]]
+==== Natural-id resolution
+
+`getNaturalIdQueryExecutionCount()` counts database queries used to resolve natural identifiers.
+`getNaturalIdQueryExecutionMaxTime()` reports their maximum recorded duration;
+`getNaturalIdQueryExecutionMaxTimeEntity()` and `getNaturalIdQueryExecutionMaxTimeRegion()`
+identify the associated entity and, when applicable, natural-id cache region.
+These measurements are separate from ordinary query execution statistics.
+
+`NaturalIdStatistics` provides per-root-entity execution counts and min/max/average durations,
+as well as natural-id normalization and cache access counts. The current implementation
+records these natural-id resolution durations in *nanoseconds*, unlike the ordinary query
+execution timings in milliseconds. A cached resolution is different
+from a database resolution query and from loading the resolved entity's state.
+See <<naturalid>> and <<statistics-second-level-cache-natural-id>>.
+
+[[statistics-query]]
+=== Query execution and slow-query measurements
+
+`getQueryExecutionCount()` counts query executions recorded against the database.
+It is not a count of all SQL statements, every query API invocation, or entity loads.
+In particular, query-result cache hits have separate counters and do not represent another
+database execution of the cached selection.
+
+Bulk mutation statements executed with `execute()` or the legacy `executeUpdate()` do not
+contribute to the current query execution count or timing statistics. Their affected counts
+are returned by the execution method; they do not populate ordinary per-entity mutation counters either.
+See <<query-mutations>> for bulk mutation execution and affected-count semantics.
+
+`getQueryExecutionMaxTime()` reports the maximum recorded execution time in milliseconds;
+`getQueryExecutionMaxTimeQueryString()` identifies the corresponding query.
+Use `getQueryStatistics(queryString)` for execution count, result count, min/max/average
+and total execution time, query-result cache access, and compilation/cache measurements.
+
+[[statistics-query-example]]
+.Per-query execution measurements
+====
+[source,java,indent=0]
+----
+include::{example-dir-statistics}/StatisticsGuideTests.java[tags=statistics-query]
+----
+====
+
+The parameter values do not create separate entries for this fixed HQL string.
+Query identifiers depend on the execution path: HQL is used for HQL queries, while native
+queries use SQL. Do not assume every Criteria query has an equivalent rendered HQL key.
+Use `getQueries()` to inspect retained identifiers, subject to <<statistics-query-max-size>>.
+
+Execution timings are Hibernate's recorded durations, not database-server-only timings
+or end-to-end application latency. Result consumption and processing affect what is measured.
+`getExecutionRowCount()` is a recorded result count; it is not a general physical JDBC row
+counter. For example, result-list processing may remove duplicate results, and scroll/stream
+paths do not provide a complete consumed-row count or the full time spent traversing results.
+Do not interpret absent samples or a zero-millisecond duration as proof that no work occurred.
+
+[[statistics-slow-queries]]
+==== Slow SQL
+
+// suppress inspection "AsciiDocLinkResolve"
+Enable <<settings-hibernate.log_slow_query,`hibernate.log_slow_query`>> with a positive threshold
+in milliseconds to log SQL operations exceeding that threshold.
+When statistics collection is also enabled, `getSlowQueries()` exposes a map from SQL strings
+to their maximum recorded slow duration in milliseconds. This uses SQL keys and JDBC timing,
+which differ from the query identifiers and execution timings above. It is not a list of every
+slow execution or a record of bound parameter values. The threshold is configured separately
+from `hibernate.generate_statistics`.
+
+[NOTE]
+====
+Currently, `Statistics.clear()` does not empty the slow-query map, even though it resets the
+other statistics described here. Slow-query entries may therefore predate `getStart()`.
+The `hibernate.statistics.query_max_size` setting does not bound this map.
+====
+
+[[statistics-query-plan-cache]]
+=== Query compilation and plan-cache measurements
+
+Hibernate caches HQL interpretations and reusable execution plans. Criteria queries already
+represent query trees; they are not parsed as HQL strings. See <<hql-query-plan-cache>> for
+cache configuration and the separate Criteria controls. Plan caching is independent of
+<<caching-query,query-result caching>>.
+
+[[statistics-query-plan-cache-global-level]]
+==== Global counters
+
+`getQueryPlanCacheHitCount()` and `getQueryPlanCacheMissCount()` record cache activity for
+HQL interpretations and execution plans. A single query can involve more than one cache
+operation. Creating a query can affect these counters before executing it, and not every
+query path has identical caching or instrumentation. Their ratio is not directly the fraction
+of executed queries served from cache.
+
+[[statistics-plan-cache-example]]
+.Cache reuse before query execution
+====
+[source,java,indent=0]
+----
+include::{example-dir-statistics}/StatisticsGuideTests.java[tags=statistics-plan-cache]
+----
+====
+
+This example uses a fresh factory and a fixed HQL string and result type. Resetting statistics
+alone would not make an existing factory's plan cache cold. Compare equivalent workloads and
+cache state when using these counters to investigate repeated compilation.
+
+[[statistics-query-plan-cache-query-level]]
+==== Per-query detail
+
+`QueryStatistics.getPlanCacheHitCount()` and `getPlanCacheMissCount()` report the corresponding
+activity for a retained query identifier. `getPlanCompilationTotalMicroseconds()` reports
+accumulated compilation time in *microseconds*, unlike execution timings in milliseconds.
+In the current implementation, HQL compilation timing covers HQL translation and associated
+parameter processing; it does not measure every later execution-plan or SQL compilation stage.
+Do not treat it as total query preparation cost for every query type.
+
+[[statistics-second-level-cache]]
+=== Cache-region measurements
+
+Cache counters describe separate kinds of activity:
+
+[cols="2,3",options="header"]
+|===
+|Counter family |What it records
+|`getSecondLevelCacheHitCount()`, `getSecondLevelCacheMissCount()`, `getSecondLevelCachePutCount()`
+|Recorded entity and collection domain-data cache activity.
+|`getNaturalIdCacheHitCount()`, `getNaturalIdCacheMissCount()`, `getNaturalIdCachePutCount()`
+|Natural-id resolution cache activity.
+|`getQueryCacheHitCount()`, `getQueryCacheMissCount()`, `getQueryCachePutCount()`
+|Query-result cache activity.
+|`getUpdateTimestampsCacheHitCount()`, `getUpdateTimestampsCacheMissCount()`, `getUpdateTimestampsCachePutCount()`
+|Timestamp cache activity used to check query-result validity.
+|===
+
+A repeat lookup in the persistence context is not a second-level cache hit.
+A query-result hit may still require entity loads, depending on the cached layout and
+available domain data. A cache miss records unsuccessful cache access, not proof that
+a complete application operation subsequently succeeded.
+
+Use `getDomainDataRegionStatistics(regionName)` for a known entity, collection, or natural-id
+region. An unknown domain-data region causes `IllegalArgumentException`; do not use this
+method to probe arbitrary region names. `getQueryRegionStatistics(regionName)` returns
+statistics for an existing query-result region, or `null` when it is absent or query caching
+is disabled. `getCacheRegionStatistics(regionName)` checks both kinds, preferring domain data.
+Use the type-specific method when the region type is known.
+
+`getSecondLevelCacheRegionNames()` lists domain-data region names, not query-result regions.
+`CacheRegionStatistics` reports regional hits, misses, puts, and removals. Its element counts
+and memory-size measurements depend on provider support. Unsupported measurements return
+`CacheRegionStatistics.NO_EXTENDED_STAT_SUPPORT_RETURN` (`Long.MIN_VALUE`), not zero.
+These provider measurements describe current occupancy, rather than cumulative activity
+since the last reset. See <<caching-statistics>> for a region measurement example.
+
+[[statistics-second-level-cache-natural-id]]
+==== Natural-id cache
+
+Use the natural-id counters and `getNaturalIdStatistics(rootEntityName)` to distinguish a
+cached identifier resolution from a database resolution query. A hit resolves an identifier;
+it does not establish that the entity state is already available. See <<natural-id-caching>>.
+
+[[statistics-second-level-cache-query]]
+==== Query-result cache
+
+Use the query cache counters for factory totals, `QueryStatistics` for one retained query,
+and `getQueryRegionStatistics()` for one existing result region. A per-query total may span
+multiple result regions. See <<caching-query>> for configuration, layouts, and invalidation.
+
+[[statistics-second-level-cache-timestamp]]
+==== Update-timestamps cache
+
+Timestamp-cache hits, misses, and puts concern query-space invalidation metadata, not cached
+entity instances or query results. They need not match the query-result hit/miss totals.
+See <<caching-query>> for the role of timestamps in query-result validity.
+
+[[statistics-query-max-size]]
+=== Retention, overhead, and practical verification
+
+// suppress inspection "AsciiDocLinkResolve"
+The <<settings-hibernate.statistics.query_max_size,`hibernate.statistics.query_max_size`>> setting bounds
+the number of retained `QueryStatistics` entries. Its default is *5000*, with LRU-based
+eviction to make room for new entries. This capacity is independent of query-plan-cache
+capacity and does not bound every kind of statistics storage.
+
+Evicting an entry discards its accumulated per-query detail without reducing factory-wide
+counters. A later lookup may create a new entry with fresh counters. Previously obtained
+objects do not track the replacement entry. Consequently, summing retained per-query values
+need not reproduce factory totals.
+
+`getQueries()` exposes the currently retained identifiers, not an execution history.
+Compilation, cache activity, or an explicit `getQueryStatistics()` lookup can create an entry
+without a database execution. Choose capacity according to query diversity, required detail,
+and memory cost; Criteria use alone is not a reason to increase it.
+
+For useful comparisons:
+
+* Exclude fixture creation and cleanup, verify the returned or persisted data, and control
+  persistence-context, data-cache, and plan-cache state.
+* Compare related metrics and inspect SQL when appropriate. One counter rarely establishes
+  the cause of a performance change.
+* Account for concurrent activity and collection overhead; do not infer production latency
+  from a small diagnostic example.
+* Use JDBC instrumentation for batch execution and provider tools for provider-specific cache
+  behavior. See <<batch-verification>> and <<caching-statistics>>.
+
+// suppress inspection "AsciiDocLinkResolve"
+For integrations requiring a different statistics collector, <<settings-hibernate.stats.factory,`hibernate.stats.factory`>> selects a {doc-javadoc-url}org/hibernate/stat/spi/StatisticsFactory.html[`StatisticsFactory`].
+This is an extension point; applications reading the standard metrics normally use `SessionFactory.getStatistics()`.

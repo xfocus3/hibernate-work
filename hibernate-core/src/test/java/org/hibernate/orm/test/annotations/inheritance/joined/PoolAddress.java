@@ -1,0 +1,18 @@
+package org.hibernate.orm.test.annotations.inheritance.joined;
+
+import jakarta.persistence.Column;
+import jakarta.persistence.Embeddable;
+
+@Embeddable
+public class PoolAddress {
+	@Column(table = "POOL_ADDRESS")
+	private String address;
+
+	public String getAddress() {
+		return address;
+	}
+
+	public void setAddress(String address) {
+		this.address = address;
+	}
+}

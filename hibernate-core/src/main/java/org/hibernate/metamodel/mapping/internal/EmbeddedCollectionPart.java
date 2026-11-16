@@ -1,0 +1,335 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.metamodel.mapping.CollectionPart;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.MappingType;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.property.access.spi.PropertyAccessorService;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.translation.Clause;
+import org.hibernate.sql.ast.spi.query.from.SqlAstJoinType;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBase;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.SqlTuple;
+import org.hibernate.sql.ast.spi.query.from.PluralTableGroup;
+import org.hibernate.sql.ast.spi.query.from.StandardVirtualTableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroupJoin;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.sql.results.graph.Fetch;
+import org.hibernate.sql.results.graph.FetchOptions;
+import org.hibernate.sql.results.graph.FetchParent;
+import org.hibernate.sql.results.graph.embeddable.EmbeddableValuedFetchable;
+import org.hibernate.sql.results.graph.embeddable.internal.EmbeddableFetchImpl;
+import org.hibernate.sql.results.graph.embeddable.internal.EmbeddableResultImpl;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import jakarta.annotation.Nullable;
+
+import static java.util.Objects.requireNonNullElse;
+import static org.hibernate.metamodel.mapping.internal.ParentPropertyAccessHelper.parentPropertyAccess;
+
+/**
+ * @author Steve Ebersole
+ */
+public class EmbeddedCollectionPart implements CollectionPart, EmbeddableValuedFetchable, FetchOptions {
+	private final NavigableRole navigableRole;
+	private final CollectionPersister collectionDescriptor;
+	private final Nature nature;
+	private final EmbeddableMappingType embeddableMappingType;
+
+	private final String containingTableExpression;
+
+	@Nullable private final PropertyAccess parentInjectionAttributePropertyAccess;
+	private final String sqlAliasStem;
+
+	public EmbeddedCollectionPart(
+			PropertyAccessorService propertyAccessorService,
+			CollectionPersister collectionDescriptor,
+			Nature nature,
+			EmbeddableMappingType embeddableMappingType,
+			String parentInjectionAttributeName,
+			String containingTableExpression,
+			String sqlAliasStem) {
+		this.navigableRole = collectionDescriptor.getNavigableRole().appendContainer( nature.getName() );
+		this.collectionDescriptor = collectionDescriptor;
+		this.nature = nature;
+		this.parentInjectionAttributePropertyAccess =
+				parentPropertyAccess( propertyAccessorService, parentInjectionAttributeName, embeddableMappingType );
+		this.embeddableMappingType = embeddableMappingType;
+
+		this.containingTableExpression = containingTableExpression;
+		this.sqlAliasStem = sqlAliasStem;
+	}
+
+	@Nonnull
+	@Override
+	public PluralAttributeMapping getCollectionAttribute() {
+		return collectionDescriptor.getAttributeMapping();
+	}
+
+	@Nonnull
+	@Override
+	public <T> DomainResult<T> createDomainResult(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nullable String resultVariable,
+			@Nonnull DomainResultCreationState creationState) {
+		// Make sure the pre-created table group for the part is registered under its navigable path
+		resolveTableGroup( navigablePath, creationState );
+		return new EmbeddableResultImpl<>(
+				navigablePath,
+				this,
+				resultVariable,
+				creationState
+		);
+	}
+
+	@Nonnull
+	@Override
+	public Nature getNature() {
+		return nature;
+	}
+
+	@Nonnull
+	@Override
+	public EmbeddableMappingType getEmbeddableTypeDescriptor() {
+		return embeddableMappingType;
+	}
+
+	@Nonnull
+	@Override
+	public MappingType getPartMappingType() {
+		return getEmbeddableTypeDescriptor();
+	}
+
+	@Nonnull
+	@Override
+	public String getContainingTableExpression() {
+		return containingTableExpression;
+	}
+
+	@Nullable
+	@Override
+	public PropertyAccess getParentInjectionAttributePropertyAccess() {
+		return parentInjectionAttributePropertyAccess;
+	}
+
+	@Override
+	public String getFetchableName() {
+		return getNature().getName();
+	}
+
+	@Override
+	public int getFetchableKey() {
+		return nature == Nature.INDEX || !collectionDescriptor.hasIndex() ? 0 : 1;
+	}
+
+	@Override
+	public FetchOptions getMappedFetchOptions() {
+		return this;
+	}
+
+	@Override
+	public String toString() {
+		return "EmbeddedCollectionPart(" + getNavigableRole() + ")@" + System.identityHashCode( this );
+	}
+
+	@Override
+	public Fetch generateFetch(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			FetchTiming fetchTiming,
+			boolean selected,
+			String resultVariable,
+			DomainResultCreationState creationState) {
+		// Make sure the pre-created table group for the part is registered under its navigable path
+		resolveTableGroup( fetchablePath, creationState );
+		return new EmbeddableFetchImpl(
+				fetchablePath,
+				this,
+				fetchParent,
+				FetchTiming.IMMEDIATE,
+				selected,
+				creationState
+		);
+	}
+
+	private TableGroup resolveTableGroup(NavigablePath fetchablePath, DomainResultCreationState creationState) {
+		final var fromClauseAccess = creationState.getSqlAstCreationState().getFromClauseAccess();
+		return fromClauseAccess.resolveTableGroup(
+				fetchablePath,
+				np -> {
+					final var parentTableGroup = (PluralTableGroup) fromClauseAccess.getTableGroup( np.getParent() );
+					return switch ( nature ) {
+						case ELEMENT -> parentTableGroup.getElementTableGroup();
+						case INDEX -> parentTableGroup.getIndexTableGroup();
+						default -> throw new IllegalStateException( "Could not find table group for: " + np );
+					};
+
+				}
+		);
+	}
+
+	@Nonnull
+	@Override
+	public SqlTuple toSqlExpression(
+			@Nonnull TableGroup tableGroup,
+			@Nonnull Clause clause,
+			@Nonnull SqmToSqlAstConverter walker,
+			@Nonnull SqlAstCreationState sqlAstCreationState) {
+		final var sqlExpressionResolver = sqlAstCreationState.getSqlExpressionResolver();
+		final List<Expression> expressions = new ArrayList<>();
+		getEmbeddableTypeDescriptor().forEachSelectable(
+				(columnIndex, selection) -> {
+					assert containingTableExpression.equals( selection.getContainingTableExpression() );
+					final TableReference tableReference = tableGroup.resolveTableReference(
+							tableGroup.getNavigablePath()
+									.append( getNavigableRole().getNavigableName() ),
+							this,
+							selection.getContainingTableExpression()
+					);
+					expressions.add(
+							sqlExpressionResolver.resolveSqlExpression(
+									tableReference,
+									selection
+							)
+					);
+				}
+		);
+		return new SqlTuple( expressions, this );
+	}
+
+	@Override
+	public TableGroupJoin createTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType requestedJoinType,
+			boolean fetched,
+			boolean addsPredicate,
+			SqlAstCreationState creationState) {
+		final SqlAstJoinType joinType = requireNonNullElse( requestedJoinType, SqlAstJoinType.INNER );
+		final TableGroup tableGroup = createRootTableGroupJoin(
+				navigablePath,
+				lhs,
+				explicitSourceAlias,
+				explicitSqlAliasBase,
+				requestedJoinType,
+				fetched,
+				null,
+				creationState
+		);
+
+		return new TableGroupJoin( navigablePath, joinType, tableGroup );
+	}
+
+	@Override
+	public TableGroup createRootTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType sqlAstJoinType,
+			boolean fetched,
+			@Nullable Consumer<Predicate> predicateConsumer,
+			SqlAstCreationState creationState) {
+		assert lhs.getModelPart() instanceof PluralAttributeMapping;
+		return new StandardVirtualTableGroup( navigablePath, this, lhs, fetched );
+	}
+
+	@Override
+	public String getSqlAliasStem() {
+		return sqlAliasStem;
+	}
+
+	@Nullable
+	@Override
+	public ModelPart findSubPart(@Nonnull String name, @Nullable EntityMappingType treatTargetType) {
+		return getEmbeddableTypeDescriptor().findSubPart( name, treatTargetType );
+	}
+
+	@Override
+	public void visitSubParts(@Nonnull Consumer<ModelPart> consumer, @Nullable EntityMappingType treatTargetType) {
+		getEmbeddableTypeDescriptor().visitSubParts( consumer, treatTargetType );
+	}
+
+	@Override
+	public void applySqlSelections(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull DomainResultCreationState creationState) {
+		embeddableMappingType.applySqlSelections( navigablePath, tableGroup, creationState );
+	}
+
+	@Override
+	public void applySqlSelections(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull DomainResultCreationState creationState,
+			@Nonnull BiConsumer<SqlSelection, JdbcMapping> selectionConsumer) {
+		embeddableMappingType.applySqlSelections( navigablePath, tableGroup, creationState, selectionConsumer );
+	}
+
+	@Nonnull
+	@Override
+	public JavaType<?> getExpressibleJavaType() {
+		return getJavaType();
+	}
+
+	@Nonnull
+	@Override
+	public NavigableRole getNavigableRole() {
+		return navigableRole;
+	}
+
+	@Nullable
+	@Override
+	public EntityMappingType findContainingEntityMapping() {
+		return collectionDescriptor.getAttributeMapping().findContainingEntityMapping();
+	}
+
+	@Override
+	public FetchStyle getStyle() {
+		return FetchStyle.JOIN;
+	}
+
+	@Override
+	public FetchTiming getTiming() {
+		return FetchTiming.IMMEDIATE;
+	}
+
+	@Override
+	public boolean containsTableReference(String tableExpression) {
+		if ( collectionDescriptor.isOneToMany() ) {
+			final var elementDescriptor =
+					(EntityCollectionPart)
+							collectionDescriptor.getAttributeMapping().getElementDescriptor();
+			return elementDescriptor.getPartMappingType().containsTableReference( tableExpression );
+		}
+		return collectionDescriptor.getAttributeMapping().containsTableReference( tableExpression );
+	}
+
+}

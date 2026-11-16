@@ -1,0 +1,27 @@
+package org.hibernate.orm.test.id.usertype.inet;
+
+import org.hibernate.dialect.type.internal.PostgreSQLInetJdbcType;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ * @author Vlad Mihalcea
+ */
+public class InetJdbcType extends PostgreSQLInetJdbcType {
+
+	public static final InetJdbcType INSTANCE = new InetJdbcType();
+
+	@Override
+	public JavaType<?> getRecommendedJavaType(
+			Integer precision,
+			Integer scale,
+			TypeConfiguration typeConfiguration) {
+		return typeConfiguration.getJavaTypeRegistry().resolveDescriptor( Inet.class );
+	}
+
+	@Override
+	protected <X> X fromString(String string, JavaType<X> javaType, WrapperOptions options) {
+		return javaType.wrap( string, options );
+	}
+}

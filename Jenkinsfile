@@ -1,0 +1,267 @@
+import groovy.transform.Field
+
+/*
+ * See https://github.com/hibernate/hibernate-jenkins-pipeline-helpers
+ */
+@Library('hibernate-jenkins-pipeline-helpers') _
+import org.hibernate.jenkins.pipeline.helpers.job.JobHelper
+
+@Field final String DEFAULT_JDK_VERSION = '25'
+@Field final String DEFAULT_JDK_TOOL = "OpenJDK ${DEFAULT_JDK_VERSION} Latest"
+@Field final String NODE_PATTERN_BASE = 'Worker&&Containers'
+@Field List<BuildEnvironment> environments
+
+this.helper = new JobHelper(this)
+
+helper.runWithNotification {
+env.COMMON_GRADLE_ARGS = '-Igradle/init.gradle'
+
+stage('Configure') {
+	requireApprovalForPullRequest 'hibernate'
+
+	// Most environments have been moved to GitHub Actions (ci.yml / nightly.yml).
+	// This Jenkinsfile retains only:
+	// - s390x (architecture-specific hardware)
+	// - Label-triggered tests requiring Jenkins infrastructure
+	//   (HANA Cloud lockable resource)
+	//   CockroachDB: Dedicated Jenkins worker node
+	this.environments = [
+		new BuildEnvironment( tagPrefix: 'Semeru ', node: 's390x' )
+	];
+
+	if ( env.CHANGE_ID ) {
+		if ( pullRequest.labels.contains( 'cockroachdb' ) ) {
+			this.environments.add( new BuildEnvironment( dbName: 'cockroachdb', node: 'cockroachdb', longRunning: true ) )
+		}
+		if ( pullRequest.labels.contains( 'hana' ) ) {
+			this.environments.add( new BuildEnvironment( dbName: 'hana_cloud', dbLockableResource: 'hana-cloud', dbLockResourceAsHost: true ) )
+		}
+	}
+
+	helper.configure {
+		file 'job-configuration.yaml'
+		// We don't require the following, but the build helper plugin apparently does
+		jdk {
+			defaultTool DEFAULT_JDK_TOOL
+		}
+		maven {
+			defaultTool 'Apache Maven 3.8'
+		}
+	}
+	properties([
+			buildDiscarder(
+					logRotator(daysToKeepStr: '30', numToKeepStr: '10')
+			),
+			// If two builds are about the same branch or pull request,
+			// the older one will be aborted when the newer one starts.
+			disableConcurrentBuilds(abortPrevious: true),
+			helper.generateNotificationProperty()
+	])
+}
+
+// Avoid running the pipeline on branch indexing
+if (currentBuild.getBuildCauses().toString().contains('BranchIndexingCause')) {
+  	print "INFO: Build skipped due to trigger being Branch Indexing"
+	currentBuild.result = 'NOT_BUILT'
+  	return
+}
+
+stage('Build') {
+	Map<String, Closure> executions = [:]
+	Map<String, Map<String, String>> state = [:]
+	environments.each { BuildEnvironment buildEnv ->
+		state[buildEnv.tag] = [:]
+		executions.put(buildEnv.tag, {
+			runBuildOnNode(buildEnv.node ?: NODE_PATTERN_BASE) {
+				def mainJavaHome
+				if ( buildEnv.mainJdkVersion ) {
+					mainJavaHome = tool(name: "OpenJDK ${buildEnv.mainJdkVersion} Latest", type: 'jdk')
+				}
+				def testJavaHome
+				if ( buildEnv.testJdkVersion ) {
+					testJavaHome = tool(name: "OpenJDK ${buildEnv.testJdkVersion} Latest", type: 'jdk')
+				}
+				def javaHome = tool(name: DEFAULT_JDK_TOOL, type: 'jdk')
+				// Use withEnv instead of setting env directly, as that is global!
+				// See https://github.com/jenkinsci/pipeline-plugin/blob/master/TUTORIAL.md
+				withEnv(["JAVA_HOME=${javaHome}", "PATH+JAVA=${javaHome}/bin"]) {
+				    state[buildEnv.tag]['additionalOptions'] = ''
+					if ( buildEnv.mainJdkVersion ) {
+						state[buildEnv.tag]['additionalOptions'] = state[buildEnv.tag]['additionalOptions'] +
+								" -Pmain.jdk.version=${buildEnv.mainJdkVersion}"
+					}
+					if ( buildEnv.testJdkVersion ) {
+						state[buildEnv.tag]['additionalOptions'] = state[buildEnv.tag]['additionalOptions'] +
+								" -Ptest.jdk.version=${buildEnv.testJdkVersion}"
+					}
+					if ( buildEnv.mainJdkVersion || buildEnv.testJdkVersion ) {
+						state[buildEnv.tag]['additionalOptions'] = state[buildEnv.tag]['additionalOptions'] +
+								" -Porg.gradle.java.installations.paths=${[javaHome, mainJavaHome, testJavaHome].findAll { it != null }.join(',')}"
+					}
+					if ( buildEnv.testJdkLauncherArgs ) {
+						state[buildEnv.tag]['additionalOptions'] = state[buildEnv.tag]['additionalOptions'] +
+								" -Ptest.jdk.launcher.args='${buildEnv.testJdkLauncherArgs}'"
+					}
+					if ( buildEnv.node ) {
+						state[buildEnv.tag]['additionalOptions'] = state[buildEnv.tag]['additionalOptions'] +
+								" -Pci.node=${buildEnv.node}"
+					}
+					state[buildEnv.tag]['containerName'] = null;
+					stage('Checkout') {
+						checkout scm
+					}
+					tryFinally({
+						stage('Start database') {
+							switch (buildEnv.dbName) {
+								case "cockroachdb":
+									docker.image('cockroachdb/cockroach:v26.3.2').pull()
+									sh "./db.sh cockroachdb"
+									state[buildEnv.tag]['containerName'] = "cockroach"
+									break;
+							}
+						}
+						stage('Test') {
+							String args = "${buildEnv.additionalOptions ?: ''} ${state[buildEnv.tag]['additionalOptions'] ?: ''}"
+							withEnv(["RDBMS=${buildEnv.dbName}", 'CI_SYSTEM=jenkins']) {
+								tryFinally({
+									if (buildEnv.dbLockableResource == null) {
+                                        timeout( [time: buildEnv.longRunning ? 480 : 120, unit: 'MINUTES'] ) {
+                                            ciBuild buildEnv, args
+                                        }
+									}
+									else {
+										lock(label: buildEnv.dbLockableResource, quantity: 1, variable: 'LOCKED_RESOURCE') {
+											if ( buildEnv.dbLockResourceAsHost ) {
+												args += " -DdbHost=${LOCKED_RESOURCE}"
+											}
+											timeout( [time: buildEnv.longRunning ? 480 : 120, unit: 'MINUTES'] ) {
+												ciBuild buildEnv, args
+											}
+										}
+									}
+								}, {
+									junit '**/target/test-results/test/*.xml,**/target/test-results/testKitTest/*.xml'
+								})
+							}
+						}
+					}, { // Finally
+						if ( state[buildEnv.tag]['containerName'] != null ) {
+							sh "docker rm -f ${state[buildEnv.tag]['containerName']}"
+						}
+					})
+				}
+			}
+		})
+	}
+	parallel(executions)
+}
+
+} // End of helper.runWithNotification
+
+// Job-specific helpers
+
+class BuildEnvironment {
+	String mainJdkVersion
+	String testJdkVersion
+	String testJdkLauncherArgs
+	String dbName = 'h2'
+	String node
+	String dbLockableResource
+	boolean dbLockResourceAsHost
+	String additionalOptions
+	boolean longRunning
+	String tagPrefix
+
+	String toString() { getTag() }
+	String getTag() { "${tagPrefix}${node ? node + "_" : ''}${testJdkVersion ? 'jdk_' + testJdkVersion + '_' : '' }${dbName}" }
+	String getRdbms() { dbName.contains("_") ? dbName.substring(0, dbName.indexOf('_')) : dbName }
+}
+
+void runBuildOnNode(String label, Closure body) {
+	node( label ) {
+		pruneDockerContainers()
+        tryFinally(body, { // Finally
+        	// If this is a PR, we clean the workspace at the end
+        	if ( env.CHANGE_BRANCH != null ) {
+        		cleanWs()
+        	}
+        	pruneDockerContainers()
+        })
+	}
+}
+
+void ciBuild(buildEnv, String args) {
+	if ( !helper.scmSource.pullRequest ) {
+		// Not a PR: we can pass credentials to the build, allowing it to populate the build cache
+		// and to publish build scans directly.
+
+		// On untrusted nodes, we use the same access key as for PRs:
+		// it has limited access, essentially it can only push build scans.
+		def develocityCredentialsId = buildEnv.node ? 'develocity.commonhaus.dev-access-key-pr' : 'develocity.commonhaus.dev-access-key'
+
+		withCredentials([string(credentialsId: develocityCredentialsId,
+				variable: 'DEVELOCITY_ACCESS_KEY')]) {
+			withGradle { // withDevelocity, actually: https://plugins.jenkins.io/gradle/#plugin-content-capturing-build-scans-from-jenkins-pipeline
+				sh "./ci/build.sh \$COMMON_GRADLE_ARGS $args"
+			}
+		}
+	}
+	else if ( buildEnv.node != 's390x' ) { // We couldn't get the code below to work on s390x for some reason.
+		// Pull request: we can't pass credentials to the build, since we'd be exposing secrets to e.g. tests.
+		// We do the build first, then publish the build scan separately.
+		tryFinally({
+			sh "./ci/build.sh \$COMMON_GRADLE_ARGS $args"
+		}, { // Finally
+			withCredentials([string(credentialsId: 'develocity.commonhaus.dev-access-key-pr',
+					variable: 'DEVELOCITY_ACCESS_KEY')]) {
+				withGradle { // withDevelocity, actually: https://plugins.jenkins.io/gradle/#plugin-content-capturing-build-scans-from-jenkins-pipeline
+					// Don't fail a build if publishing fails
+					sh "./gradlew \$COMMON_GRADLE_ARGS buildScanPublishPrevious || true"
+				}
+			}
+		})
+	}
+	else {
+		// Don't do build scans
+		sh "./ci/build.sh \$COMMON_GRADLE_ARGS $args"
+	}
+}
+
+void pruneDockerContainers() {
+	if ( !sh( script: 'command -v docker || true', returnStdout: true ).trim().isEmpty() ) {
+		sh 'docker container prune -f || true'
+		sh 'docker image prune -f || true'
+		sh 'docker network prune -f || true'
+		sh 'docker volume prune -f || true'
+	}
+}
+
+// try-finally construct that properly suppresses exceptions thrown in the finally block.
+static def tryFinally(Closure main, Closure ... finallies) {
+	def mainFailure = null
+	try {
+		main()
+	}
+	catch (Throwable t) {
+		mainFailure = t
+		throw t
+	}
+	finally {
+		finallies.each {it ->
+			try {
+				it()
+			}
+			catch (Throwable t) {
+				if ( mainFailure ) {
+					mainFailure.addSuppressed( t )
+				}
+				else {
+					mainFailure = t
+				}
+			}
+		}
+	}
+	if ( mainFailure ) { // We may reach here if only the "finally" failed
+		throw mainFailure
+	}
+}

@@ -1,0 +1,136 @@
+package org.hibernate.engine.spi;
+
+import java.io.Serializable;
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+
+/**
+ * A strategy for determining if an identifier value is an identifier of
+ * a new transient instance or a previously persistent transient instance.
+ * The strategy is determined by the {@code unsaved-value} attribute in
+ * the mapping file.
+ *
+ * @author Gavin King
+ */
+public class IdentifierValue implements UnsavedValueStrategy {
+
+	private final @Nullable Object value;
+
+	/**
+	 * Always assume the transient instance is newly instantiated
+	 */
+	public static final IdentifierValue ANY = new IdentifierValue() {
+		@Override
+		public Boolean isUnsaved(@Nullable Object id) {
+			CORE_LOGGER.idUnsavedValueStrategy( "ANY" );
+			return Boolean.TRUE;
+		}
+
+		@Override
+		public @Nullable Object getDefaultValue(@Nullable Object currentValue) {
+			return currentValue;
+		}
+
+		@Override
+		public String toString() {
+			return "SAVE_ANY";
+		}
+	};
+
+	/**
+	 * Never assume the transient instance is newly instantiated
+	 */
+	public static final IdentifierValue NONE = new IdentifierValue() {
+		@Override
+		public Boolean isUnsaved(@Nullable Object id) {
+			CORE_LOGGER.idUnsavedValueStrategy( "NONE" );
+			return Boolean.FALSE;
+		}
+
+		@Override
+		public @Nullable Object getDefaultValue(@Nullable Object currentValue) {
+			return currentValue;
+		}
+
+		@Override
+		public String toString() {
+			return "SAVE_NONE";
+		}
+	};
+
+	/**
+	 * Assume the transient instance is newly instantiated if the identifier
+	 * is null.
+	 */
+	public static final IdentifierValue NULL = new IdentifierValue() {
+		@Override
+		public Boolean isUnsaved(@Nullable Object id) {
+			CORE_LOGGER.idUnsavedValueStrategy( "NULL" );
+			return id == null;
+		}
+
+		@Override
+		public @Nullable Serializable getDefaultValue(@Nullable Object currentValue) {
+			return null;
+		}
+
+		@Override
+		public String toString() {
+			return "SAVE_NULL";
+		}
+	};
+
+	/**
+	 * Assume nothing.
+	 */
+	public static final IdentifierValue UNDEFINED = new IdentifierValue() {
+		@Override
+		public @Nullable Boolean isUnsaved(@Nullable Object id) {
+			CORE_LOGGER.idUnsavedValueStrategy( "UNDEFINED" );
+			return null;
+		}
+
+		@Override
+		public @Nullable Serializable getDefaultValue(@Nullable Object currentValue) {
+			return null;
+		}
+
+		@Override
+		public String toString() {
+			return "UNDEFINED";
+		}
+	};
+
+	protected IdentifierValue() {
+		this.value = null;
+	}
+
+	/**
+	 * Assume the transient instance is newly instantiated if
+	 * its identifier is null or equal to {@code value}
+	 */
+	public IdentifierValue(Object value) {
+		this.value = value;
+	}
+
+	/**
+	 * Does the given identifier belong to a new instance?
+	 */
+	@Override
+	public @Nullable Boolean isUnsaved(@Nullable Object id) {
+		CORE_LOGGER.idUnsavedValue( value );
+		return id == null || id.equals( value );
+	}
+
+	@Override
+	public @Nullable Object getDefaultValue(@Nullable Object currentValue) {
+		return value;
+	}
+
+	@Override
+	public String toString() {
+		return "identifier unsaved-value: " + value;
+	}
+}

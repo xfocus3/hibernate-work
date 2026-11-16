@@ -1,0 +1,24 @@
+<entity-mappings xmlns="http://www.hibernate.org/xsd/orm/mapping"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 version="7.0">
+    <package>org.hibernate.orm.test.boot.models.xml.column</package>
+    <entity class="AnEntity" metadata-complete="true" access="FIELD">
+        <secondary-table name="tbl"/>
+        <attributes>
+            <id name="id"/>
+            <basic name="name" >
+                <column name="nombre"
+                        length="256"
+                        table="tbl"
+                        nullable="true"
+                        insertable="true"
+                        updatable="true"
+                        unique="true"
+                        options="the options" >
+                    <comment>The name column</comment>
+                    <check-constraint constraint="nombre is not null"/>
+                </column>
+            </basic>
+        </attributes>
+    </entity>
+</entity-mappings>

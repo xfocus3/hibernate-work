@@ -1,0 +1,34 @@
+package org.hibernate.orm.test.sql.ast;
+
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.query.Query;
+import org.hibernate.query.internal.SelectionQueryImpl;
+import org.hibernate.query.sqm.sql.spi.SqmTranslation;
+import org.hibernate.query.sqm.sql.internal.StandardSqmTranslator;
+import org.hibernate.query.sqm.sql.spi.SqmTranslationRequest;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelectStatement;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SqlAstHelper {
+	public static SelectStatement translateHqlSelectQuery(String hql, Class<?> returnType, SessionImplementor session) {
+		final Query<?> query = session.createQuery( hql, returnType );
+		final SelectionQueryImpl<?> hqlQuery = (SelectionQueryImpl<?>) query;
+		final SqmSelectStatement<?> sqmStatement = hqlQuery.getSqmStatement();
+
+		final StandardSqmTranslator<SelectStatement> sqmConverter = new StandardSqmTranslator<>( new SqmTranslationRequest.Select(
+				sqmStatement,
+				hqlQuery.getQueryOptions(),
+				hqlQuery.getDomainParameterXref(),
+				hqlQuery.getParameterBindings(),
+				session.getLoadQueryInfluencers(),
+				session.getFactory().getSqlTranslationEngine(),
+				true
+		) );
+
+		final SqmTranslation<SelectStatement> sqmInterpretation = sqmConverter.translate();
+		return sqmInterpretation.getSqlAst();
+	}
+}

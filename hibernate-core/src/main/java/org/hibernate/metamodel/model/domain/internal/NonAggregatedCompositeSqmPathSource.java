@@ -1,0 +1,42 @@
+package org.hibernate.metamodel.model.domain.internal;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.model.domain.ManagedDomainType;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.tree.spi.domain.NonAggregatedCompositeSimplePath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+
+/**
+ * Support for non-aggregated composite values
+ *
+ * @author Steve Ebersole
+ */
+public class NonAggregatedCompositeSqmPathSource<J>
+		extends AbstractSqmPathSource<J> implements CompositeSqmPathSource<J> {
+
+	private final ManagedDomainType<J> container;
+
+	public NonAggregatedCompositeSqmPathSource(
+			String localName,
+			SqmPathSource<J> pathModel,
+			BindableType bindableType,
+			ManagedDomainType<J> container) {
+		super( localName, pathModel, container, bindableType );
+		this.container = container;
+	}
+
+	@Override
+	public @Nullable SqmPathSource<?> findSubPathSource(String name) {
+		return (SqmPathSource<?>) container.findAttribute( name );
+	}
+
+	@Override
+	public SqmPath<J> createSqmPath(SqmPath<?> lhs, @Nullable SqmPathSource<?> intermediatePathSource) {
+		return new NonAggregatedCompositeSimplePath<>(
+				PathHelper.append( lhs, this, intermediatePathSource ),
+				pathModel,
+				lhs,
+				lhs.nodeBuilder()
+		);
+	}
+}

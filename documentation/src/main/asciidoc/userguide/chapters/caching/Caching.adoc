@@ -1,0 +1,636 @@
+[[caching]]
+== Caching
+:jcache-project-dir: {root-project-dir}/hibernate-jcache
+:example-dir-caching: {jcache-project-dir}/src/test/java/org/hibernate/orm/test/caching
+
+Caching can reduce database work when applications repeatedly access the same data.
+Its value depends on reuse, mutation frequency, entry size, and the cost of maintaining consistency.
+Measure these costs with representative workloads rather than enabling caching for every mapping or query.
+
+[[caching-scopes]]
+=== Cache scopes and consistency
+
+The persistence context, also called the _first-level cache_, maintains managed entity identity and state
+for an `EntityManager` or `Session`. It is part of the stateful programming model, rather than an optional
+cache enabled by default. Its lifetime follows the persistence context, which may span several transactions;
+see <<pc>> for context lifecycle and managed state.
+
+The _second-level cache_ shares persistent state across persistence contexts using a configured cache provider.
+It may be local to a factory or shared through a distributed provider, depending on the integration and configuration.
+Its domain-data regions hold entity state, natural-id resolutions, and collection contents.
+A cache hit ordinarily hydrates a managed entity belonging to the receiving context:
+it does not share one managed Java object between contexts.
+The optional <<caching-reference-entries,immutable reference-entry optimization>> is a special case.
+
+The _query-results cache_ stores results for particular query executions and checks their validity against
+changes to the query's affected tables, called _query spaces_. It is separate from the domain-data cache.
+The _query-plan cache_ instead reuses query interpretation and execution plans; it does not cache database results.
+See <<statistics-query-plan-cache>> for measuring query-plan reuse.
+
+Stateless operations have no persistent first-level cache, but Hibernate's `StatelessSession` uses the
+second-level cache by default. See <<batch-stateless-session-example>> for that API.
+
+[IMPORTANT]
+====
+Hibernate cannot automatically observe arbitrary changes made by other applications, direct JDBC operations,
+or database-trigger side effects. A trigger may change another cached row even within a table Hibernate knows about,
+without updating that row's entity-cache entry.
+Expiry can limit how long an entry is retained, but does not guarantee immediate consistency with external writers.
+Coordinate invalidation or explicitly evict affected data; see <<caching-invalidation>>.
+====
+
+[[caching-config]]
+=== Enabling a cache provider
+
+[[caching-config-provider]]
+==== Region factories and regions
+
+`org.hibernate.cache.spi.RegionFactory` connects Hibernate to a cache provider.
+// suppress inspection "AsciiDocLinkResolve"
+The setting <<settings-hibernate.cache.region.factory_class,`hibernate.cache.region.factory_class`>> accepts
+a registered strategy name, an implementation class or class name, or an implementation instance.
+
+The `hibernate-jcache` module supplies the built-in integration for <<caching-provider-jcache,JCache>>;
+a JCache implementation must also be supplied. <<caching-provider-infinispan,Infinispan>> supplies its own Hibernate integration.
+Choose an integration compatible with the Hibernate version in use.
+
+A _region_ is a named grouping of cache entries with provider-defined storage and retention policies.
+Entity hierarchies, collections, natural-id resolutions, and query results may have separate regions.
+// suppress inspection "AsciiDocLinkResolve"
+The setting <<settings-hibernate.cache.region_prefix,`hibernate.cache.region_prefix`>> qualifies region names
+when multiple factories share a provider. A prefix separates names; it does not create an independent cache manager.
+
+[[caching-config-properties]]
+==== Enabling caching and selecting defaults
+
+Second-level caching is enabled by default when a caching region factory is configured;
+without one, Hibernate uses `NoCachingRegionFactory` and caching is disabled.
+// suppress inspection "AsciiDocLinkResolve"
+<<settings-hibernate.cache.use_second_level_cache,`hibernate.cache.use_second_level_cache=false`>>
+disables second-level caching globally, including explicit cache mappings.
+Query-results caching additionally requires <<caching-query-configuration,global enablement>>
+and an individual query marked cacheable.
+
+Configure the provider and the regions it will use, then select cacheable mappings and concurrency strategies.
+See <<bootstrap>> for bootstrap entry points. The generated settings appendix documents
+// suppress inspection "AsciiDocLinkResolve"
+<<settings-hibernate.cache.use_minimal_puts,minimal puts>>,
+// suppress inspection "AsciiDocLinkResolve"
+<<settings-hibernate.cache.use_structured_entries,structured entries>>,
+// suppress inspection "AsciiDocLinkResolve"
+and <<settings-hibernate.cache.default_cache_concurrency_strategy,the default concurrency strategy>>.
+Minimal puts reduce redundant cache writes at the cost of additional reads; providers choose suitable defaults.
+Structured entries make cached values easier to inspect, with a performance cost.
+
+// suppress inspection "AsciiDocLinkResolve"
+The deprecated <<settings-hibernate.cache.keys_factory,`hibernate.cache.keys_factory`>> setting is honored
+only by the Infinispan integration. Its key factory must preserve uniqueness across entity types and tenants;
+use the integration's documentation before changing its default.
+
+[[caching-mappings]]
+=== Cache mappings and concurrency strategies
+
+`@jakarta.persistence.Cacheable` selects entity caching under the persistence unit's `SharedCacheMode`.
+Hibernate's default is `ENABLE_SELECTIVE`; `UNSPECIFIED` also resolves to selective behavior.
+Use `shared-cache-mode` in `persistence.xml` or the setting
+// suppress inspection "AsciiDocLinkResolve"
+<<settings-jakarta.persistence.sharedCache.mode,`jakarta.persistence.sharedCache.mode`>> to select the standard policy:
+
+[cols="1,3",options="header"]
+|===
+|Mode |Standard selection policy
+|`ENABLE_SELECTIVE` |Cache entities explicitly marked `@Cacheable(true)`.
+|`DISABLE_SELECTIVE` |Cache entities except those explicitly marked `@Cacheable(false)`.
+|`ALL` |Select all entities, regardless of `@Cacheable`.
+|`NONE` |Select no entities through this standard policy.
+|`UNSPECIFIED` |Use provider-defined behavior; Hibernate uses selective selection.
+|===
+
+Prefer selecting cacheable data explicitly. Hibernate's `@org.hibernate.annotations.Cache` is an explicit
+Hibernate cache mapping and enables a root entity independently of this standard selection policy.
+Consequently, `SharedCacheMode.NONE` does not suppress explicit Hibernate `@Cache` mappings.
+Use `hibernate.cache.use_second_level_cache=false` to disable the second-level cache globally.
+
+`@Cache` specifies:
+
+`usage`:: The concurrency strategy for the root entity or collection.
+`region`:: The region name; an empty name uses the mapping's default region.
+`includeLazy`:: A boolean, defaulting to `true`, controlling whether loaded lazy entity attributes are eligible
+  for inclusion in an entity cache entry. `false` excludes those lazy attributes.
+  It does not initialize unloaded attributes or specify an association fetch graph.
+
+When an entity is selected through `@Cacheable` without an explicit strategy, Hibernate uses the configured
+or provider-supplied default concurrency strategy. Prefer an explicit strategy appropriate to the data.
+
+==== Choosing a concurrency strategy
+
+[cols="1,3",options="header"]
+|===
+|Strategy |Behavior and suitable workloads
+|`READ_ONLY` |For entities whose state is not updated, such as immutable reference data.
+  Updating a cached entity using this strategy is unsupported; deleting it can invalidate its entry.
+|`NONSTRICT_READ_WRITE` |Invalidates entries around updates without soft locks. Concurrent access may observe
+  stale data; use only when the application's consistency requirements allow this.
+|`READ_WRITE` |Uses soft-lock markers during updates to prevent competing cache reads and stale puts.
+  Readers encountering a marker use the database. Use versioned entities; this is not serializable isolation.
+|`TRANSACTIONAL` |Delegates transactional cache consistency to a suitable provider and transaction integration.
+  The strategy itself does not establish serializable database isolation.
+|===
+
+Supported strategies and transaction guarantees depend on the provider.
+A cache strategy does not replace database isolation or optimistic locking.
+Soft locks are cache coordination markers, not database row locks.
+
+[[caching-mappings-inheritance]]
+==== Entity inheritance
+
+Declare Hibernate `@Cache` on the root entity. Subclasses share the root's region and concurrency semantics;
+placing `@Cache` on a subclass is rejected during bootstrap.
+Jakarta Persistence allows `@Cacheable` to be inherited or overridden by a subclass,
+which is distinct from defining a new Hibernate cache region or concurrency strategy there.
+Keep caching policy consistent across a hierarchy when practical, and verify selective subclass behavior
+for the actual mappings and lookup paths used by the application.
+See <<entity-inheritance>> for inheritance mappings.
+
+[[caching-entity]]
+=== What the domain-data cache stores
+
+==== Entity state
+
+Entity entries normally contain disassembled attribute values, similar to the persistent representation,
+including association identifiers where applicable. They do not recursively store the state of associated entities.
+A hit on an entity entry therefore does not guarantee that all associated state can be obtained without SQL.
+See <<fetching>> for loading requirements and operation-specific fetch plans.
+
+The following model uses explicit regions for entity state, natural-id resolutions, and a value collection:
+
+[[caching-entity-mapping-example]]
+.A cacheable entity and collection
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-mapping]
+----
+====
+
+[[caching-entity-jpa-example]]
+.Loading an entity using the standard API
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-entity-load]
+----
+====
+
+After an initial load populates the entity cache, the same identifier may be served from the cache in another
+persistence context. Those contexts receive distinct managed objects with the cached state.
+A repeat lookup in the same context would demonstrate first-level identity reuse instead.
+
+[[caching-entity-native-example]]
+The same `find()` call is available through `Session`.
+
+[[caching-reference-entries]]
+===== Immutable reference entries
+
+// suppress inspection "AsciiDocLinkResolve"
+The opt-in setting <<settings-hibernate.cache.use_reference_entries,`hibernate.cache.use_reference_entries`>>
+allows direct references for eligible immutable entities without associations.
+Selecting `READ_ONLY` alone does not make a mutable entity eligible.
+The provider must be suitable for retaining these references; this is not a general alternative to disassembled
+entries in a distributed cache.
+
+[[caching-entity-natural-id-mapping-example]]
+==== Natural-id resolutions
+
+The `@NaturalIdCache` declaration in <<caching-entity-mapping-example,the model above>> enables a separate
+natural-id-to-primary-key cache. `@NaturalId` and entity caching alone do not enable that resolution cache.
+See <<naturalid>> for natural-id declarations and lookup APIs.
+
+[[caching-entity-natural-id-example]]
+.Loading by natural id
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-natural-id]
+----
+====
+
+A resolution-cache hit supplies the primary key; loading the entity state is a separate step.
+That step can use the current persistence context, the entity cache, or the database.
+Evicting entity state does not evict the natural-id resolution, and evicting the resolution does not evict entity state.
+
+[[caching-collection]]
+==== Collection contents
+
+Place `@Cache` on a persistent collection attribute to cache that collection independently of its owner.
+For value collections, the entry contains disassembled basic or embeddable values and the collection structure.
+For entity associations, it contains entity references/identifiers and collection structure, not associated entity state.
+
+[[caching-collection-mapping-example]]
+The `phones` value collection in <<caching-entity-mapping-example,the model above>> has its own `guide.phones` region.
+A cached collection of entities can still require entity loads when those entities are absent from the entity cache.
+See <<collections>> for collection mappings.
+
+[[caching-collection-example]]
+.Initializing a cached collection
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-collection]
+----
+====
+
+Collections are populated in the cache when loaded. Changing a collection invalidates its entry rather than
+writing through its complete new contents; a later load can repopulate it from the database.
+For a bidirectional association, manage both sides consistently.
+// suppress inspection "AsciiDocLinkResolve"
+The optional <<settings-hibernate.cache.auto_evict_collection_cache,`hibernate.cache.auto_evict_collection_cache`>>
+setting tracks owning-side changes to invalidate a cached inverse collection when it was not updated in memory.
+It is disabled by default and does not replace maintaining the in-memory association correctly.
+
+[[caching-query]]
+=== Query-results caching
+
+Use query-results caching when sufficiently frequent repeated executions outweigh cache population,
+validation, and invalidation costs. Results for rapidly changing tables or many distinct parameter combinations
+may have little reuse. Measure the workload before selecting queries.
+
+[[caching-query-configuration]]
+.Enabling query-results caching
+====
+[source,xml]
+----
+<property name="hibernate.cache.use_query_cache" value="true"/>
+----
+====
+
+Global enablement does not automatically cache each query. Explicitly mark the query cacheable:
+
+[[caching-query-jpa-example]]
+.Enabling query-results caching through a hint
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-query-standard]
+----
+====
+
+The hint is a Hibernate extension usable through the standard query API.
+Hibernate also exposes a typed method for the same choice:
+
+[[caching-query-native-example]]
+.Enabling query-results caching using Hibernate
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-query-native]
+----
+====
+
+==== Result identity and invalidation
+
+The result key distinguishes the generated SQL, bound parameters, pagination, and applicable filter/tenant context.
+Different parameter values or pages do not reuse one identical result entry.
+
+Hibernate validates cached results using update timestamps for the query's spaces.
+A mutation to an affected space can invalidate results even if its changed row would not match the query predicate.
+Hibernate does not reevaluate each cached predicate to invalidate only matching rows.
+See <<caching-invalidation>> for mutations and external writers.
+
+[[caching-query-cache-layout]]
+==== Query cache layouts
+
+Entity and collection data in cached query results use a configurable layout:
+
+[cols="1,3",options="header"]
+|===
+|Layout |Cached representation
+|`FULL` |The fetched state needed to reconstruct the query result. This does not mean every attribute
+  and association of each entity is initialized.
+|`SHALLOW` |Entity identifiers or collection owner keys. Reconstruction may use domain-data entries
+  or additional database loads when those entries are missing.
+|`SHALLOW_WITH_DISCRIMINATOR` |A shallow entity representation also retaining its discriminator,
+  which can avoid additional type-resolution work for polymorphic results.
+|`AUTO` |The default: shallow for cacheable entities and collections, full otherwise.
+|===
+
+A shallow layout works best with a high domain-cache hit rate. A query-results hit can still produce SQL
+when reconstructing entity or collection state. Full entries can avoid those loads at the cost of larger
+query-result entries and duplication of state.
+
+// suppress inspection "AsciiDocLinkResolve"
+The global setting <<settings-hibernate.cache.query_cache_layout,`hibernate.cache.query_cache_layout`>>
+selects a default. `@QueryCacheLayout` on an entity or persistent collection overrides it for that mapping.
+The earlier `Person` uses `SHALLOW`; this entity uses `FULL` without a separate entity cache:
+
+.A full query-cache layout
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-layout]
+----
+====
+
+[[caching-query-region]]
+==== Result and timestamp regions
+
+Enabling query-results caching creates the default regions:
+
+`default-query-results-region`:: Cached query results.
+`default-update-timestamps-region`:: Update timestamps for query spaces, used to check result validity.
+
+Region prefixes and provider integration may qualify the physical cache names.
+
+[IMPORTANT]
+====
+Do not configure expiry or size-based eviction for the timestamp region while dependent results can remain cached.
+At minimum, timestamps must outlive every dependent query-result entry.
+Evicting timestamps can make stale cached results appear valid; an LRU policy is unsuitable for this region.
+====
+
+Named query-results regions allow different result retention policies:
+
+[[caching-query-region-jpa-example]]
+.Selecting a query-results region
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-query-region]
+----
+====
+
+[[caching-query-region-native-example]]
+The Hibernate equivalent is `setCacheRegion("guide.names")` on a cacheable query.
+Region selection does not change result-key identity or the timestamp validation rules.
+
+[[caching-management]]
+=== Cache modes, invalidation, and eviction
+
+==== Retrieval and storage modes
+
+The standard `CacheRetrieveMode` controls shared-cache reads; `CacheStoreMode` controls population.
+Hibernate's `CacheMode` combines those choices:
+
+[cols="1,2,3",options="header"]
+|===
+|Hibernate mode |Standard modes |Loading behavior
+|`NORMAL` |retrieve `USE`, store `USE` |Read and populate shared caches.
+|`GET` |retrieve `USE`, store `BYPASS` |Read without populating cache entries.
+|`IGNORE` |retrieve `BYPASS`, store `BYPASS` |Bypass reads and population.
+|`PUT` |retrieve `BYPASS`, store `USE` |Load and populate, subject to minimal-put optimization.
+|`REFRESH` |retrieve `BYPASS`, store `REFRESH` |Load and force replacement of applicable cache entries.
+|`REFRESH_SESSION` |Same shared-cache modes as `REFRESH`; no standard equivalent for its additional effect
+  |Also refresh already managed entity state on supported loading paths.
+|===
+
+Cache bypass does not suppress invalidation when Hibernate changes persistent data.
+In Hibernate, `CacheStoreMode.REFRESH` implies retrieval bypass even if retrieval `USE` was requested.
+`REFRESH` forces replacement despite minimal-put optimization; `PUT` may avoid a redundant put.
+
+// suppress inspection "AsciiDocLinkResolve"
+Factory settings <<settings-jakarta.persistence.cache.retrieveMode,`jakarta.persistence.cache.retrieveMode`>>
+// suppress inspection "AsciiDocLinkResolve"
+and <<settings-jakarta.persistence.cache.storeMode,`jakarta.persistence.cache.storeMode`>> supply defaults.
+Context-level modes and operation-specific options can override defaults.
+An operation's cache bypass also does not ordinarily bypass managed entity identity in the persistence context.
+An entity graph can supply these standard cache modes for individual attribute nodes;
+see <<fetching-graph-options>>. These options govern cache interaction for that fetch,
+not whether the mapping is eligible for caching.
+
+[[caching-management-cache-mode-entity-jpa-example]]
+.Cache modes as find options
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-find-options]
+----
+====
+
+[[caching-management-cache-mode-entity-native-example]]
+Hibernate's `CacheMode` may also be passed as a find option. Session-wide `setCacheMode()` changes
+subsequent operations; restore the prior mode when temporarily changing it on a reused session.
+
+[[caching-management-cache-mode-query-jpa-example]]
+.Cache modes on a standard query
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-query-modes]
+----
+====
+
+[[caching-management-cache-mode-query-native-example]]
+Hibernate queries offer `setCacheMode()` for the combined mode.
+The same standard choices can be supplied through the `jakarta.persistence.cache.retrieveMode`
+and `jakarta.persistence.cache.storeMode` hints or direct-loading properties.
+
+[[caching-refresh]]
+==== Refreshing cached and managed state
+
+`REFRESH` refreshes applicable shared-cache entries as data is loaded, but normally preserves state
+of entities already managed in the current persistence context.
+`REFRESH_SESSION` additionally overwrites existing managed entity state on supported loading paths.
+It may overwrite unflushed changes; use it deliberately, like an explicit refresh operation.
+See <<pc>> for refreshing managed entities.
+
+In the next example, the database row was changed through JDBC after the entity was loaded.
+The managed entity has no pending edits. `REFRESH` returns that same object without replacing its state;
+`REFRESH_SESSION` then updates its state from the database:
+
+.Refreshing shared-cache entries versus managed state
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-refresh-session]
+----
+====
+
+[[caching-query-region-store-mode-jpa-example]]
+For cached query results, a standard `CacheStoreMode.REFRESH` override or Hibernate's `CacheMode.REFRESH`
+bypasses the old result and replaces the result for the executed key.
+
+[[caching-query-region-store-mode-native-example]]
+.Refreshing one cached query result
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-query-refresh]
+----
+====
+
+This refresh affects the shown query execution, including its parameter value, not every key in `guide.names`.
+Other cached results in that region need their own refresh, normal invalidation, or explicit eviction.
+
+[[caching-invalidation]]
+==== Mutation and external-write boundaries
+
+Hibernate coordinates cache updates or invalidation for normal ORM changes according to the configured strategy.
+Bulk HQL/Criteria mutations clean up affected domain regions and invalidate query results using the known mappings
+and spaces. This cleanup does not update objects already managed in the persistence context;
+see <<batch-bulk-hql>> for bulk operations.
+
+Native mutations executed through Hibernate can declare synchronization metadata, such as affected entity classes
+or query spaces, using `addSynchronizedEntityClass()` or `addSynchronizedQuerySpace()`.
+This identifies affected regions and helps Hibernate decide what to flush and invalidate.
+Without this metadata, cleanup may conservatively affect more cached mappings.
+Hibernate does not parse arbitrary SQL to discover every effect of triggers or external changes.
+See <<sql>> for native SQL APIs.
+
+Direct JDBC or external writes do not automatically participate in this invalidation machinery.
+Coordinate invalidation with those writers or evict affected regions when appropriate.
+Expiry limits retention; it does not refresh currently managed objects or guarantee fresh results between expiry events.
+
+[[caching-management-evict]]
+==== Evicting cache entries
+
+Shared caches are managed through `EntityManagerFactory.getCache()` or `SessionFactory.getCache()`.
+Standard `jakarta.persistence.Cache` supports entity eviction:
+
+[[caching-management-evict-jpa-example]]
+.Evicting one entity using the standard API
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-evict-standard]
+----
+====
+
+Hibernate distinguishes entity state, natural-id resolutions, collection contents, and query-results regions:
+
+[[caching-management-evict-native-example]]
+.Evicting entity, natural-id, collection, and query data
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-evict-native]
+----
+====
+
+The collection API takes its mapping role, not its configured region name, and may also take an owner identifier.
+Natural-id eviction removes resolutions, not entities identified by those resolutions.
+
+[[caching-query-region-native-evict-example]]
+`evictQueryRegion()` removes all cached results in that query region;
+use it when the intent is region-wide eviction rather than refreshing one query key.
+
+`evictAll()` implements the standard entity-only eviction contract.
+Hibernate's `evictAllRegions()` evicts entity state, natural-id resolutions, collection contents, and query results.
+It retains the update-timestamps region.
+Eviction does not detach or refresh existing managed objects. An immediate lookup in the same context may still
+return their existing state; use refresh or another context when current database state is required.
+
+[[caching-statistics]]
+=== Measuring cache behavior
+
+// suppress inspection "AsciiDocLinkResolve"
+Enable <<settings-hibernate.generate_statistics,`hibernate.generate_statistics`>> to obtain Hibernate metrics
+through `SessionFactory.getStatistics()`. See <<statistics>> for the complete API.
+Use `getDomainDataRegionStatistics()` for entity, collection, or natural-id regions, and
+`getQueryRegionStatistics()` for query-result regions. A query region that has not been created may be absent.
+
+[[caching-statistics-example]]
+.Measuring a query-results region
+====
+[source,java,indent=0]
+----
+include::{example-dir-caching}/CachingGuideTests.java[tags=caching-guide-statistics]
+----
+====
+
+The example reports zero when no hit or miss has been recorded; that does not establish an effective cache.
+Measure hits, misses, puts, query executions, and SQL together. A query-results hit may still need domain-data loads,
+and a second-level hit is different from a repeat lookup within the persistence context.
+
+To verify a claimed optimization, start with known cache contents and collect metrics around loads in separate contexts.
+Exclude fixture inserts and cleanup from the measured work. Check the returned data as well as hit counts,
+and account for provider retention policies and concurrent activity.
+Hibernate statistics are separate from provider-specific statistics and management facilities.
+
+[[caching-providers]]
+=== Provider-specific configuration
+
+[[caching-provider-jcache]]
+==== JCache
+
+Supply `hibernate-jcache`, its dependencies, and a JCache implementation on the classpath.
+JCache uses `javax.cache`; these API names and Hibernate's `hibernate.javax.cache.*` settings have not
+been renamed to `jakarta.cache`.
+
+[[caching-provider-jcache-region-factory]]
+===== Region factory
+
+[[caching-provider-jcache-region-factory-example]]
+.Selecting the JCache region factory
+====
+[source,xml]
+----
+<property name="hibernate.cache.region.factory_class" value="jcache"/>
+----
+====
+
+`JCacheRegionFactory` uses a `javax.cache.CacheManager` to obtain and create caches for Hibernate regions.
+
+[[caching-provider-jcache-cache-manager]]
+===== Provider selection and manager configuration
+
+Without additional settings, Hibernate obtains the default JCache provider and its default manager URI/class loader.
+Select a provider explicitly when multiple providers are present. The configuration URI is resolved as a resource
+through Hibernate's class-loader service and passed to the provider as a URI.
+
+[[caching-provider-jcache-region-factory-config-example]]
+.Selecting a provider and configuration resource
+====
+[source,xml]
+----
+<property name="hibernate.javax.cache.provider" value="org.ehcache.jsr107.EhcacheCachingProvider"/>
+<property name="hibernate.javax.cache.uri" value="file:/path/to/ehcache.xml"/>
+----
+====
+
+JCache managers are shared by provider, URI, and class loader. Reusing the same configuration URI can reuse
+one manager; setting a URI does not guarantee a private manager per `SessionFactory`.
+An explicit manager is another configuration path.
+
+===== Explicit CacheManager
+
+`hibernate.javax.cache.cache_manager` accepts:
+
+* A `CacheManager` instance, used directly.
+* An implementation `Class`, instantiated using a public no-argument constructor.
+* An implementation class name, loaded and instantiated using the same requirement.
+
+[IMPORTANT]
+====
+The current JCache integration closes its manager when the region factory stops, including an explicitly supplied
+manager. Account for this when sharing managers across factories: stopping one factory may close a manager
+still used by another. Neither a region prefix nor supplying a shared manager transfers shutdown ownership elsewhere.
+====
+
+[[caching-provider-jcache-missing-cache-strategy]]
+===== Missing caches and retention policies
+
+Preconfigure regions with appropriate capacity, expiry, and concurrency policies.
+If a region's cache is missing, `hibernate.javax.cache.missing_cache_strategy` selects:
+
+[cols="1,3",options="header"]
+|===
+|Value |Behavior
+|`create-warn` |Default. Create the cache using a `MutableConfiguration` and log a warning.
+|`create` |Create it without the warning.
+|`fail` |Fail instead of creating a cache.
+|===
+
+Automatically created caches may lack suitable capacity and expiry policies.
+Providers can apply templates or other defaults to programmatically created caches;
+see https://www.ehcache.org/documentation/3.11/107.html#supplementing-jcache-cache-configurations-using-ehcache-xml-extensions[Ehcache's JCache template documentation].
+Configure these policies explicitly and preserve the <<caching-query-region,timestamp region's validity requirements>>.
+Provider transaction support must match the chosen concurrency strategy; selecting a strategy alone does not
+make an underlying cache transactional.
+
+[[caching-provider-infinispan]]
+==== Infinispan
+
+Infinispan supplies a Hibernate second-level cache integration for local and clustered deployments.
+Use a provider version compatible with the Hibernate release and follow its deployment-specific configuration.
+Refer to the https://infinispan.org/docs/stable/titles/hibernate/hibernate.html[Infinispan Hibernate integration guide]
+for dependencies, topology, supported cache strategies, and transaction requirements.

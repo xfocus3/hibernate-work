@@ -1,0 +1,92 @@
+package org.hibernate.query.sqm.sql.spi;
+
+import java.util.List;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import org.hibernate.spi.Stack;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.tree.spi.SqmVisitableNode;
+import org.hibernate.query.sqm.tree.spi.expression.SqmExpression;
+import org.hibernate.query.sqm.tree.spi.expression.SqmParameter;
+import org.hibernate.query.sqm.tree.spi.predicate.SqmPredicate;
+import org.hibernate.query.sqm.tree.spi.select.SqmQueryPart;
+import org.hibernate.sql.ast.spi.query.from.SqlAstJoinType;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.creation.SqlTreeCreationException;
+import org.hibernate.sql.ast.spi.translation.Clause;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.QueryTransformer;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+/**
+ * Specialized SemanticQueryWalker (SQM visitor) for producing SQL AST.
+ *
+ * @author Steve Ebersole
+ */
+public interface SqmToSqlAstConverter extends SemanticQueryWalker<Object>, SqlAstCreationState {
+	/**
+	 * Visits a node whose SQL translation is required by the enclosing expression or statement.
+	 * A SQL null literal has a SQL AST expression and is therefore a valid result.
+	 *
+	 * @throws SqlTreeCreationException if the visitor does not produce a result
+	 */
+	@Nonnull
+	default Object visitWithRequiredResult(@Nonnull SqmVisitableNode node) {
+		final Object result = node.accept( this );
+		if ( result == null ) {
+			throw new SqlTreeCreationException( "No SQL AST result for " + node.getClass().getName() );
+		}
+		return result;
+	}
+
+	Stack<Clause> getCurrentClauseStack();
+
+	Stack<SqmQueryPart<?>> getSqmQueryPartStack();
+
+	default SqmQueryPart<?> getCurrentSqmQueryPart() {
+		return getSqmQueryPartStack().getCurrent();
+	}
+
+	void registerQueryTransformer(QueryTransformer transformer);
+
+	/**
+	 * Returns the {@link SqlAstJoinType} of the currently processing join if there is one, or {@code null}.
+	 * This is used to determine the join type for implicit joins happening in the {@code ON} clause.
+	 */
+	@Nullable SqlAstJoinType getCurrentlyProcessingJoinType();
+
+	/**
+	 * Returns whether the state of the translation is currently in type inference mode.
+	 * This is useful to avoid type inference based on other incomplete inference information.
+	 */
+	boolean isInTypeInference();
+
+	/**
+	 * Returns the function return type implied from the context within which it is used.
+	 * If there is no current function being processed or no context implied type, the return is <code>null</code>.
+	 */
+	@Nullable MappingModelExpressible<?> resolveFunctionImpliedReturnType();
+
+	MappingModelExpressible<?> determineValueMapping(SqmExpression<?> sqmExpression);
+
+	/**
+	 * Visits the given node with the given inferred type access.
+	 */
+	Object visitWithInferredType(SqmVisitableNode node, Supplier<MappingModelExpressible<?>> inferredTypeAccess);
+
+	List<Expression> expandSelfRenderingFunctionMultiValueParameter(SqmParameter<?> sqmParameter);
+
+	Predicate visitNestedTopLevelPredicate(SqmPredicate predicate);
+
+	/**
+	 * Resolve a generic metadata object from the provided source, using the specified producer.
+	 */
+	default <S, M> M resolveMetadata(S source, Function<S, M> producer) {
+		return producer.apply( source );
+	}
+}

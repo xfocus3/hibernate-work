@@ -1,0 +1,15 @@
+plugins {
+    id "local.publishing-java-module"
+    id "local.publishing-group-relocation"
+}
+
+description = "Experimental extension to make it easier to compile applications into a GraalVM native image"
+
+dependencies {
+    //No need for transitive dependencies: this is all just metadata to be used as companion jar.
+    compileOnly project( ':hibernate-core' )
+    compileOnly libs.graalvmSdk
+
+    testImplementation project( ':hibernate-core' )
+    testImplementation libs.jandex
+}

@@ -1,0 +1,435 @@
+package org.hibernate.event.internal;
+
+
+import jakarta.annotation.Nullable;
+import org.hibernate.HibernateException;
+import org.hibernate.Interceptor;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.internal.BidirectionalAssociationSynchronizer;
+import org.hibernate.cascade.internal.Cascade;
+import org.hibernate.cascade.spi.CascadePoint;
+import org.hibernate.engine.internal.FlushProcessingContext;
+import org.hibernate.cascade.spi.CascadingActions;
+import org.hibernate.engine.spi.CollectionEntry;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.EntityEntry;
+import org.hibernate.engine.spi.PersistenceContext;
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.engine.spi.Status;
+import org.hibernate.event.spi.EventSource;
+import org.hibernate.event.spi.FlushEntityEvent;
+import org.hibernate.event.spi.FlushEntityEventListener;
+import org.hibernate.event.spi.FlushEvent;
+import org.hibernate.event.spi.PersistContext;
+import org.hibernate.internal.util.EntityPrinter;
+import org.hibernate.internal.util.collections.InstanceIdentityMap;
+import org.hibernate.persister.entity.EntityPersister;
+
+
+import static org.hibernate.engine.internal.Collections.processUnreachableCollection;
+import static org.hibernate.event.internal.EventListenerLogging.EVENT_LISTENER_LOGGER;
+import jakarta.annotation.Nonnull;
+
+/**
+ * A convenience base class for listeners whose functionality results in flushing.
+ *
+ * @author Steve Ebersole
+ */
+public abstract class AbstractFlushingEventListener {
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Pre-flushing section
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	/**
+	 * Coordinates the processing necessary to get things ready for executions
+	 * as db calls by preparing the session caches and moving the appropriate
+	 * entities and collections to their respective execution queues.
+	 *
+	 * @param event The flush event.
+	 * @throws HibernateException Error flushing caches to execution queues.
+	 */
+	@Nonnull
+	protected FlushProcessingContext prepareFlushProcessing(@Nonnull FlushEvent event) {
+		EVENT_LISTENER_LOGGER.flushingSession();
+		final var session = event.getSession();
+		final var persistenceContext = session.getPersistenceContextInternal();
+		final var flushProcessingContext = beginFlushProcessing( session, persistenceContext );
+		preFlush( session, persistenceContext, flushProcessingContext );
+		flushEverythingToExecutions( event, persistenceContext, session, flushProcessingContext );
+		return flushProcessingContext;
+	}
+
+	protected void flushEverythingToExecutions(
+			@Nonnull FlushEvent event,
+			@Nonnull PersistenceContext persistenceContext,
+			@Nonnull EventSource session,
+			@Nonnull FlushProcessingContext flushProcessingContext) {
+		persistenceContext.setFlushing( true );
+		try {
+			final int entityCount = flushEntities( event, persistenceContext );
+			final int collectionCount = flushCollections( session, persistenceContext, flushProcessingContext );
+			event.setNumberOfEntitiesProcessed( entityCount );
+			event.setNumberOfCollectionsProcessed( collectionCount );
+		}
+		finally {
+			persistenceContext.setFlushing( false);
+		}
+		//some statistics
+		logFlushResults( event );
+	}
+
+	@Nonnull
+	protected FlushProcessingContext beginFlushProcessing(
+			@Nonnull EventSource session,
+			@Nonnull PersistenceContext persistenceContext) {
+		return beginFlushProcessing( session, persistenceContext, false );
+	}
+
+	protected FlushProcessingContext beginFlushProcessing(
+			@Nonnull EventSource session,
+			@Nonnull PersistenceContext persistenceContext,
+			boolean speculative) {
+		final var flushProcessingContext = new FlushProcessingContext( session, speculative );
+		persistenceContext.setCollectionFlushActionTracker( flushProcessingContext );
+		return flushProcessingContext;
+	}
+
+	protected void clearFlushProcessing(@Nonnull PersistenceContext persistenceContext) {
+		persistenceContext.setCollectionFlushActionTracker( null );
+	}
+
+	protected void preFlush(
+			@Nonnull EventSource session,
+			@Nonnull PersistenceContext persistenceContext,
+			@Nonnull FlushProcessingContext flushProcessingContext) {
+		session.runInterceptorCallback(
+				() -> session.getInterceptor().preFlush( persistenceContext.managedEntitiesIterator() ) );
+		prepareEntityFlushes( session, persistenceContext );
+		BidirectionalAssociationSynchronizer.synchronize( session );
+		// we could move this inside if we wanted to
+		// tolerate collection initializations during
+		// collection dirty checking:
+		prepareCollectionFlushes( persistenceContext );
+		// now, any collections that are initialized
+		// inside this block do not get updated - they
+		// are ignored until the next flush
+	}
+
+	protected void logFlushResults(@Nonnull FlushEvent event) {
+		if ( EVENT_LISTENER_LOGGER.isDebugEnabled() ) {
+			final var session = event.getSession();
+			final var persistenceContext = session.getPersistenceContextInternal();
+			final var actionQueue = session.getActionQueue();
+			EVENT_LISTENER_LOGGER.flushedEntitiesSummary(
+					actionQueue.numberOfInsertions(),
+					actionQueue.numberOfUpdates(),
+					actionQueue.numberOfDeletions(),
+					persistenceContext.getNumberOfManagedEntities()
+			);
+			EVENT_LISTENER_LOGGER.flushedCollectionsSummary(
+					actionQueue.numberOfCollectionCreations(),
+					actionQueue.numberOfCollectionUpdates(),
+					actionQueue.numberOfCollectionRemovals(),
+					persistenceContext.getCollectionEntriesSize()
+			);
+			new EntityPrinter( session.getFactory() )
+					.logEntities( persistenceContext.getEntityHoldersByKey().entrySet() );
+		}
+	}
+
+	/**
+	 * Process {@link CascadingActions#PERSIST_ON_FLUSH} at the start of a
+	 * flush to discover any newly referenced entity that must be passed to
+	 * {@code persist()}, and also apply orphan delete.
+	 */
+	private void prepareEntityFlushes(@Nonnull EventSource session, @Nonnull PersistenceContext persistenceContext)
+			throws HibernateException {
+		EVENT_LISTENER_LOGGER.processingFlushTimeCascades();
+		final var context = PersistContext.create();
+		// safe from concurrent modification because of how concurrentEntries() is implemented on IdentityMap
+		for ( var entry : persistenceContext.reentrantSafeManagedEntities() ) {
+			final var entityEntry = entry.$$_hibernate_getEntityEntry();
+			if ( flushable( entityEntry ) ) {
+				cascadeOnFlush( session, entityEntry.getPersister(), entry.$$_hibernate_getEntityInstance(), context );
+			}
+		}
+		checkForTransientReferences( session, persistenceContext );
+	}
+
+	void checkForTransientReferences(@Nonnull EventSource session, @Nonnull PersistenceContext persistenceContext) {
+		// perform these checks after all cascade persist events have been
+		// processed, so that all entities which will be persisted are
+		// persistent when we do the check (I wonder if we could move this
+		// into Nullability, instead of abusing the Cascade infrastructure)
+		for ( var entryEntry : persistenceContext.reentrantSafeManagedEntities() ) {
+			final var entry = entryEntry.$$_hibernate_getEntityEntry();
+			if ( checkable( entry ) ) {
+				Cascade.cascade(
+						CascadingActions.CHECK_ON_FLUSH,
+						CascadePoint.BEFORE_FLUSH,
+						session,
+						entry.getPersister(),
+						entryEntry.$$_hibernate_getEntityInstance(),
+						null
+				);
+			}
+		}
+	}
+
+	private static boolean flushable(@Nonnull EntityEntry entry) {
+		final var status = entry.getStatus();
+		return status == Status.MANAGED
+			|| status == Status.SAVING
+			|| status == Status.READ_ONLY; // debatable, see HHH-19398
+	}
+
+	private static boolean checkable(@Nonnull EntityEntry entry) {
+		final var status = entry.getStatus();
+		return status == Status.MANAGED
+			|| status == Status.SAVING;
+	}
+
+	private void cascadeOnFlush(
+			@Nonnull EventSource session,
+			@Nonnull EntityPersister persister,
+			@Nonnull Object object,
+			@Nonnull PersistContext anything)
+			throws HibernateException {
+		final var persistenceContext = session.getPersistenceContextInternal();
+		persistenceContext.incrementCascadeLevel();
+		try {
+			Cascade.cascade( CascadingActions.PERSIST_ON_FLUSH, CascadePoint.BEFORE_FLUSH, session, persister, object, anything );
+		}
+		finally {
+			persistenceContext.decrementCascadeLevel();
+		}
+	}
+
+	/**
+	 * Initialize flush-local collection state, including the dirty check.
+	 */
+	private void prepareCollectionFlushes(@Nonnull PersistenceContext persistenceContext) {
+		// Initialize dirty flags for arrays + collections with composite elements
+		// and reset flush-local collection processing state.
+		EVENT_LISTENER_LOGGER.dirtyCheckingCollections();
+		final var collectionEntries = persistenceContext.getCollectionEntries();
+		if ( collectionEntries != null ) {
+			final var identityMap =
+					(InstanceIdentityMap<PersistentCollection<?>, CollectionEntry>)
+							collectionEntries;
+			for ( var entry : identityMap.toArray() ) {
+				entry.getValue().preFlush( entry.getKey() );
+			}
+		}
+	}
+
+	/**
+	 * <ol>
+	 * <li> detect any dirty entities
+	 * <li> schedule any entity updates
+	 * <li> search out any reachable collections
+	 * </ol>
+	 */
+	@SuppressWarnings("removal")
+	private int flushEntities(@Nonnull FlushEvent event, @Nonnull PersistenceContext persistenceContext) {
+		EVENT_LISTENER_LOGGER.flushingEntitiesAndProcessingReferencedCollections();
+
+		final var source = event.getSession();
+		final var flushListeners =
+				event.getFactory().getEventListenerGroups().eventListenerGroup_FLUSH_ENTITY;
+
+		// Among other things, updateReachables() recursively loads all
+		// collections that are changing roles. This might cause entities
+		// to be loaded.
+		// So this needs to be safe from concurrent modification problems.
+		final var entityEntries = persistenceContext.reentrantSafeManagedEntities();
+		final int count = entityEntries.length;
+
+		FlushEntityEvent entityEvent = null; //allow reuse of the event as it's heavily allocated in certain use cases
+		int eventGenerationId = 0; //Used to double-check the instance reuse won't cause problems
+		for ( var me : entityEntries ) {
+			// Update the status of the object and if necessary, schedule an update
+			final var entry = me.$$_hibernate_getEntityEntry();
+			final var status = entry.getStatus();
+			if ( status != Status.LOADING && status != Status.GONE ) {
+				entityEvent = createOrReuseEventInstance(
+						entityEvent,
+						source,
+						me.$$_hibernate_getEntityInstance(),
+						entry
+				);
+				entityEvent.setInstanceGenerationId( ++eventGenerationId );
+				flushListeners.fireEventOnEachListener( entityEvent, FlushEntityEventListener::onFlushEntity );
+				entityEvent.setAllowedToReuse( true );
+				assert entityEvent.getInstanceGenerationId() == eventGenerationId;
+			}
+		}
+
+		source.getActionQueue().sortActions();
+
+		return count;
+	}
+
+	/**
+	 * Reuses a {@link FlushEntityEvent} for a new purpose, if possible;
+	 * or if not possible, a new actual instance is returned.
+	 */
+	private @Nonnull FlushEntityEvent createOrReuseEventInstance(
+			@Nullable FlushEntityEvent possiblyValidExistingInstance,
+			@Nonnull EventSource source,
+			@Nonnull Object key,
+			@Nonnull EntityEntry entry) {
+		if ( possiblyValidExistingInstance == null || !possiblyValidExistingInstance.isAllowedToReuse() ) {
+			//need to create a new instance
+			return new FlushEntityEvent( source, key, entry );
+		}
+		else {
+			possiblyValidExistingInstance.resetAndReuseEventInstance( key, entry );
+			return possiblyValidExistingInstance;
+		}
+	}
+
+	/**
+	 * Process any unreferenced collections, queue delayed collection operations,
+	 * and sort the collection actions queued during collection processing.
+	 */
+	@SuppressWarnings("removal")
+	private int flushCollections(
+			@Nonnull EventSource session,
+			@Nonnull PersistenceContext persistenceContext,
+			@Nonnull FlushProcessingContext flushProcessingContext)
+			throws HibernateException {
+		EVENT_LISTENER_LOGGER.processingUnreferencedCollections();
+		final int count = processUnreachableCollections( session, persistenceContext, flushProcessingContext );
+
+		EVENT_LISTENER_LOGGER.schedulingCollectionOperations();
+		final var actionQueue = session.getActionQueue();
+		persistenceContext.forEachCollectionEntry(
+				(collection, collectionEntry) -> {
+					// Delayed operations are processed separately only while the collection remains
+					// uninitialized. Once initialized, normal collection dirty-checking/action
+					// handling owns the changes.
+					if ( !collection.wasInitialized() && collection.hasQueuedOperations() ) {
+						flushProcessingContext.queueCollectionQueuedOperations(
+								collection,
+								collectionEntry.getLoadedPersister(),
+								collectionEntry.getLoadedKey()
+						);
+					}
+				}, true );
+
+		flushProcessingContext.registerCollectionMutationInputs();
+		actionQueue.sortCollectionActions();
+
+		return count;
+	}
+
+	private static int processUnreachableCollections(
+			@Nonnull EventSource session,
+			@Nonnull PersistenceContext persistenceContext,
+			@Nonnull FlushProcessingContext flushProcessingContext) {
+		final var collectionEntries = persistenceContext.getCollectionEntries();
+		if ( collectionEntries == null ) {
+			return 0;
+		}
+		else {
+			final int count = collectionEntries.size();
+			final var identityMap =
+					(InstanceIdentityMap<PersistentCollection<?>, CollectionEntry>)
+							collectionEntries;
+			for ( var entry : identityMap.toArray() ) {
+				if ( !entry.getValue().wasReachedDuringFlush()
+						&& !entry.getValue().isIgnore() ) {
+					processUnreachableCollection( entry.getKey(), session, flushProcessingContext );
+				}
+			}
+			return count;
+		}
+	}
+
+	/**
+	 * Execute all SQL (and second-level cache updates) in a special order so that foreign-key constraints cannot
+	 * be violated: <ol>
+	 * <li> Inserts, in the order they were performed
+	 * <li> Updates
+	 * <li> Deletion of collection elements
+	 * <li> Insertion of collection elements
+	 * <li> Deletes, in the order they were performed
+	 * </ol>
+	 *
+	 * @param session The session being flushed
+	 */
+	protected void performExecutions(@Nonnull EventSource session) {
+		// IMPL NOTE: here we alter the flushing flag of the persistence context to allow
+		//            callbacks occurring during flush more leniency regarding initializing
+		//            proxies and lazy collections
+		// For more information, see HHH-2763
+		final var persistenceContext = session.getPersistenceContextInternal();
+		final var jdbcCoordinator = session.getJdbcCoordinator();
+		try {
+			jdbcCoordinator.flushBeginning();
+			persistenceContext.setFlushing( true );
+			// we need to lock the collection caches before executing entity inserts/updates
+			// in order to account for bidirectional associations
+			final var actionQueue = session.getActionQueue();
+			actionQueue.prepareActions();
+			actionQueue.executeActions();
+		}
+		finally {
+			persistenceContext.setFlushing( false );
+			jdbcCoordinator.flushEnding();
+		}
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// Post-flushing section
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	/**
+	 * <ol>
+	 * <li> Recreate the collection key to collection mapping
+	 * <li> rebuild the collection entries
+	 * <li> call {@link Interceptor#postFlush}
+	 * </ol>
+	 */
+	protected void postFlush(@Nonnull SessionImplementor session, @Nonnull FlushProcessingContext flushProcessingContext) {
+		EVENT_LISTENER_LOGGER.postFlush();
+
+		final var persistenceContext = session.getPersistenceContextInternal();
+		persistenceContext.clearCollectionsByKey();
+
+		// the database has changed now, so the subselect results need to be invalidated
+		// the batch fetching queues should also be cleared - especially the collection batch fetching one
+		persistenceContext.getBatchFetchQueue().clear();
+
+		persistenceContext.forEachCollectionEntry(
+				(persistentCollection, collectionEntry) -> {
+					collectionEntry.postFlush( persistentCollection, flushProcessingContext );
+					final var loadedPersister = collectionEntry.getLoadedPersister();
+					final Object key = collectionEntry.getLoadedKey();
+					if ( loadedPersister != null && key != null ) {
+						//otherwise recreate the mapping between the collection and its key
+						final var collectionKey = new CollectionKey( loadedPersister, key );
+						persistenceContext.addCollectionByKey( collectionKey, persistentCollection );
+					}
+					else {
+						//if the collection is dereferenced, unset its session reference and remove from the session cache
+						//iter.remove(); //does not work, since the entrySet is not backed by the set
+						persistentCollection.unsetSession( session );
+						persistenceContext.removeCollectionEntry( persistentCollection );
+					}
+				},
+				true
+		);
+
+	}
+
+	protected void postPostFlush(@Nonnull SessionImplementor session) {
+		session.runInterceptorCallback(
+				() -> session.getInterceptor()
+						.postFlush( session.getPersistenceContextInternal().managedEntitiesIterator() ) );
+	}
+
+}

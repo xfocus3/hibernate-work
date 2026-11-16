@@ -1,0 +1,9 @@
+#! /bin/bash
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+TCK_RUN=true
+
+source "$DIR/db-params.sh"
+
+logAndExec ./gradlew :hibernate-tck-runner:test ${goal} -Pruntck=true "${@}" -Plog-test-progress=true --stacktrace

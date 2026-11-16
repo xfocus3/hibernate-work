@@ -1,0 +1,13 @@
+package org.hibernate.sql.ast.spi.creation;
+
+/**
+ * Generator for SqlAliasBase instances based on a stem.
+ *
+ * @author Steve Ebersole
+ */
+public interface SqlAliasBaseGenerator {
+	/**
+	 * Generate the SqlAliasBase based on the given stem.
+	 */
+	SqlAliasBase createSqlAliasBase(String stem);
+}

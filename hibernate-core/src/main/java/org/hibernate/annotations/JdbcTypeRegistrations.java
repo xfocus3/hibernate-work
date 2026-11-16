@@ -1,0 +1,28 @@
+package org.hibernate.annotations;
+
+import jakarta.persistence.spi.Discoverable;
+
+import java.lang.annotation.Inherited;
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
+
+import static java.lang.annotation.ElementType.MODULE;
+import static java.lang.annotation.ElementType.PACKAGE;
+import static java.lang.annotation.ElementType.TYPE;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
+
+/**
+ * Grouping of {@link JdbcTypeRegistration}
+ *
+ * See notes on {@link JdbcTypeRegistration} about using on packages
+ * versus use on classes
+ *
+ * @since 6.0
+ */
+@Target({PACKAGE, TYPE, MODULE})
+@Inherited
+@Retention(RUNTIME)
+@Discoverable
+public @interface JdbcTypeRegistrations {
+	JdbcTypeRegistration[] value();
+}

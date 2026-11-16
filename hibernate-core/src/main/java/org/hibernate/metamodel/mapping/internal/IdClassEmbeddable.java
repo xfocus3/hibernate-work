@@ -1,0 +1,408 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import java.util.ArrayList;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import java.util.function.Consumer;
+
+import org.hibernate.MappingException;
+import org.hibernate.cfg.CheckHandling;
+import org.hibernate.cfg.MappingSettings;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.mapping.Component;
+import org.hibernate.mapping.RootClass;
+import org.hibernate.metamodel.mapping.AttributeMapping;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.EmbeddableValuedModelPart;
+import org.hibernate.metamodel.mapping.EntityIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.NonAggregatedIdentifierMapping;
+import org.hibernate.metamodel.mapping.NonAggregatedIdentifierMapping.IdentifierValueMapper;
+import org.hibernate.metamodel.mapping.SelectableMappings;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.metamodel.internal.StandardEmbeddableInstantiator;
+import org.hibernate.metamodel.spi.EmbeddableRepresentationStrategy;
+import org.hibernate.property.access.internal.PropertyAccessStrategyMapImpl;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.property.access.spi.PropertyAccessorService;
+import org.hibernate.property.access.spi.SetterFieldImpl;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroupProducer;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.type.AnyType;
+import org.hibernate.type.CollectionType;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.spi.CompositeTypeImplementor;
+
+import static java.lang.reflect.Modifier.isFinal;
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.metamodel.mapping.internal.MappingModelCreationHelper.getTableIdentifierExpression;
+
+
+/**
+ * EmbeddableMappingType implementation describing an {@link jakarta.persistence.IdClass}
+ */
+public class IdClassEmbeddable extends AbstractEmbeddableMapping implements IdentifierValueMapper {
+	private final NavigableRole navigableRole;
+	private final NonAggregatedIdentifierMapping idMapping;
+	private final VirtualIdEmbeddable virtualIdEmbeddable;
+	private final JavaType<?> javaType;
+	private final IdClassRepresentationStrategy representationStrategy;
+//	private final IdClassEmbedded embedded;
+	private final EmbeddableValuedModelPart embedded;
+
+	public IdClassEmbeddable(
+			Component idClassSource,
+			RootClass bootEntityDescriptor,
+			NonAggregatedIdentifierMapping idMapping,
+			EntityMappingType identifiedEntityMapping,
+			String idTable,
+			String[] idColumns,
+			VirtualIdEmbeddable virtualIdEmbeddable,
+			MappingModelCreationProcess creationProcess) {
+		super( idClassSource.getPropertySpan() );
+
+		this.idMapping = idMapping;
+		this.virtualIdEmbeddable = virtualIdEmbeddable;
+
+		navigableRole = castNonNull( idMapping.getNavigableRole() ).append( NavigablePath.IDENTIFIER_MAPPER_PROPERTY );
+
+		javaType =
+				creationProcess.getCreationContext().getTypeConfiguration().getJavaTypeRegistry()
+						.resolveManagedTypeDescriptor( idClassSource.getComponentClass() );
+
+		final PropertyAccessorService propertyAccessorService = creationProcess.getCreationContext().getServiceRegistry()
+				.requireService( PropertyAccessorService.class );
+
+		representationStrategy = new IdClassRepresentationStrategy(
+				propertyAccessorService,
+				this,
+				idClassSource,
+				idClassSource.sortProperties() == null,
+				idClassSource::getPropertyNames
+		);
+
+		warnOnFinalFields( idClassSource, representationStrategy,
+				creationProcess.getCreationContext().getSessionFactoryOptions()
+						.getFinalPersistentFieldsHandling() );
+
+		final var propertyAccess =
+				PropertyAccessStrategyMapImpl.INSTANCE.buildPropertyAccess(
+						propertyAccessorService,
+						java.util.Map.class,
+						EntityIdentifierMapping.ID_ROLE_NAME,
+						true );
+		final var attributeMetadata =
+				MappingModelCreationHelper.getAttributeMetadata( propertyAccess );
+
+		embedded = new EmbeddedAttributeMapping(
+				NavigablePath.IDENTIFIER_MAPPER_PROPERTY,
+				identifiedEntityMapping.getNavigableRole()
+						.append( EntityIdentifierMapping.ID_ROLE_NAME )
+						.append( NavigablePath.IDENTIFIER_MAPPER_PROPERTY ),
+				-1,
+				-1,
+				idTable,
+				attributeMetadata,
+				(PropertyAccess) null,
+				FetchTiming.IMMEDIATE,
+				FetchStyle.JOIN,
+				this,
+				identifiedEntityMapping,
+				propertyAccess
+		);
+
+		final var idClassType = idClassSource.getType();
+		( (CompositeTypeImplementor) idClassType ).injectMappingModelPart( embedded, creationProcess );
+
+		creationProcess.registerInitializationCallback(
+				"IdClassEmbeddable(" + navigableRole.getFullPath() + ")#finishInitialization",
+				() ->
+						finishInitialization(
+								idClassSource,
+								idClassType,
+								idTable,
+								idColumns,
+								creationProcess
+						)
+		);
+
+	}
+
+	public IdClassEmbeddable(
+			EmbeddedAttributeMapping valueMapping,
+			TableGroupProducer declaringTableGroupProducer,
+			SelectableMappings selectableMappings,
+			IdClassEmbeddable inverseMappingType,
+			MappingModelCreationProcess creationProcess) {
+		super( inverseMappingType.attributeMappings.size() );
+
+		this.navigableRole = inverseMappingType.getNavigableRole();
+		this.idMapping = (NonAggregatedIdentifierMapping) valueMapping;
+		this.virtualIdEmbeddable = (VirtualIdEmbeddable) valueMapping.getEmbeddableTypeDescriptor();
+		this.javaType = inverseMappingType.javaType;
+		this.representationStrategy = new IdClassRepresentationStrategy(
+				creationProcess.getCreationContext().getServiceRegistry()
+						.requireService( PropertyAccessorService.class ),
+				this,
+				inverseMappingType.getRepresentationStrategy().getInstantiator()
+		);
+		this.embedded = valueMapping;
+		this.selectableMappings = selectableMappings;
+		creationProcess.registerInitializationCallback(
+				"IdClassEmbeddable("
+						+ inverseMappingType.getNavigableRole().getFullPath()
+						+ ".{inverse})#finishInitialization",
+				() -> inverseInitializeCallback(
+						declaringTableGroupProducer,
+						selectableMappings,
+						inverseMappingType,
+						creationProcess,
+						this
+				)
+		);
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// IdentifierValueMapper
+
+	@Nonnull
+	@Override
+	public EmbeddableValuedModelPart getEmbeddedPart() {
+		return embedded;
+	}
+
+	@Nonnull
+	@Override
+	public Object getIdentifier(@Nonnull Object entity, @Nullable SharedSessionContractImplementor session) {
+		final var propertyValues = new Object[virtualIdEmbeddable.getNumberOfAttributeMappings()];
+
+		for ( int i = 0; i < propertyValues.length; i++ ) {
+			final var attributeMapping = virtualIdEmbeddable.getAttributeMapping( i );
+			final Object object = attributeMapping.getValue( entity );
+			if ( object == null ) {
+				final var idClassAttributeMapping = getAttributeMapping( i );
+				propertyValues[i] =
+						castNonNull( idClassAttributeMapping.getPropertyAccess() ).getGetter().getReturnTypeClass().isPrimitive()
+								? idClassAttributeMapping.getExpressibleJavaType().getDefaultValue()
+								: null;
+			}
+			//JPA 2 @MapsId + @IdClass points to the pk of the entity
+			else if ( attributeMapping instanceof ToOneAttributeMapping toOneAttributeMapping
+					&& !( getAttributeMapping( i ) instanceof ToOneAttributeMapping ) ) {
+				final var targetPart =
+						toOneAttributeMapping.getForeignKeyDescriptor()
+								.getPart( toOneAttributeMapping.getSideNature().inverse() );
+				if ( targetPart.isEntityIdentifierMapping() ) {
+					propertyValues[i] = ( (EntityIdentifierMapping) targetPart ).getIdentifier( object );
+				}
+				else {
+					propertyValues[i] = object;
+					assert false;
+				}
+			}
+			else {
+				propertyValues[i] = object;
+			}
+		}
+
+		return representationStrategy.getInstantiator().instantiate( () -> propertyValues );
+	}
+
+	@Override
+	public void setIdentifier(@Nonnull Object entity, @Nonnull Object id, @Nonnull SharedSessionContractImplementor session) {
+		final var factory = session.getFactory();
+		final var entityDescriptor =
+				factory.getMappingMetamodel()
+						.getEntityDescriptor( entity.getClass() );
+		final var propertyValues = new Object[attributeMappings.size()];
+		virtualIdEmbeddable.forEachAttribute(
+				(position, virtualIdAttribute) -> {
+					final var idClassAttribute = attributeMappings.get( position );
+					Object object = idClassAttribute.getValue( id );
+					if ( object != null && virtualIdAttribute instanceof ToOneAttributeMapping toOneAttributeMapping
+						&& !( idClassAttribute instanceof ToOneAttributeMapping ) ) {
+						final var entityPersister =
+								toOneAttributeMapping.getEntityMappingType()
+										.getEntityPersister();
+						final var entityKey = session.generateEntityKey( object, entityPersister );
+						final var persistenceContext = session.getPersistenceContext();
+						final var holder = persistenceContext.getEntityHolder( entityKey );
+						// use the managed object i.e. proxy or initialized entity
+						object = holder == null ? null : holder.getManagedObject();
+						if ( object == null ) {
+							// get the association out of the entity itself
+							object = entityDescriptor.getPropertyValue( entity,
+									toOneAttributeMapping.getAttributeName() );
+						}
+					}
+					propertyValues[position] = object;
+				}
+		);
+
+		virtualIdEmbeddable.setValues( entity, propertyValues );
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// EmbeddableMappingType
+
+	@Nonnull
+	@Override
+	public NavigableRole getNavigableRole() {
+		return navigableRole;
+	}
+
+	@Nonnull
+	@Override
+	public String getPartName() {
+		return NavigablePath.IDENTIFIER_MAPPER_PROPERTY;
+	}
+
+	@Nonnull
+	@Override
+	public EmbeddableRepresentationStrategy getRepresentationStrategy() {
+		return representationStrategy;
+	}
+
+	@Nonnull
+	@Override
+	public JavaType<?> getMappedJavaType() {
+		return javaType;
+	}
+
+	@Nonnull
+	@Override
+	public EmbeddableValuedModelPart getEmbeddedValueMapping() {
+		return embedded;
+	}
+
+	@Override
+	public void forEachAttributeMapping(@Nonnull Consumer<? super AttributeMapping> action) {
+		forEachAttribute( (index, attribute) -> action.accept( attribute ) );
+	}
+
+	@Nullable
+	@Override
+	public EntityMappingType findContainingEntityMapping() {
+		return idMapping.findContainingEntityMapping();
+	}
+
+	@Override
+	public <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		throw new UnsupportedOperationException();
+	}
+
+
+	@Nonnull
+	@Override
+	public <T> DomainResult<T> createDomainResult(@Nonnull NavigablePath navigablePath, @Nonnull TableGroup tableGroup, @Nullable String resultVariable, @Nonnull DomainResultCreationState creationState) {
+		throw new UnsupportedOperationException();
+	}
+
+	@Nonnull
+	@Override
+	public EmbeddableMappingType createInverseMappingType(
+			@Nonnull EmbeddedAttributeMapping valueMapping,
+			@Nonnull TableGroupProducer declaringTableGroupProducer,
+			@Nonnull SelectableMappings selectableMappings,
+			@Nonnull MappingModelCreationProcess creationProcess) {
+		return new IdClassEmbeddable(
+				valueMapping,
+				declaringTableGroupProducer,
+				selectableMappings,
+				this,
+				creationProcess
+		);
+	}
+
+
+
+	private static void warnOnFinalFields(
+			Component idClassSource,
+			IdClassRepresentationStrategy representationStrategy,
+			CheckHandling handling) {
+		if ( !( representationStrategy.getInstantiator() instanceof StandardEmbeddableInstantiator ) ) {
+			return;
+		}
+		if ( handling == CheckHandling.IGNORE ) {
+			return;
+		}
+		var finalFields = new ArrayList<String>();
+		for ( var property : idClassSource.getProperties() ) {
+			var propertyAccess = representationStrategy.resolvePropertyAccess( property );
+			if ( propertyAccess.getSetter() instanceof SetterFieldImpl setter
+					&& isFinal( setter.getField().getModifiers() ) ) {
+				finalFields.add( property.getName() );
+			}
+		}
+		if ( !finalFields.isEmpty() ) {
+			if ( handling == CheckHandling.ERROR ) {
+				throw new MappingException( String.format(
+						"Persistent fields %s in id class '%s' are declared 'final'",
+						finalFields, idClassSource.getComponentClassName()
+				) );
+			}
+			CORE_LOGGER.finalPersistentFields(
+					finalFields, "id class", idClassSource.getComponentClassName(),
+					MappingSettings.FINAL_PERSISTENT_FIELDS
+			);
+		}
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// init
+
+	private boolean finishInitialization(
+			Component bootDescriptor,
+			CompositeType compositeType,
+			String rootTableExpression,
+			String[] rootTableKeyColumnNames,
+			MappingModelCreationProcess creationProcess) {
+		final var attributeMappings = new ImmutableAttributeMappingList.Builder( compositeType.getPropertyNames().length );
+
+		return finishInitialization(
+				navigableRole,
+				bootDescriptor,
+				compositeType,
+				rootTableExpression,
+				rootTableKeyColumnNames,
+				this,
+				representationStrategy,
+				(attributeName, attributeType) -> {
+					if ( attributeType instanceof CollectionType ) {
+						throw new IllegalAttributeType( "An IdClass cannot define collection attributes : " + attributeName );
+					}
+					if ( attributeType instanceof AnyType ) {
+						throw new IllegalAttributeType( "An IdClass cannot define <any/> attributes : " + attributeName );
+					}
+				},
+				(column, jdbcEnvironment) -> getTableIdentifierExpression( column.getValue().getTable(), creationProcess ),
+				attributeMappings::add,
+				() -> {
+					this.attributeMappings = attributeMappings.build();
+					// We need the attribute mapping types to finish initialization first before we can build the column mappings
+					creationProcess.registerInitializationCallback(
+							"IdClassEmbeddable(" + getNavigableRole() + ")#initColumnMappings",
+							this::initColumnMappings
+					);
+				},
+				creationProcess
+		);
+	}
+
+}

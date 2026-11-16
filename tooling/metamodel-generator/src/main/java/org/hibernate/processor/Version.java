@@ -1,0 +1,24 @@
+package org.hibernate.processor;
+
+import org.hibernate.internal.util.NullnessUtil;
+
+/**
+ * Information about the Meta Model Generator version.
+ *
+ * @author Hardy Ferentschik
+ */
+public final class Version {
+	private static final String VERSION = initVersion();
+
+	private static String initVersion() {
+		final var version = NullnessUtil.castNonNull( Version.class.getPackage() ).getImplementationVersion();
+		return version != null ? version : "[WORKING]";
+	}
+
+	private Version() {
+	}
+
+	public static String getVersionString() {
+		return VERSION;
+	}
+}

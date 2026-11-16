@@ -1,0 +1,122 @@
+package org.hibernate.event.internal;
+
+import org.hibernate.HibernateException;
+import org.hibernate.action.queue.spi.CollectionMutationInput;
+import org.hibernate.event.spi.EventSource;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.Type;
+
+import static org.hibernate.event.internal.EventListenerLogging.EVENT_LISTENER_LOGGER;
+import static org.hibernate.pretty.MessageHelper.collectionInfoString;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+/**
+ * Abstract superclass of visitors that reattach collections
+ * and reassociate uninitialized proxies with the session.
+ *
+ * @author Gavin King
+ */
+public abstract class ReattachVisitor extends ProxyVisitor {
+
+	private final Object ownerIdentifier;
+	private final Object owner;
+
+	public ReattachVisitor(@Nonnull EventSource session, @Nonnull Object ownerIdentifier, @Nonnull Object owner) {
+		super( session );
+		this.ownerIdentifier = ownerIdentifier;
+		this.owner = owner;
+	}
+
+	@Override
+	@Nullable
+	Object processEntity(@Nullable Object value, @Nonnull EntityType entityType) {
+		if ( value != null ) {
+			getSession().getPersistenceContext()
+					.reassociateIfUninitializedProxy( value );
+			// if it is an initialized proxy,
+			// let cascade handle it later on
+		}
+		return null;
+	}
+
+	/**
+	 * Retrieve the identifier of the entity being visited.
+	 *
+	 * @return The entity's identifier.
+	 */
+	final @Nonnull Object getOwnerIdentifier() {
+		return ownerIdentifier;
+	}
+
+	/**
+	 * Retrieve the entity being visited.
+	 *
+	 * @return The entity.
+	 */
+	final @Nonnull Object getOwner() {
+		return owner;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	@Nullable
+	Object processComponent(@Nullable Object component, @Nonnull CompositeType componentType) {
+		final Type[] types = componentType.getSubtypes();
+		if ( component == null ) {
+			processValues( new Object[types.length], types );
+		}
+		else {
+			super.processComponent( component, componentType );
+		}
+		return null;
+	}
+
+	/**
+	 * Schedules a collection for deletion.
+	 *
+	 * @param role The persister representing the collection to be removed.
+	 * @param collectionKey The collection key (differs from owner-id in the case of property-refs).
+	 * @param source The session from which the request originated.
+	 *
+	 */
+	void removeCollection(@Nonnull CollectionPersister role, @Nonnull Object collectionKey, @Nonnull EventSource source)
+			throws HibernateException {
+		if ( EVENT_LISTENER_LOGGER.isTraceEnabled() ) {
+			EVENT_LISTENER_LOGGER.collectionDereferencedWhileTransient(
+					collectionInfoString( role, ownerIdentifier, source.getFactory() )
+			);
+		}
+		source.getActionQueue().addCollectionMutation(
+				CollectionMutationInput.wrapperlessRemoval(
+						role,
+						collectionKey,
+						owner,
+						ownerIdentifier
+				)
+		);
+	}
+
+	/**
+	 * This version is slightly different for say
+	 * {@link org.hibernate.type.CollectionType#getKeyOfOwner} in that here we
+	 * need to assume that the owner is not yet associated with the session,
+	 * and thus we cannot rely on the owner's EntityEntry snapshot...
+	 *
+	 * @param role The persister for the collection role being processed.
+	 *
+	 * @return The value from the owner that identifies the grouping into the collection
+	 */
+	@Nonnull
+	final Object extractCollectionKeyFromOwner(@Nonnull CollectionPersister role) {
+		final var collectionType = role.getCollectionType();
+		return collectionType.useLHSPrimaryKey()
+				? ownerIdentifier :
+				role.getOwnerEntityPersister()
+						.getPropertyValue( owner, collectionType.getLHSPropertyName() );
+	}
+}

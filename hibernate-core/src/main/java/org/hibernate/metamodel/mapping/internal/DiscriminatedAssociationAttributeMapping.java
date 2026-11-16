@@ -1,0 +1,568 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import java.io.Serializable;
+import java.util.Objects;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+import org.hibernate.SharedSessionContract;
+import org.hibernate.cache.MutableCacheKeyBuilder;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.engine.FetchTiming;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.mapping.Any;
+import org.hibernate.mapping.Property;
+import org.hibernate.metamodel.mapping.AttributeMetadata;
+import org.hibernate.metamodel.mapping.BasicValuedModelPart;
+import org.hibernate.metamodel.mapping.DiscriminatedAssociationModelPart;
+import org.hibernate.metamodel.mapping.DiscriminatorMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.metamodel.mapping.MappingType;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.from.SqlAstJoinType;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBase;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableGroupJoin;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.sql.results.graph.Fetch;
+import org.hibernate.sql.results.graph.FetchParent;
+import org.hibernate.sql.results.graph.Fetchable;
+import org.hibernate.type.AnyType;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.java.MutabilityPlan;
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+/**
+ * Singular, any-valued attribute
+ *
+ * @see org.hibernate.annotations.Any
+ *
+ * @author Steve Ebersole
+ */
+public class DiscriminatedAssociationAttributeMapping
+		extends AbstractSingularAttributeMapping
+		implements DiscriminatedAssociationModelPart {
+	private final NavigableRole navigableRole;
+	private final DiscriminatedAssociationMapping discriminatorMapping;
+	private final SessionFactoryImplementor sessionFactory;
+
+	public DiscriminatedAssociationAttributeMapping(
+			NavigableRole attributeRole,
+			JavaType<?> baseAssociationJtd,
+			ManagedMappingType declaringType,
+			int stateArrayPosition,
+			int fetchableIndex,
+			AttributeMetadata attributeMetadata,
+			FetchTiming fetchTiming,
+			PropertyAccess propertyAccess,
+			Property bootProperty,
+			AnyType anyType,
+			Any bootValueMapping,
+			MappingModelCreationProcess creationProcess) {
+		super(
+				bootProperty.getName(),
+				stateArrayPosition,
+				fetchableIndex,
+				attributeMetadata,
+				fetchTiming,
+				fetchTiming == FetchTiming.IMMEDIATE ? FetchStyle.JOIN : FetchStyle.SELECT,
+				declaringType,
+				propertyAccess
+		);
+		this.navigableRole = attributeRole;
+
+		this.discriminatorMapping = DiscriminatedAssociationMapping.from(
+				attributeRole,
+				baseAssociationJtd,
+				this,
+				anyType,
+				bootValueMapping,
+				creationProcess
+		);
+		this.sessionFactory = creationProcess.getCreationContext().getSessionFactory();
+	}
+
+	@Nonnull
+	@Override
+	public DiscriminatorMapping getDiscriminatorMapping() {
+		return discriminatorMapping.getDiscriminatorMapping();
+	}
+
+	@Nonnull
+	@Override
+	public BasicValuedModelPart getKeyPart() {
+		return discriminatorMapping.getKeyPart();
+	}
+
+	@Nullable
+	@Override
+	public EntityMappingType resolveDiscriminatorValue(@Nullable Object discriminatorValue) {
+		return discriminatorMapping.resolveDiscriminatorValueToEntityMapping( discriminatorValue );
+	}
+
+	@Nullable
+	@Override
+	public Object resolveDiscriminatorForEntityType(@Nonnull EntityMappingType entityMappingType) {
+		return discriminatorMapping.resolveDiscriminatorValueToEntityMapping( entityMappingType );
+	}
+
+	@Override
+	public String toString() {
+		return "DiscriminatedAssociationAttributeMapping(" + navigableRole + ")@" + System.identityHashCode( this );
+	}
+
+	@Override
+	public Fetch generateFetch(
+			FetchParent fetchParent,
+			NavigablePath fetchablePath,
+			FetchTiming fetchTiming,
+			boolean selected,
+			String resultVariable,
+			DomainResultCreationState creationState) {
+		return discriminatorMapping.generateFetch(
+				fetchParent,
+				fetchablePath,
+				fetchTiming,
+				selected,
+				resultVariable,
+					creationState
+			);
+	}
+
+	@Nullable
+	@Override
+	public Fetch resolveCircularFetch(
+			NavigablePath fetchablePath,
+			FetchParent fetchParent,
+			FetchTiming fetchTiming,
+			DomainResultCreationState creationState) {
+		return discriminatorMapping.resolveCircularFetch( fetchParent, fetchablePath, fetchTiming, creationState );
+	}
+
+	@Nonnull
+	@Override
+	public <T> DomainResult<T> createDomainResult(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nullable String resultVariable,
+			@Nonnull DomainResultCreationState creationState) {
+		return discriminatorMapping.createDomainResult(
+				navigablePath,
+				tableGroup,
+				resultVariable,
+				creationState
+		);
+	}
+
+	@Override
+	public void applySqlSelections(@Nonnull NavigablePath navigablePath, @Nonnull TableGroup tableGroup, @Nonnull DomainResultCreationState creationState) {
+		discriminatorMapping.getDiscriminatorMapping().applySqlSelections( navigablePath, tableGroup, creationState );
+		discriminatorMapping.getKeyPart().applySqlSelections( navigablePath, tableGroup, creationState );
+	}
+
+	@Override
+	public void applySqlSelections(@Nonnull NavigablePath navigablePath, @Nonnull TableGroup tableGroup, @Nonnull DomainResultCreationState creationState, @Nonnull BiConsumer<SqlSelection, JdbcMapping> selectionConsumer) {
+		discriminatorMapping.getDiscriminatorMapping().applySqlSelections( navigablePath, tableGroup, creationState, selectionConsumer );
+		discriminatorMapping.getKeyPart().applySqlSelections( navigablePath, tableGroup, creationState, selectionConsumer );
+	}
+
+	@Nonnull
+	@Override
+	public NavigableRole getNavigableRole() {
+		return navigableRole;
+	}
+
+	@Nonnull
+	@Override
+	public MappingType getMappedType() {
+		return discriminatorMapping;
+	}
+
+	@Override
+	public int getNumberOfFetchables() {
+		return 2;
+	}
+
+	@Override
+	public Fetchable getFetchable(int position) {
+		return switch ( position ) {
+			case 0 -> {
+				final var discriminatorPart = getDiscriminatorMapping();
+				assert discriminatorPart.getFetchableKey() == 0;
+				yield discriminatorPart;
+			}
+			case 1 -> {
+				final var keyPart = getKeyPart();
+				assert keyPart.getFetchableKey() == 1;
+				yield keyPart;
+			}
+			default -> throw new IndexOutOfBoundsException( position );
+		};
+	}
+
+	@Nonnull
+	@Override
+	public String getContainingTableExpression() {
+		return getDiscriminatorMapping().getContainingTableExpression();
+	}
+
+	@Override
+	public int getJdbcTypeCount() {
+		return getDiscriminatorMapping().getJdbcTypeCount() + getKeyPart().getJdbcTypeCount();
+	}
+
+	@Nonnull
+	@Override
+	public JdbcMapping getJdbcMapping(final int index) {
+		return switch ( index ) {
+			case 0 -> discriminatorMapping.getDiscriminatorMapping().getJdbcMapping();
+			case 1 -> discriminatorMapping.getKeyPart().getJdbcMapping();
+			default -> throw new IndexOutOfBoundsException( index );
+		};
+	}
+
+	@Nonnull
+	@Override
+	public SelectableMapping getSelectable(int columnIndex) {
+		if ( columnIndex == 0 ) {
+			return getDiscriminatorMapping();
+		}
+		return getKeyPart();
+	}
+
+	@Nullable
+	@Override
+	public Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			return null;
+		}
+
+		final var concreteMappingType = determineConcreteType( value, session );
+		final var identifierMapping = concreteMappingType.getIdentifierMapping();
+
+		final Object discriminator =
+				discriminatorMapping.getModelPart()
+						.resolveDiscriminatorForEntityType( concreteMappingType );
+		final Object identifier = identifierMapping.getIdentifier( value );
+
+		return new Object[] {
+				discriminatorMapping.getDiscriminatorMapping().disassemble( discriminator, session ),
+				identifierMapping.disassemble( identifier, session )
+		};
+	}
+
+	@Override
+	public void addToCacheKey(@Nonnull MutableCacheKeyBuilder cacheKey, @Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			cacheKey.addValue( null );
+			cacheKey.addHashCode( 0 );
+		}
+		else {
+			final var concreteMappingType = determineConcreteType( value, session );
+
+			final Object discriminator =
+					discriminatorMapping.getModelPart()
+							.resolveDiscriminatorForEntityType( concreteMappingType );
+			discriminatorMapping.getDiscriminatorMapping().addToCacheKey( cacheKey, discriminator, session );
+
+			final var identifierMapping = concreteMappingType.getIdentifierMapping();
+			identifierMapping.addToCacheKey( cacheKey, identifierMapping.getIdentifier( value ), session );
+		}
+	}
+
+	private EntityMappingType determineConcreteType(Object entity, @Nullable SharedSessionContractImplementor session) {
+		final String entityName =
+				session == null
+						? sessionFactory.bestGuessEntityName( entity )
+						: session.bestGuessEntityName( entity );
+		return sessionFactory.getMappingMetamodel()
+				.getEntityDescriptor( entityName );
+	}
+
+	@Override
+	public int forEachSelectable(int offset, @Nonnull SelectableConsumer consumer) {
+		discriminatorMapping.getDiscriminatorMapping().forEachSelectable( offset, consumer );
+		discriminatorMapping.getKeyPart().forEachSelectable( offset + 1, consumer );
+
+		return 2;
+	}
+
+	@Override
+	public int forEachJdbcType(@Nonnull IndexedConsumer<JdbcMapping> action) {
+		action.accept( 0, discriminatorMapping.getDiscriminatorMapping().getJdbcMapping() );
+		action.accept( 1, discriminatorMapping.getKeyPart().getJdbcMapping() );
+		return 2;
+	}
+
+	@Override
+	public <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			valuesConsumer.consume(
+					offset,
+					x,
+					y,
+					null,
+					discriminatorMapping.getDiscriminatorMapping().getJdbcMapping()
+			);
+			valuesConsumer.consume(
+					offset + 1,
+					x,
+					y,
+					null,
+					discriminatorMapping.getKeyPart().getJdbcMapping()
+			);
+		}
+		else {
+			if ( value.getClass().isArray() ) {
+				final var values = (Object[]) value;
+				valuesConsumer.consume(
+						offset,
+						x,
+						y,
+						values[0],
+						discriminatorMapping.getDiscriminatorMapping().getJdbcMapping()
+				);
+				valuesConsumer.consume(
+						offset + 1,
+						x,
+						y,
+						values[1],
+						discriminatorMapping.getKeyPart().getJdbcMapping()
+				);
+			}
+			else {
+				final var concreteMappingType = determineConcreteType( value, session );
+
+				final Object discriminator =
+						discriminatorMapping.getModelPart()
+								.resolveDiscriminatorForEntityType( concreteMappingType );
+				final Object disassembledDiscriminator =
+						discriminatorMapping.getDiscriminatorMapping().disassemble( discriminator, session );
+				valuesConsumer.consume(
+						offset,
+						x,
+						y,
+						disassembledDiscriminator,
+						discriminatorMapping.getDiscriminatorMapping().getJdbcMapping()
+				);
+
+				final var identifierMapping = concreteMappingType.getIdentifierMapping();
+				final Object identifier = identifierMapping.getIdentifier( value );
+				final Object disassembledKey = discriminatorMapping.getKeyPart().disassemble( identifier, session );
+				valuesConsumer.consume(
+						offset + 1,
+						x,
+						y,
+						disassembledKey,
+						discriminatorMapping.getKeyPart().getJdbcMapping()
+				);
+			}
+		}
+
+		return 2;
+	}
+
+	@Override
+	public <X, Y> int breakDownJdbcValues(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return discriminatorMapping.breakDownJdbcValues( offset, x, y, domainValue, valueConsumer, session );
+	}
+
+	@Override
+	public <X, Y> int decompose(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return discriminatorMapping.decompose( offset, x, y, domainValue, valueConsumer, session );
+	}
+
+	@Override
+	public int forEachJdbcType(int offset, @Nonnull IndexedConsumer<JdbcMapping> action) {
+		int span = getDiscriminatorMapping().forEachJdbcType( offset, action );
+		return span + getKeyPart().forEachJdbcType( offset + span, action );
+	}
+
+	@Override
+	public void visitFetchables(Consumer<? super Fetchable> fetchableConsumer, EntityMappingType treatTargetType) {
+		fetchableConsumer.accept( getDiscriminatorMapping() );
+		fetchableConsumer.accept( getKeyPart() );
+	}
+
+	@Override
+	public void visitFetchables(IndexedConsumer<? super Fetchable> fetchableConsumer, EntityMappingType treatTargetType) {
+		//noinspection unchecked,rawtypes
+		forEachSubPart( (IndexedConsumer) fetchableConsumer, treatTargetType );
+	}
+
+	@Nullable
+	@Override
+	public ModelPart findSubPart(@Nonnull String name, @Nullable EntityMappingType treatTargetType) {
+		return discriminatorMapping.findSubPart( name, treatTargetType );
+	}
+
+	@Override
+	public void forEachSubPart(@Nonnull IndexedConsumer<ModelPart> consumer, @Nullable EntityMappingType treatTarget) {
+		consumer.accept( 0, getDiscriminatorMapping() );
+		consumer.accept( 1, getKeyPart() );
+	}
+
+	@Override
+	public void visitSubParts(@Nonnull Consumer<ModelPart> consumer, @Nullable EntityMappingType treatTargetType) {
+		consumer.accept( getDiscriminatorMapping() );
+		consumer.accept( getKeyPart() );
+	}
+
+	@Override
+	public boolean hasPartitionedSelectionMapping() {
+		return discriminatorMapping.getDiscriminatorMapping().isPartitioned()
+			|| discriminatorMapping.getKeyPart().isPartitioned();
+	}
+
+	public static class MutabilityPlanImpl implements MutabilityPlan<Object> {
+		// for now use the AnyType for consistency with write-operations
+		private final AnyType anyType;
+
+		public MutabilityPlanImpl(AnyType anyType) {
+			this.anyType = anyType;
+		}
+
+		@Override
+		public boolean isMutable() {
+			return anyType.isMutable();
+		}
+
+		@Nullable
+	@Override
+		public Object deepCopy(@Nullable Object value) {
+			return value;
+		}
+
+		@Nullable
+	@Override
+		public Serializable disassemble(@Nullable Object value, SharedSessionContract session) {
+//			if ( value == null ) {
+//				return null;
+//			}
+//			else {
+//				return new AnyType.ObjectTypeCacheEntry(
+//						persistenceContext.bestGuessEntityName( value ),
+//						ForeignKeys.getEntityIdentifierIfNotUnsaved(
+//								persistenceContext.bestGuessEntityName( value ),
+//								value,
+//								persistenceContext
+//						)
+//				);
+//			}
+
+			// this ^^ is what we want eventually, but for the time-being to ensure compatibility with
+			// writing just reuse the AnyType
+
+			final var persistenceContext = (SharedSessionContractImplementor) session;
+			return anyType.disassemble( value, persistenceContext, null );
+		}
+
+		@Nullable
+	@Override
+		public Object assemble(@Nullable Serializable cached, SharedSessionContract session) {
+//			final AnyType.ObjectTypeCacheEntry e = (AnyType.ObjectTypeCacheEntry) cached;
+//			return e == null ? null : session.internalLoad( e.entityName, e.id, eager, false );
+
+			// again, what we want eventually ^^ versus what we should do now vv
+
+			final var persistenceContext = (SharedSessionContractImplementor) session;
+			return anyType.assemble( cached, persistenceContext, null );
+		}
+	}
+
+	@Override
+	public TableGroupJoin createTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType requestedJoinType,
+			boolean fetched,
+			boolean addsPredicate,
+			SqlAstCreationState creationState) {
+		final var joinType = Objects.requireNonNullElse( requestedJoinType, SqlAstJoinType.INNER );
+		final var tableGroup = createRootTableGroupJoin(
+				navigablePath,
+				lhs,
+				explicitSourceAlias,
+				explicitSqlAliasBase,
+				requestedJoinType,
+				fetched,
+				null,
+				creationState
+		);
+
+		return new TableGroupJoin( navigablePath, joinType, tableGroup );
+	}
+
+	@Override
+	public TableGroup createRootTableGroupJoin(
+			NavigablePath navigablePath,
+			TableGroup lhs,
+			@Nullable String explicitSourceAlias,
+			@Nullable SqlAliasBase explicitSqlAliasBase,
+			@Nullable SqlAstJoinType sqlAstJoinType,
+			boolean fetched,
+			@Nullable Consumer<Predicate> predicateConsumer,
+			SqlAstCreationState creationState) {
+		return discriminatorMapping.createRootTableGroupJoin(
+				navigablePath,
+				lhs,
+				fetched,
+				sqlAstJoinType,
+				predicateConsumer,
+				creationState
+		);
+	}
+
+	@Override
+	public SqlAstJoinType getDefaultSqlAstJoinType(TableGroup parentTableGroup) {
+		return SqlAstJoinType.LEFT;
+	}
+
+	@Override
+	public String getSqlAliasStem() {
+		return castNonNull( getAttributeName() );
+	}
+
+	@Override
+	public void applyDiscriminator(@Nonnull Consumer<Predicate> predicateConsumer, @Nullable String alias, @Nonnull TableGroup tableGroup, @Nonnull SqlAstCreationState creationState) {
+		throw new UnsupportedOperationException();
+	}
+}

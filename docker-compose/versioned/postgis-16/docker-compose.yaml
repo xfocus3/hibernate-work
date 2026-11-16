@@ -1,0 +1,34 @@
+services:
+  postgis:
+    image: ${DB_IMAGE_POSTGIS_16:-docker.io/postgis/postgis:16-3.6@sha256:e0e15825c24572ff98576ee50543f32c4fc2590a642354e2fbcb970515026c50}
+    container_name: postgis
+    platform: ${POSTGRESQL_PLATFORM:-linux/amd64}
+    environment:
+      POSTGRES_USER: hibernate_orm_test
+      POSTGRES_PASSWORD: hibernate_orm_test
+      POSTGRES_DB: hibernate_orm_test
+    ports:
+      - "5432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - checkpoint_timeout=1d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hibernate_orm_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

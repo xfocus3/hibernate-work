@@ -1,0 +1,8 @@
+def tomlPath = System.getProperty("gradle.libs.versions.toml.path")
+dependencyResolutionManagement {
+    versionCatalogs {
+        libs {
+            from(files("$tomlPath"))
+        }
+    }
+}

@@ -1,0 +1,47 @@
+package org.hibernate.query.criteria;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+
+import jakarta.persistence.Tuple;
+import jakarta.persistence.criteria.CriteriaQuery;
+import org.hibernate.query.sqm.tree.spi.insert.SqmInsertSelectStatement;
+
+/**
+ * A representation of SqmInsertSelectStatement at the
+ * {@link org.hibernate.query.criteria} level, even though JPA does
+ * not define support for insert-select criteria.
+ *
+ * @see SqmInsertSelectStatement
+ *
+ * @apiNote Incubating mainly for 2 purposes:<ul>
+ *     <li>
+ *         to decide how to handle the typing for the "selection part".  Should it
+ *         be {@code <T>} or {@code <X>}.  For the time being we expose it as
+ *         {@code <T>} because that is what was done (without intention) originally,
+ *         and it is the easiest form to validate
+ *     </li>
+ *     <li>
+ *         Would be better to expose non-SQM contracts here
+ *     </li>
+ * </ul>
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.3")
+public interface JpaCriteriaInsertSelect<T> extends JpaCriteriaInsert<T> {
+
+	/**
+	 * Set the select query supplying inserted values.
+	 */
+	@Nonnull
+	JpaCriteriaInsertSelect<T> select(@Nonnull CriteriaQuery<Tuple> criteriaQuery);
+
+	/**
+	 * Set the conflict clause for this insert statement.
+	 */
+	@Override
+	@Nonnull
+	JpaCriteriaInsertSelect<T> onConflict(@Nullable JpaConflictClause<T> conflictClause);
+}

@@ -1,0 +1,713 @@
+package org.hibernate.sql.exec.internal.lock;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+import org.hibernate.dialect.lock.spi.LockingClauseStrategy;
+
+import jakarta.persistence.PessimisticLockScope;
+import jakarta.persistence.Timeout;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.ScrollMode;
+import org.hibernate.Session;
+import org.hibernate.StaleObjectStateException;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.CollectionKey;
+import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.TableDetails;
+import org.hibernate.query.IllegalQueryOperationException;
+import org.hibernate.query.internal.QueryOptionsImpl;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.sqm.ComparisonOperator;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.expression.SqlTuple;
+import org.hibernate.sql.ast.spi.query.from.NamedTableReference;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.predicate.ComparisonPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.InListPredicate;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.internal.BaseExecutionContext;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingsImpl;
+import org.hibernate.sql.exec.internal.SqlTypedMappingJdbcParameter;
+import org.hibernate.sql.exec.internal.StandardStatementCreator;
+import org.hibernate.sql.exec.spi.ExecutionContext;
+import org.hibernate.sql.exec.spi.JdbcParameterBindings;
+import org.hibernate.sql.exec.spi.LoadedValuesCollector;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+import org.hibernate.sql.spi.mutation.TableMapping;
+import org.hibernate.sql.results.graph.internal.LockingResultCoverage;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.StringJoiner;
+import java.util.TreeSet;
+
+import static org.hibernate.Timeouts.SKIP_LOCKED_MILLI;
+import static org.hibernate.sql.exec.SqlExecLogger.SQL_EXEC_LOGGER;
+
+/**
+ * Helper for acquiring and validating follow-on entity and collection locks.
+ *
+ * @author Steve Ebersole
+ */
+public class LockingHelper {
+	/// Whether the request expresses pessimistic skip-locked intent, including
+	/// the legacy lock mode. Does not change direct-locking option precedence.
+	public static boolean isSkipLockedRequest(LockOptions lockOptions) {
+		return lockOptions != null && lockOptions.getLockMode().isPessimistic()
+				&& (lockOptions.getTimeout().milliseconds() == SKIP_LOCKED_MILLI
+						|| lockOptions.getLockMode() == LockMode.UPGRADE_SKIPLOCKED);
+	}
+
+	/// Rejects skip-locked acquisition after follow-on locking has been selected.
+	public static void validateFollowOnLocking(LockOptions lockOptions) {
+		if ( isSkipLockedRequest( lockOptions ) ) {
+			throw new IllegalQueryOperationException(
+					"SKIP_LOCKED is not supported with follow-on locking; use direct locking for a supported query shape"
+			);
+		}
+	}
+
+	/// Checks structural identity coverage before any query or timeout action is executed.
+	/// Each set-query branch has its own summary; a loader-created AST instead uses
+	/// the executable result graph. Collection paths retain their existing acquisition route.
+	public static void validateFollowOnLockingResults(
+			SelectStatement statement,
+			QuerySpec lockingTarget,
+			LockingClauseStrategy strategy) {
+		final List<QuerySpec> branches = new ArrayList<>();
+		statement.getQueryPart().visitQuerySpecs( branches::add );
+		if ( !branches.contains( lockingTarget ) && lockingTarget.getLockingResultCoverage() != null ) {
+			// A dialect may have wrapped the original selection for pagination.
+			branches.clear();
+			branches.add( lockingTarget );
+		}
+		final var missing = new TreeSet<String>();
+		boolean identifiable = false;
+		for ( int index = 0; index < branches.size(); index++ ) {
+			final var branch = branches.get( index );
+			var coverage = branch.getLockingResultCoverage();
+			if ( coverage == null ) {
+				coverage = LockingResultCoverage.EMPTY;
+				for ( var result : statement.getDomainResultDescriptors() ) {
+					coverage = coverage.withDomainResult( result );
+				}
+			}
+			final var required = new LinkedHashSet<NavigablePath>();
+			if ( branch.getRootPathsForLocking() != null ) {
+				required.addAll( branch.getRootPathsForLocking() );
+			}
+			if ( branch == lockingTarget && strategy.getPathsToLock() != null ) {
+				required.addAll( strategy.getPathsToLock() );
+			}
+			identifiable |= !required.isEmpty();
+			for ( var path : required ) {
+				if ( !coverage.entityPaths().contains( path ) && !coverage.collectionPaths().contains( path ) ) {
+					missing.add( (branches.size() == 1 ? "" : "branch " + (index + 1) + ": ") + path.getFullPath() );
+				}
+			}
+		}
+		if ( !missing.isEmpty() || !identifiable ) {
+			throw new IllegalQueryOperationException(
+					"Follow-on locking cannot acquire all requested locks from this result shape"
+							+ (missing.isEmpty() ? "; no identifiable entity lock targets" : "; uncovered entity lock targets: " + missing)
+							+ "; select the required entities or use direct locking for a supported query shape"
+			);
+		}
+	}
+
+	/// Validates identifier coverage for one follow-on table acquisition without
+	/// executing SQL or applying reread state. Optional non-identifier tables and
+	/// skip-locked acquisition are exempt. Expected-key order determines both the
+	/// representative missing entity and the complete diagnostic identifier list.
+	///
+	/// @throws StaleObjectStateException if a required entity row was not acquired
+	public static void validateAcquiredRows(
+			TableDetails tableDetails,
+			EntityMappingType entityMappingType,
+			List<EntityKey> expectedKeys,
+			List<Object[]> acquiredRows,
+			Timeout lockTimeout,
+			SharedSessionContractImplementor session) {
+		if ( lockTimeout.milliseconds() == SKIP_LOCKED_MILLI
+				|| !tableDetails.isIdentifierTable()
+						&& tableDetails instanceof TableMapping tableMapping && tableMapping.isOptional() ) {
+			return;
+		}
+
+		final var missingKeys = new LinkedHashSet<>( expectedKeys );
+		final var persister = entityMappingType.getEntityPersister();
+		for ( var row : acquiredRows ) {
+			missingKeys.remove( session.generateEntityKey( row[0], persister ) );
+		}
+		if ( missingKeys.isEmpty() ) {
+			return;
+		}
+
+		reportMissingRows( tableDetails, entityMappingType, missingKeys, session );
+	}
+
+	static void validateAcquiredIdentities(
+			TableDetails tableDetails,
+			EntityMappingType entityMappingType,
+			List<EntityKey> expectedKeys,
+			java.util.function.Predicate<EntityKey> acquired,
+			Timeout lockTimeout,
+			SharedSessionContractImplementor session) {
+		if ( lockTimeout.milliseconds() == SKIP_LOCKED_MILLI
+				|| !tableDetails.isIdentifierTable()
+						&& tableDetails instanceof TableMapping tableMapping && tableMapping.isOptional() ) {
+			return;
+		}
+		LinkedHashSet<EntityKey> missing = null;
+		for ( var key : expectedKeys ) {
+			if ( !acquired.test( key ) ) {
+				if ( missing == null ) {
+					missing = new LinkedHashSet<>();
+				}
+				missing.add( key );
+			}
+		}
+		if ( missing != null ) {
+			reportMissingRows( tableDetails, entityMappingType, missing, session );
+		}
+	}
+
+	private static void reportMissingRows(
+			TableDetails tableDetails,
+			EntityMappingType entityMappingType,
+			LinkedHashSet<EntityKey> missingKeys,
+			SharedSessionContractImplementor session) {
+		final var persister = entityMappingType.getEntityPersister();
+		final var firstMissing = missingKeys.iterator().next();
+		final var factory = session.getFactory();
+		final var identifiers = new StringJoiner( ", ", "[", "]" );
+		for ( var key : missingKeys ) {
+			identifiers.add( persister.getIdentifierType().toLoggableString( key.getIdentifier(), factory ) );
+		}
+		final var statistics = factory.getStatistics();
+		if ( statistics.isStatisticsEnabled() ) {
+			statistics.optimisticFailure( firstMissing.getEntityName() );
+		}
+		throw new StaleObjectStateException(
+				firstMissing.getEntityName(),
+				firstMissing.getIdentifier(),
+				"Follow-on locking failed for entity '" + firstMissing.getEntityName()
+						+ "' on table '" + tableDetails.getTableName() + "': missing identifiers " + identifiers
+		);
+	}
+
+	/**
+	 * Lock a collection-table for a single entity.
+	 *
+	 * @param attributeMapping The plural attribute whose table needs locked.
+	 * @param lockMode The lock mode to apply
+	 * @param lockTimeout A lock timeout to apply, if one.
+	 * @param collectionToLock The collection to lock.
+	 *
+	 * @see Session#lock
+	 */
+	public static void lockCollectionTable(
+			PluralAttributeMapping attributeMapping,
+			LockMode lockMode,
+			Timeout lockTimeout,
+			PersistentCollection<?> collectionToLock,
+			ExecutionContext executionContext) {
+		lockCollectionTableByKey( attributeMapping, lockMode, lockTimeout, collectionToLock.getKey(), executionContext );
+	}
+
+	/// Locks existing collection-table rows using the database collection key,
+	/// without reading or initializing the owner's current collection field.
+	/// The key may be the owner's identifier or a referenced unique property.
+	public static void lockCollectionTableByKey(
+			PluralAttributeMapping attributeMapping,
+			LockMode lockMode,
+			Timeout lockTimeout,
+			Object collectionKey,
+			ExecutionContext executionContext) {
+		final SharedSessionContractImplementor session = executionContext.getSession();
+
+		final var keyDescriptor = attributeMapping.getKeyDescriptor();
+		final String keyTableName = keyDescriptor.getKeyTable();
+
+		if ( SQL_EXEC_LOGGER.isDebugEnabled() ) {
+			SQL_EXEC_LOGGER.collectionLockingForCollectionTable( keyTableName, attributeMapping.getRootPathName() );
+		}
+
+		final var querySpec = new QuerySpec( true );
+
+		final var tableReference = new NamedTableReference( keyTableName, "tbl" );
+
+		final LockingTableGroup tableGroup = new LockingTableGroup(
+				tableReference,
+				keyTableName,
+				attributeMapping,
+				keyDescriptor.getKeySide().getModelPart()
+		);
+		querySpec.getFromClause().addRoot( tableGroup );
+		querySpec.applyRootPathForLocking( tableGroup.getNavigablePath() );
+
+		final var keyPart = keyDescriptor.getKeyPart();
+		final var columnReference = new ColumnReference( tableReference, keyPart.getSelectable( 0 ) );
+
+		// NOTE: We add the key column to the selection list, but never create a DomainResult
+		// as we won't read the value back.  Ideally, we would read the "value column(s)" and
+		// update the collection state accordingly much like is done for entity state -
+		// however, the concern is minor, so for simplicity we do not.
+		querySpec.getSelectClause()
+				.addSqlSelection( new SqlSelectionImpl( columnReference, 0 ) );
+
+		final int jdbcTypeCount = keyDescriptor.getJdbcTypeCount();
+		final var parameterBindings = new JdbcParameterBindingsImpl( jdbcTypeCount );
+
+		final ComparisonPredicate restriction;
+		if ( jdbcTypeCount == 1 ) {
+			final var jdbcParameter =
+					new SqlTypedMappingJdbcParameter( keyPart.getSelectable( 0 ) );
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey,
+					(valueIndex, value, jdbcValueMapping) -> {
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcValueMapping.getJdbcMapping(), value ) );
+					},
+					session
+			);
+			restriction = new ComparisonPredicate( columnReference, ComparisonOperator.EQUAL, jdbcParameter );
+		}
+		else {
+			final List<ColumnReference> columnReferences = new ArrayList<>( jdbcTypeCount );
+			final List<JdbcParameter> jdbcParameters = new ArrayList<>( jdbcTypeCount );
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey,
+					(valueIndex, value, jdbcValueMapping) -> {
+						columnReferences.add( new ColumnReference( tableReference, jdbcValueMapping ) );
+						final var jdbcMapping = jdbcValueMapping.getJdbcMapping();
+						final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+						jdbcParameters.add( jdbcParameter );
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcMapping, value ) );
+					},
+					session
+			);
+			final var columns = new SqlTuple( columnReferences, keyDescriptor );
+			final var parameters = new SqlTuple( jdbcParameters, keyDescriptor );
+			restriction = new ComparisonPredicate( columns, ComparisonOperator.EQUAL, parameters );
+		}
+		querySpec.applyPredicate( restriction );
+
+		performLocking( querySpec, parameterBindings,
+				lockingExecutionContext( lockMode, lockTimeout, executionContext ) );
+	}
+
+	/**
+	 * Lock a collection-table.
+	 *
+	 * @param attributeMapping The plural attribute whose table needs locked.
+	 * @param lockMode The lock mode to apply
+	 * @param lockTimeout A lock timeout to apply, if one.
+	 * @param ownerDetailsMap Details for each owner, whose collection-table rows should be locked.
+	 */
+	public static void lockCollectionTable(
+			PluralAttributeMapping attributeMapping,
+			LockMode lockMode,
+			Timeout lockTimeout,
+			Map<Object, EntityDetails> ownerDetailsMap,
+			ExecutionContext executionContext) {
+		final var keyDescriptor = attributeMapping.getKeyDescriptor();
+		final String keyTableName = keyDescriptor.getKeyTable();
+
+		if ( SQL_EXEC_LOGGER.isDebugEnabled() ) {
+			SQL_EXEC_LOGGER.followOnLockingForCollectionTable( keyTableName, attributeMapping.getRootPathName() );
+		}
+
+		final var querySpec = new QuerySpec( true );
+
+		final var tableReference = new NamedTableReference( keyTableName, "tbl" );
+
+		final LockingTableGroup tableGroup = new LockingTableGroup(
+				tableReference,
+				keyTableName,
+				attributeMapping,
+				keyDescriptor.getKeySide().getModelPart()
+		);
+		querySpec.getFromClause().addRoot( tableGroup );
+		querySpec.applyRootPathForLocking( tableGroup.getNavigablePath() );
+
+		final var keyPart = keyDescriptor.getKeyPart();
+		final var columnReference = new ColumnReference( tableReference, keyPart.getSelectable( 0 ) );
+
+		// NOTE: We add the key column to the selection list, but never create a DomainResult
+		// as we won't read the value back.  Ideally, we would read the "value column(s)" and
+		// update the collection state accordingly much like is done for entity state -
+		// however, the concern is minor, so for simplicity we do not.
+		querySpec.getSelectClause()
+				.addSqlSelection( new SqlSelectionImpl( columnReference, 0 ) );
+
+		final int jdbcTypeCount = keyDescriptor.getJdbcTypeCount();
+		final int expectedParamCount = ownerDetailsMap.size() * jdbcTypeCount;
+		final var parameterBindings = new JdbcParameterBindingsImpl( expectedParamCount );
+
+		final InListPredicate restriction;
+		if ( jdbcTypeCount == 1 ) {
+			restriction = new InListPredicate( columnReference );
+			applySimpleCollectionKeyTableLockRestrictions(
+					attributeMapping,
+					keyDescriptor,
+					restriction,
+					parameterBindings,
+					ownerDetailsMap,
+					executionContext.getSession()
+			);
+		}
+		else {
+			restriction = applyCompositeCollectionKeyTableLockRestrictions(
+					attributeMapping,
+					keyDescriptor,
+					tableReference,
+					parameterBindings,
+					ownerDetailsMap,
+					executionContext.getSession()
+			);
+		}
+		querySpec.applyPredicate( restriction );
+
+		performLocking( querySpec, parameterBindings,
+				lockingExecutionContext( lockMode, lockTimeout, executionContext ) );
+	}
+
+	private static ExecutionContext lockingExecutionContext(LockMode lockMode, Timeout lockTimeout, ExecutionContext executionContext) {
+		final var lockingQueryOptions = new QueryOptionsImpl();
+		final var lockOptions = lockingQueryOptions.getLockOptions();
+		lockOptions.setLockMode( lockMode );
+		lockOptions.setTimeout( lockTimeout );
+		return new BaseExecutionContext( executionContext.getSession() ) {
+			@Override
+			public QueryOptions getQueryOptions() {
+				return lockingQueryOptions;
+			}
+		};
+	}
+
+	/// Resolves the persisted owner key without requiring a collection-valued snapshot.
+	public static Object resolveCollectionKey(
+			PluralAttributeMapping attribute,
+			Object owner,
+			SharedSessionContractImplementor session) {
+		final var collectionPersister = attribute.getCollectionDescriptor();
+		final var collectionType = collectionPersister.getCollectionType();
+		final var persistenceContext = session.getPersistenceContextInternal();
+		final var ownerEntry = persistenceContext.getEntry( owner );
+		if ( !collectionType.useLHSPrimaryKey() && ownerEntry != null && ownerEntry.getLoadedState() == null ) {
+			// Read-only owners have no snapshot. Their current property-ref value may
+			// have changed, but the original collection entry retains the database key.
+			final var collectionEntries = persistenceContext.getCollectionEntries();
+			if ( collectionEntries != null ) {
+				for ( var collectionEntry : collectionEntries.entrySet() ) {
+					if ( collectionEntry.getKey().getOwner() == owner
+							&& collectionEntry.getValue().getLoadedPersister() == collectionPersister ) {
+						return collectionEntry.getValue().getLoadedKey();
+					}
+				}
+			}
+		}
+		return collectionType.getKeyOfOwner( owner, session );
+	}
+
+
+	private static void applySimpleCollectionKeyTableLockRestrictions(
+			PluralAttributeMapping attributeMapping,
+			ForeignKeyDescriptor keyDescriptor,
+			InListPredicate restriction,
+			JdbcParameterBindingsImpl parameterBindings,
+			Map<Object, EntityDetails> ownerDetailsMap,
+			SharedSessionContractImplementor session) {
+
+		ownerDetailsMap.forEach( (o, entityDetails) -> {
+			final var collectionKey = resolveCollectionKey( attributeMapping, entityDetails.instance(), session );
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey,
+					(valueIndex, value, jdbcValueMapping) -> {
+						final var jdbcMapping = jdbcValueMapping.getJdbcMapping();
+						final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+						restriction.addExpression( jdbcParameter );
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcMapping, value ) );
+					},
+					session
+			);
+		} );
+	}
+
+	private static InListPredicate applyCompositeCollectionKeyTableLockRestrictions(
+			PluralAttributeMapping attributeMapping,
+			ForeignKeyDescriptor keyDescriptor,
+			TableReference tableReference,
+			JdbcParameterBindingsImpl parameterBindings,
+			Map<Object, EntityDetails> ownerDetailsMap,
+			SharedSessionContractImplementor session) {
+		final int jdbcTypeCount = keyDescriptor.getJdbcTypeCount();
+		final List<ColumnReference> columnReferences = new ArrayList<>( jdbcTypeCount );
+		keyDescriptor.forEachSelectable( (selectionIndex, selectableMapping) -> {
+			columnReferences.add( new ColumnReference( tableReference, selectableMapping ) );
+		} );
+		final InListPredicate inListPredicate = new InListPredicate( new SqlTuple( columnReferences, keyDescriptor ) );
+
+		ownerDetailsMap.forEach( (o, entityDetails) -> {
+			final var collectionKey = resolveCollectionKey( attributeMapping, entityDetails.instance(), session );
+
+			final List<JdbcParameter> jdbcParameters = new ArrayList<>( jdbcTypeCount );
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey,
+					(valueIndex, value, jdbcValueMapping) -> {
+						final var jdbcMapping = jdbcValueMapping.getJdbcMapping();
+						final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+						jdbcParameters.add( jdbcParameter );
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcMapping, value ) );
+					},
+					session
+			);
+			inListPredicate.addExpression( new SqlTuple( jdbcParameters, keyDescriptor ) );
+		} );
+
+		return inListPredicate;
+	}
+
+	/**
+	 * Lock a collection-table.
+	 *
+	 * @param attributeMapping The plural attribute whose table needs locked.
+	 * @param lockMode The lock mode to apply
+	 * @param lockTimeout A lock timeout to apply, if one.
+	 * @param collectionKeys Keys of collection-table rows that should be locked.
+	 */
+	public static void lockCollectionTable(
+			PluralAttributeMapping attributeMapping,
+			LockMode lockMode,
+			Timeout lockTimeout,
+			List<CollectionKey> collectionKeys,
+			ExecutionContext executionContext) {
+		final var keyDescriptor = attributeMapping.getKeyDescriptor();
+		final String keyTableName = keyDescriptor.getKeyTable();
+
+		if ( SQL_EXEC_LOGGER.isDebugEnabled() ) {
+			SQL_EXEC_LOGGER.followOnLockingForCollectionTable( keyTableName, attributeMapping.getRootPathName() );
+		}
+
+		final var tableReference = new NamedTableReference( keyTableName, "tbl" );
+		final var tableGroup = new LockingTableGroup(
+				tableReference,
+				keyTableName,
+				attributeMapping,
+				keyDescriptor.getKeySide().getModelPart()
+		);
+
+		final var querySpec = new QuerySpec( true );
+		querySpec.getFromClause().addRoot( tableGroup );
+		querySpec.applyRootPathForLocking( tableGroup.getNavigablePath() );
+
+		final var keyPart = keyDescriptor.getKeyPart();
+		final var columnReference = new ColumnReference( tableReference, keyPart.getSelectable( 0 ) );
+
+		// NOTE: We add the key column to the selection list, but never create a DomainResult
+		// as we won't read the value back.  Ideally, we would read the "value column(s)" and
+		// update the collection state accordingly much like is done for entity state -
+		// however, the concern is minor, so for simplicity we do not.
+		final var sqlSelection = new SqlSelectionImpl( columnReference, 0 );
+		querySpec.getSelectClause().addSqlSelection( sqlSelection );
+
+		final int jdbcTypeCount = keyDescriptor.getJdbcTypeCount();
+		final int expectedParamCount = collectionKeys.size() * jdbcTypeCount;
+		final var parameterBindings = new JdbcParameterBindingsImpl( expectedParamCount );
+
+		final InListPredicate restriction;
+		if ( jdbcTypeCount == 1 ) {
+			restriction = new InListPredicate( columnReference );
+			applySimpleCollectionKeyTableLockRestrictions(
+					keyDescriptor,
+					restriction,
+					parameterBindings,
+					collectionKeys,
+					executionContext.getSession()
+			);
+		}
+		else {
+			restriction = applyCompositeCollectionKeyTableLockRestrictions(
+					attributeMapping,
+					keyDescriptor,
+					tableReference,
+					parameterBindings,
+					collectionKeys,
+					executionContext.getSession()
+			);
+		}
+		querySpec.applyPredicate( restriction );
+
+		performLocking( querySpec, parameterBindings,
+				lockingExecutionContext( lockMode, lockTimeout, executionContext ) );
+	}
+
+	private static void applySimpleCollectionKeyTableLockRestrictions(
+			ForeignKeyDescriptor keyDescriptor,
+			InListPredicate restriction,
+			JdbcParameterBindingsImpl parameterBindings,
+			List<CollectionKey> collectionKeys,
+			SharedSessionContractImplementor session) {
+		for ( var collectionKey : collectionKeys ) {
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey.getKey(),
+					(valueIndex, value, jdbcValueMapping) -> {
+						final var jdbcMapping = jdbcValueMapping.getJdbcMapping();
+						final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+						restriction.addExpression( jdbcParameter );
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcMapping, value ) );
+					},
+					session
+			);
+		}
+	}
+
+	private static InListPredicate applyCompositeCollectionKeyTableLockRestrictions(
+			PluralAttributeMapping attributeMapping,
+			ForeignKeyDescriptor keyDescriptor,
+			TableReference tableReference,
+			JdbcParameterBindingsImpl parameterBindings,
+			List<CollectionKey> collectionKeys,
+			SharedSessionContractImplementor session) {
+		final int jdbcTypeCount = keyDescriptor.getJdbcTypeCount();
+		final List<ColumnReference> columnReferences = new ArrayList<>( jdbcTypeCount );
+		keyDescriptor.forEachSelectable( (selectionIndex, selectableMapping) -> {
+			columnReferences.add( new ColumnReference( tableReference, selectableMapping ) );
+		} );
+		final var inListPredicate = new InListPredicate( new SqlTuple( columnReferences, keyDescriptor ) );
+
+		for ( var collectionKey : collectionKeys ) {
+			final List<JdbcParameter> jdbcParameters = new ArrayList<>( jdbcTypeCount );
+			keyDescriptor.breakDownJdbcValues(
+					collectionKey.getKey(),
+					(valueIndex, value, jdbcValueMapping) -> {
+						final var jdbcMapping = jdbcValueMapping.getJdbcMapping();
+						final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+						jdbcParameters.add( jdbcParameter );
+						parameterBindings.addBinding( jdbcParameter,
+								new JdbcParameterBindingImpl( jdbcMapping, value ) );
+					},
+					session
+			);
+			inListPredicate.addExpression( new SqlTuple( jdbcParameters, keyDescriptor ) );
+		}
+
+		return inListPredicate;
+	}
+
+	private static void performLocking(
+			QuerySpec querySpec,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext lockingExecutionContext) {
+		final var sessionFactory = lockingExecutionContext.getSession().getSessionFactory();
+		final var jdbcServices = sessionFactory.getJdbcServices();
+		jdbcServices.getJdbcSelectExecutor().executeQuery(
+				jdbcServices.getDialect().getSqlAstTranslatorFactory()
+						.buildTranslator( new SqlAstTranslationRequest.Select( sessionFactory, new SelectStatement( querySpec ) ) )
+						.translate( jdbcParameterBindings, lockingExecutionContext.getQueryOptions() ),
+				jdbcParameterBindings,
+				lockingExecutionContext,
+				row -> row,
+				Object[].class,
+				StandardStatementCreator.getStatementCreator( ScrollMode.FORWARD_ONLY ),
+				ListResultsConsumer.instance( ListResultsConsumer.UniqueSemantic.ALLOW )
+		);
+	}
+
+	/**
+	 * Log information about the entries in LoadedValuesCollector.
+	 */
+	public static void logLoadedValues(LoadedValuesCollector collector) {
+		if ( SQL_EXEC_LOGGER.isDebugEnabled() ) {
+			var summary = new StringBuilder();
+			summary.append( "  Loaded entities:\n" );
+			collector.getCollectedEntities().forEach( (reg) -> {
+				summary.append( String.format( "    - %s#%s\n",
+						reg.entityDescriptor().getEntityName(),
+						reg.entityKey().getIdentifier() ) );
+			} );
+
+			summary.append( "  Loaded collections:\n" );
+			collector.getCollectedCollections().forEach( (reg) -> {
+				summary.append( String.format( "    - %s#%s\n",
+						reg.collectionDescriptor().getRootPathName(),
+						reg.collectionKey().getKey() ) );
+			} );
+			SQL_EXEC_LOGGER.followOnLockingCollectedLoadedValues( summary.toString() );
+		}
+	}
+
+	public static void segmentLoadedValues(List<LoadedValuesCollector.LoadedEntityRegistration> registrations, Map<EntityMappingType, List<EntityKey>> map) {
+		if ( registrations != null ) {
+			registrations.forEach( (registration) -> {
+				final var entityKeys =
+						map.computeIfAbsent( registration.entityDescriptor(),
+								entityMappingType -> new ArrayList<>() );
+				entityKeys.add( registration.entityKey() );
+			} );
+		}
+	}
+
+	public static void segmentLoadedCollections(
+			List<LoadedValuesCollector.LoadedCollectionRegistration> registrations,
+			PessimisticLockScope lockScope,
+			Map<EntityMappingType, Map<PluralAttributeMapping, List<CollectionKey>>> map) {
+		if ( registrations != null ) {
+			registrations.forEach( (registration) -> {
+				final var pluralAttributeMapping = registration.collectionDescriptor();
+				if ( lockScope == PessimisticLockScope.FETCHED
+					|| pluralAttributeMapping.getSeparateCollectionTable() != null ) {
+					final var attributeKeys = map.computeIfAbsent(
+							pluralAttributeMapping.findContainingEntityMapping(),
+							entityMappingType -> new HashMap<>()
+					);
+					final var collectionKeys = attributeKeys.computeIfAbsent(
+							pluralAttributeMapping,
+							entityMappingType -> new ArrayList<>()
+					);
+					collectionKeys.add( registration.collectionKey() );
+				}
+			} );
+		}
+	}
+
+	/// Resolves the keys for one entity mapping using Hibernate identity semantics.
+	/// The returned mutable map exposes domain identifiers as keys, including in its
+	/// backed views, without invoking identifier Java equality or hashing for lookups.
+	public static Map<Object, EntityDetails> resolveEntityKeys(List<EntityKey> entityKeys, ExecutionContext executionContext) {
+		final var session = executionContext.getSession();
+		final Map<Object, EntityDetails> map = entityKeys.isEmpty()
+				? new HashMap<>()
+				: new EntityDetailsMap( session, entityKeys.get( 0 ).getPersister() );
+		final var persistenceContext = session.getPersistenceContext();
+		entityKeys.forEach( (entityKey) -> {
+			final Object instance = persistenceContext.getEntity( entityKey );
+			final var entityEntry = persistenceContext.getEntry( instance );
+			final var details = new EntityDetails( entityKey, entityEntry, instance );
+			if ( map instanceof EntityDetailsMap indexed ) {
+				indexed.putEntityKey( entityKey, details );
+			}
+			else {
+				map.put( entityKey.getIdentifierValue(), details );
+			}
+		} );
+		return map;
+	}
+
+}

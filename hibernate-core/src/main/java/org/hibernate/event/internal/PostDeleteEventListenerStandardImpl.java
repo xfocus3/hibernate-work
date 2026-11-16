@@ -1,0 +1,33 @@
+package org.hibernate.event.internal;
+
+import org.hibernate.event.spi.PostDeleteEvent;
+import org.hibernate.event.spi.PostDeleteEventListener;
+import org.hibernate.jpa.event.spi.CallbackType;
+import org.hibernate.persister.entity.EntityPersister;
+import jakarta.annotation.Nonnull;
+
+/**
+ * The standard PostDeleteEventListener implementation
+ *
+ * @author Kabir Khan
+ * @author Steve Ebersole
+ */
+public class PostDeleteEventListenerStandardImpl implements PostDeleteEventListener {
+	@Override
+	public void onPostDelete(@Nonnull PostDeleteEvent event) {
+		final Object entity = event.getEntity();
+		final var callbacks = event.getPersister().getEntityCallbacks();
+		event.getSession()
+				.runEntityLifecycleCallback( () -> {
+					callbacks.postRemove( entity );
+					callbacks.postDelete( entity );
+				} );
+	}
+
+	@Override
+	public boolean requiresPostCommitHandling(@Nonnull EntityPersister persister) {
+		final var callbacks = persister.getEntityCallbacks();
+		return callbacks.hasRegisteredCallbacks( CallbackType.POST_REMOVE )
+			|| callbacks.hasRegisteredCallbacks( CallbackType.POST_DELETE );
+	}
+}

@@ -1,0 +1,87 @@
+package org.hibernate.metamodel.model.domain.internal;
+
+import jakarta.annotation.Nullable;
+import jakarta.annotation.Nonnull;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.query.sqm.spi.DiscriminatorSqmPath;
+import org.hibernate.metamodel.model.domain.EntityDomainType;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.domain.AbstractSqmPath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.query.sqm.tree.spi.expression.SqmLiteralEntityType;
+import org.hibernate.query.sqm.tree.spi.domain.SqmEntityDomainType;
+import org.hibernate.spi.NavigablePath;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+
+/**
+ * {@link SqmPath} specialization for an entity discriminator
+ *
+ * @author Steve Ebersole
+ */
+@SuppressWarnings({ "rawtypes", "unchecked" })
+public class EntityDiscriminatorSqmPath<T> extends AbstractSqmPath<T> implements DiscriminatorSqmPath<T> {
+	private final SqmEntityDomainType entityDomainType;
+	private final EntityMappingType entityDescriptor;
+
+	protected EntityDiscriminatorSqmPath(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull SqmPathSource referencedPathSource,
+			@Nullable SqmPath<?> lhs,
+			@Nonnull SqmEntityDomainType entityDomainType,
+			@Nonnull EntityMappingType entityDescriptor,
+			@Nonnull NodeBuilder nodeBuilder) {
+		super( navigablePath, referencedPathSource, lhs, nodeBuilder );
+		this.entityDomainType = entityDomainType;
+		this.entityDescriptor = entityDescriptor;
+	}
+
+	@Nonnull
+	public EntityDomainType getEntityDomainType() {
+		return entityDomainType;
+	}
+
+	@Nonnull
+	public EntityMappingType getEntityDescriptor() {
+		return entityDescriptor;
+	}
+
+	@Override
+	public @Nonnull SqmPath<?> getLhs() {
+		return castNonNull( super.getLhs() );
+	}
+
+	@Override
+	public @Nonnull EntityDiscriminatorSqmPathSource getExpressible() {
+//		return (EntityDiscriminatorSqmPathSource) getNodeType();
+		return (EntityDiscriminatorSqmPathSource) getReferencedPathSource();
+	}
+
+	@Nonnull
+	@Override
+	public EntityDiscriminatorSqmPath copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		else {
+			return context.registerCopy(
+					this,
+					(EntityDiscriminatorSqmPath) getLhs().copy( context ).type()
+			);
+		}
+	}
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return entityDescriptor.hasSubclasses()
+				? walker.visitDiscriminatorPath( this )
+				: walker.visitEntityTypeLiteralExpression(
+						new SqmLiteralEntityType( entityDomainType, nodeBuilder() ) );
+	}
+}

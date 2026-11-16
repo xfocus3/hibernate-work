@@ -1,0 +1,133 @@
+package org.hibernate.query.sqm.mutation.internal;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.spi.Stack;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.spi.QueryParameterBindings;
+import org.hibernate.query.sqm.internal.DomainParameterXref;
+import org.hibernate.query.sqm.sql.spi.BaseSqmToSqlAstConverter;
+import org.hibernate.query.sqm.sql.spi.SqmTranslationRequest;
+import org.hibernate.query.sqm.sql.internal.SqlAstProcessingStateImpl;
+import org.hibernate.query.sqm.tree.spi.SqmDmlStatement;
+import org.hibernate.query.sqm.tree.spi.SqmStatement;
+import org.hibernate.query.sqm.tree.spi.from.SqmRoot;
+import org.hibernate.query.sqm.tree.spi.predicate.SqmWhereClause;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationContext;
+import org.hibernate.sql.ast.spi.creation.SqlAstProcessingState;
+import org.hibernate.sql.ast.spi.query.SqlAstTreeHelper;
+import org.hibernate.sql.ast.spi.Statement;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+
+/**
+ * Specialized BaseSqmToSqlAstConverter implementation used during conversion
+ * of an SQM mutation query tree representing into the various SQL AST trees
+ * needed to perform that operation.
+ *
+ * @author Steve Ebersole
+ */
+public class MultiTableSqmMutationConverter extends BaseSqmToSqlAstConverter<Statement> {
+
+	private final EntityMappingType mutatingEntityDescriptor;
+	private final TableGroup mutatingTableGroup;
+	private Predicate discriminatorPredicate;
+
+	public MultiTableSqmMutationConverter(
+			EntityMappingType mutatingEntityDescriptor,
+			SqmDmlStatement<?> statement,
+			SqmRoot<?> sqmRoot,
+			DomainParameterXref domainParameterXref,
+			QueryOptions queryOptions,
+			LoadQueryInfluencers loadQueryInfluencers,
+			QueryParameterBindings domainParameterBindings,
+			SqlAstCreationContext creationContext) {
+		this(
+				mutatingEntityDescriptor,
+				statement,
+				sqmRoot,
+				sqmRoot.getExplicitAlias(),
+				domainParameterXref,
+				queryOptions,
+				loadQueryInfluencers,
+				domainParameterBindings,
+				creationContext
+		);
+	}
+
+	public MultiTableSqmMutationConverter(
+			EntityMappingType mutatingEntityDescriptor,
+			SqmDmlStatement<?> statement,
+			SqmRoot<?> sqmRoot,
+			String sourceAlias,
+			DomainParameterXref domainParameterXref,
+			QueryOptions queryOptions,
+			LoadQueryInfluencers loadQueryInfluencers,
+			QueryParameterBindings domainParameterBindings,
+			SqlAstCreationContext creationContext) {
+		super(
+				new SqmTranslationRequest.Mutation(
+						statement,
+						queryOptions,
+						domainParameterXref,
+						domainParameterBindings,
+						loadQueryInfluencers,
+						creationContext
+				)
+		);
+		this.mutatingEntityDescriptor = mutatingEntityDescriptor;
+
+		final SqlAstProcessingStateImpl rootProcessingState = new SqlAstProcessingStateImpl(
+				null,
+				this,
+				getCurrentClauseStack()::getCurrent
+		);
+
+		pushProcessingState( rootProcessingState );
+
+		this.mutatingTableGroup = mutatingEntityDescriptor.createRootTableGroup(
+				true,
+				sqmRoot.getNavigablePath(),
+				sourceAlias,
+				null,
+				() -> (predicate) -> {
+					assert this.discriminatorPredicate == null;
+					this.discriminatorPredicate = predicate;
+				},
+				this
+		);
+
+		getFromClauseAccess().registerTableGroup( sqmRoot.getNavigablePath(), mutatingTableGroup );
+	}
+
+	@Override
+	public void pruneTableGroupJoins() {
+		super.pruneTableGroupJoins();
+	}
+
+	@SuppressWarnings("unused")
+	public EntityMappingType getMutatingEntityDescriptor() {
+		return mutatingEntityDescriptor;
+	}
+
+	public TableGroup getMutatingTableGroup() {
+		return mutatingTableGroup;
+	}
+
+	@Override // promote protected to public
+	public SqmStatement<?> getStatement() {
+		return super.getStatement();
+	}
+
+	@Override // promote protected to public
+	public Stack<SqlAstProcessingState> getProcessingStateStack() {
+		return super.getProcessingStateStack();
+	}
+
+	@Override
+	public Predicate visitWhereClause(@Nullable SqmWhereClause whereClause) {
+		return SqlAstTreeHelper.combinePredicates( super.visitWhereClause( whereClause ), discriminatorPredicate );
+	}
+
+}

@@ -1,0 +1,23 @@
+package org.hibernate.query.results.internal.dynamic;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.query.NativeQuery;
+import org.hibernate.query.results.spi.ResultBuilder;
+
+/**
+ * ResultBuilder specialization for results added through the Hibernate-specific
+ * {@link NativeQuery} result definition methods.
+ *
+ * @see NativeQuery#addScalar
+ * @see NativeQuery#addInstantiation
+ * @see NativeQuery#addAttributeResult
+ * @see NativeQuery#addEntity
+ * @see NativeQuery#addRoot
+ *
+ * @author Steve Ebersole
+ */
+public interface DynamicResultBuilder extends ResultBuilder, NativeQuery.ReturnableResultNode {
+	@Nonnull
+	DynamicResultBuilder cacheKeyInstance();
+}

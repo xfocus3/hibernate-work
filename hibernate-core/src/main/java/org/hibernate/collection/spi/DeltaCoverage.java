@@ -1,0 +1,17 @@
+package org.hibernate.collection.spi;
+
+import org.hibernate.Incubating;
+
+/// Describes how completely a [CollectionDelta] covers its reference state.
+///
+/// @since 8.0
+/// @author Steve Ebersole
+@Incubating(since = "8.0", group = "collection-delta")
+public enum DeltaCoverage {
+	/// The changes completely describe the difference from the baseline.
+	COMPLETE,
+
+	/// Only explicitly requested changes are known, as with queued operations on
+	/// an uninitialized collection.
+	EXPLICIT_CHANGES_ONLY
+}

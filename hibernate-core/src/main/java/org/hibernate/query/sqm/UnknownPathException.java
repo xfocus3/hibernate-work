@@ -1,0 +1,34 @@
+package org.hibernate.query.sqm;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.query.PathException;
+import org.hibernate.query.hql.spi.HqlTranslator;
+
+/**
+ * Indicates a failure to resolve an element of a path expression in HQL/JPQL.
+ *
+ * @apiNote The JPA criteria API requires that this sort of problem be reported
+ *          as an {@link IllegalArgumentException} or {@link IllegalStateException},
+ *          and so we usually throw {@link PathElementException} or
+ *          {@link TerminalPathException} from the SQM objects, and then wrap
+ *          as an instance of this exception type in the
+ *          {@link HqlTranslator}.
+ *
+ * @author Steve Ebersole
+ *
+ * @see PathElementException
+ * @see TerminalPathException
+ */
+public class UnknownPathException extends PathException {
+
+	public UnknownPathException(@Nonnull String message) {
+		super( message );
+	}
+
+	public UnknownPathException(@Nonnull String message, @Nullable String hql, @Nullable Exception cause) {
+		super( message, hql, cause );
+	}
+
+}

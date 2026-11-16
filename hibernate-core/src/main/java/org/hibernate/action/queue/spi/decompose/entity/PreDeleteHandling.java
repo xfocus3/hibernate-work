@@ -1,0 +1,72 @@
+package org.hibernate.action.queue.spi.decompose.entity;
+
+import org.hibernate.Incubating;
+import org.hibernate.action.internal.EntityDeleteAction;
+import org.hibernate.action.queue.spi.bind.PreExecutionCallback;
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.event.spi.PreDeleteEvent;
+import org.hibernate.jpa.event.spi.CallbackType;
+
+/// Pre-execution callback for entity delete actions.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "action-queue")
+public class PreDeleteHandling implements PreExecutionCallback {
+	private final EntityDeleteAction action;
+	private boolean invoked;
+	private boolean veto;
+
+	public PreDeleteHandling(EntityDeleteAction action) {
+		this.action = action;
+	}
+
+	@Override
+	public boolean requiresBatchFlush() {
+		return !invoked && action.getInstance() != null && needsCallbacks();
+	}
+
+	private boolean needsCallbacks() {
+		return action.getPersister().getEntityCallbacks().hasRegisteredCallbacks( CallbackType.PRE_DELETE )
+			|| !action.getSession().getFactory().getEventListenerGroups().eventListenerGroup_PRE_DELETE.isEmpty();
+	}
+
+
+	@Override
+	public boolean beforeExecution(SessionImplementor session) {
+		if ( !invoked ) {
+			veto = action.getInstance() != null && firePreDelete( session );
+			invoked = true;
+		}
+		return !veto;
+	}
+
+	private boolean firePreDelete(SessionImplementor session) {
+		final var callbacks = action.getPersister().getEntityCallbacks();
+		if ( callbacks.hasRegisteredCallbacks( CallbackType.PRE_DELETE ) ) {
+			session.runEntityLifecycleCallback( () -> callbacks.preDelete( action.getInstance() ) );
+		}
+
+		final var listenerGroup = session.getFactory().getEventListenerGroups().eventListenerGroup_PRE_DELETE;
+		if ( listenerGroup.isEmpty() ) {
+			return false;
+		}
+
+		final var event = new PreDeleteEvent(
+				action.getInstance(),
+				action.getId(),
+				action.getState(),
+				action.getPersister(),
+				session
+		);
+		boolean veto = false;
+		for ( var listener : listenerGroup.listeners() ) {
+			veto |= listener.onPreDelete( event );
+		}
+		return veto;
+	}
+
+	public boolean isVeto() {
+		return veto;
+	}
+}

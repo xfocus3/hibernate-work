@@ -1,0 +1,60 @@
+package org.hibernate.orm.test.procedure.results;
+
+import org.hibernate.community.dialect.TiDBDialect;
+import org.hibernate.dialect.MariaDBDialect;
+import org.hibernate.dialect.MySQLDialect;
+import org.hibernate.testing.orm.junit.RequiresDialect;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.SkipForDialect;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+
+import java.sql.SQLException;
+import java.sql.Statement;
+
+/**
+ * @author Steve Ebersole
+ */
+@RequiresDialect(value = MySQLDialect.class)
+@RequiresDialect(value = MariaDBDialect.class)
+@SkipForDialect(dialectClass = TiDBDialect.class, reason = "TiDB doesn't support stored procedures")
+public class MySqlMultipleResultMappingTests extends AbstractMultipleResultMappingTests {
+
+	@BeforeAll
+	void createFunctionsAndProcedures(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> session.doWork( (connection) -> {
+			try (Statement statement = connection.createStatement()) {
+				statement.executeUpdate(
+						"""
+							CREATE PROCEDURE get_results()
+							BEGIN
+								SELECT id, code, name from regions;
+								SELECT id, name, target_quarter FROM initiatives;
+							END
+							"""
+				);
+			}
+			catch (SQLException e) {
+				throw session.getSessionFactory()
+						.getJdbcServices()
+						.getSqlExceptionHelper()
+						.convert( e, "Error exporting procedure and function definitions" );
+			}
+		} ) );
+	}
+
+	@AfterAll
+	void dropFunctionsAndProcedures(SessionFactoryScope factoryScope) {
+		factoryScope.inTransaction( (session) -> session.doWork( (connection) -> {
+			try (Statement statement = connection.createStatement()) {
+				statement.executeUpdate( "DROP PROCEDURE IF EXISTS get_results;" );
+			}
+			catch (SQLException e) {
+				throw session.getSessionFactory()
+						.getJdbcServices()
+						.getSqlExceptionHelper()
+						.convert( e, "Error dropping procedure and function definitions" );
+			}
+		} ) );
+	}
+}

@@ -1,0 +1,661 @@
+package org.hibernate.boot.spi;
+
+import java.util.Map;
+import java.util.TimeZone;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import org.hibernate.CacheMode;
+import org.hibernate.CustomEntityDirtinessStrategy;
+import org.hibernate.EntityNameResolver;
+import org.hibernate.cfg.CheckHandling;
+import org.hibernate.FlushMode;
+import org.hibernate.GraphParserMode;
+import org.hibernate.callback.spi.ConfiguredInterceptor;
+import org.hibernate.LockOptions;
+import org.hibernate.SessionEventListener;
+import org.hibernate.SessionFactoryObserver;
+import org.hibernate.audit.AuditStrategy;
+import org.hibernate.StatementObserver;
+import org.hibernate.temporal.TemporalTableStrategy;
+import org.hibernate.context.spi.TenantCredentialsMapper;
+import org.hibernate.context.spi.TenantDataSourceMapper;
+import org.hibernate.context.spi.TenantSchemaMapper;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.type.TimeZoneStorageStrategy;
+import org.hibernate.annotations.CacheLayout;
+import org.hibernate.boot.registry.StandardServiceRegistry;
+import org.hibernate.cache.spi.TimestampsCacheFactory;
+import org.hibernate.context.spi.CurrentTenantIdentifierResolver;
+import org.hibernate.jpa.spi.JpaCompliance;
+import org.hibernate.proxy.EntityNotFoundDelegate;
+import org.hibernate.query.spi.ImmutableEntityUpdateQueryHandlingMode;
+import org.hibernate.query.criteria.ValueHandlingMode;
+import org.hibernate.query.hql.spi.HqlTranslator;
+import org.hibernate.query.sqm.function.SqmFunctionDescriptor;
+import org.hibernate.query.sqm.function.SqmFunctionRegistry;
+import org.hibernate.query.sqm.mutation.spi.SqmMultiTableInsertStrategy;
+import org.hibernate.query.sqm.mutation.spi.SqmMultiTableMutationStrategy;
+import org.hibernate.query.sqm.sql.spi.SqmTranslatorFactory;
+import org.hibernate.resource.jdbc.spi.PhysicalConnectionHandlingMode;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.format.FormatMapper;
+
+import jakarta.persistence.criteria.Nulls;
+
+/**
+ * Convenience base class for custom implementations of {@link SessionFactoryOptions}
+ * using delegation.
+ *
+ * @implNote Declared non-abstract to ensure that all {@link SessionFactoryOptions} methods
+ *           have at least a default implementation.
+ *
+ * @author Steve Ebersole
+ */
+public class AbstractDelegatingSessionFactoryOptions implements SessionFactoryOptions {
+	@Nonnull
+	private final SessionFactoryOptions delegate;
+
+	public AbstractDelegatingSessionFactoryOptions(@Nonnull SessionFactoryOptions delegate) {
+		this.delegate = delegate;
+	}
+
+	@Nonnull
+	protected SessionFactoryOptions delegate() {
+		return delegate;
+	}
+
+	@Override
+	@Nonnull
+	public String getUuid() {
+		return delegate().getUuid();
+	}
+
+	@Override
+	@Nonnull
+	public StandardServiceRegistry getServiceRegistry() {
+		return delegate.getServiceRegistry();
+	}
+
+	@Override
+	public boolean isJpaBootstrap() {
+		return delegate.isJpaBootstrap();
+	}
+
+	@Override
+	public boolean isJtaTransactionAccessEnabled() {
+		return delegate.isJtaTransactionAccessEnabled();
+	}
+
+	@Override
+	@Nullable
+	public Object getBeanManagerReference() {
+		return delegate.getBeanManagerReference();
+	}
+
+	@Override
+	@Nullable
+	public Object getValidatorFactoryReference() {
+		return delegate.getValidatorFactoryReference();
+	}
+
+	@Override
+	@Nullable
+	public String getSessionFactoryName() {
+		return delegate.getSessionFactoryName();
+	}
+
+	@Override
+	@Nullable
+	public Boolean isSessionFactoryNameAlsoJndiName() {
+		return delegate.isSessionFactoryNameAlsoJndiName();
+	}
+
+	@Override
+	public boolean isFlushBeforeCompletionEnabled() {
+		return delegate.isFlushBeforeCompletionEnabled();
+	}
+
+	@Override
+	public boolean isAutoCloseSessionEnabled() {
+		return delegate.isAutoCloseSessionEnabled();
+	}
+
+	@Override
+	public boolean isStatisticsEnabled() {
+		return delegate.isStatisticsEnabled();
+	}
+
+	@Override
+	@Nonnull
+	public ConfiguredInterceptor getConfiguredInterceptor() {
+		return delegate.getConfiguredInterceptor();
+	}
+
+	@Override
+	@Nullable
+	public StatementObserver getStatementObserver() {
+		return delegate().getStatementObserver();
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableMutationStrategy getCustomSqmMultiTableMutationStrategy() {
+		return delegate.getCustomSqmMultiTableMutationStrategy();
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableInsertStrategy getCustomSqmMultiTableInsertStrategy() {
+		return delegate.getCustomSqmMultiTableInsertStrategy();
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableMutationStrategy resolveCustomSqmMultiTableMutationStrategy(@Nonnull EntityMappingType rootEntityDescriptor, @Nonnull RuntimeModelCreationContext creationContext) {
+		return delegate.resolveCustomSqmMultiTableMutationStrategy( rootEntityDescriptor, creationContext );
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableInsertStrategy resolveCustomSqmMultiTableInsertStrategy(@Nonnull EntityMappingType rootEntityDescriptor, @Nonnull RuntimeModelCreationContext creationContext) {
+		return delegate.resolveCustomSqmMultiTableInsertStrategy( rootEntityDescriptor, creationContext );
+	}
+
+	@Override
+	@Nullable
+	public StatementInspector getStatementInspector() {
+		return delegate.getStatementInspector();
+	}
+
+	@Override
+	@Nonnull
+	public SessionFactoryObserver[] getSessionFactoryObservers() {
+		return delegate.getSessionFactoryObservers();
+	}
+
+	@Override
+	@Nonnull
+	public SessionEventListener[] buildSessionEventListeners() {
+		return delegate.buildSessionEventListeners();
+	}
+
+	@Override
+	public boolean isIdentifierRollbackEnabled() {
+		return delegate.isIdentifierRollbackEnabled();
+	}
+
+	@Override
+	public boolean isCheckNullability() {
+		return delegate.isCheckNullability();
+	}
+
+	@Override
+	public boolean isInitializeLazyStateOutsideTransactionsEnabled() {
+		return delegate.isInitializeLazyStateOutsideTransactionsEnabled();
+	}
+
+	@Override
+	public boolean isBidirectionalAssociationManagementEnabled() {
+		return delegate.isBidirectionalAssociationManagementEnabled();
+	}
+
+	@Override
+	public int getDefaultBatchFetchSize() {
+		return delegate.getDefaultBatchFetchSize();
+	}
+
+	@Override
+	@Nullable
+	public Integer getMaximumFetchDepth() {
+		return delegate.getMaximumFetchDepth();
+	}
+
+	@Override
+	public boolean isSubselectFetchEnabled() {
+		return delegate.isSubselectFetchEnabled();
+	}
+
+	@Override
+	@Nonnull
+	public Nulls getDefaultNullPrecedence() {
+		return delegate.getDefaultNullPrecedence();
+	}
+
+	@Override
+	public boolean isOrderUpdatesEnabled() {
+		return delegate.isOrderUpdatesEnabled();
+	}
+
+	@Override
+	public boolean isOrderInsertsEnabled() {
+		return delegate.isOrderInsertsEnabled();
+	}
+
+	@Override
+	public boolean isMultiTenancyEnabled() {
+		return delegate.isMultiTenancyEnabled();
+	}
+
+	@Override
+	@Nullable
+	public CurrentTenantIdentifierResolver<Object> getCurrentTenantIdentifierResolver() {
+		return delegate.getCurrentTenantIdentifierResolver();
+	}
+
+	@Override
+	@Nullable
+	public TenantSchemaMapper<Object> getTenantSchemaMapper() {
+		return delegate.getTenantSchemaMapper();
+	}
+
+	@Override
+	@Nullable
+	public TenantDataSourceMapper<Object> getTenantDataSourceMapper() {
+		return delegate.getTenantDataSourceMapper();
+	}
+
+	@Override
+	@Nullable
+	public TenantCredentialsMapper<Object> getTenantCredentialsMapper() {
+		return delegate.getTenantCredentialsMapper();
+	}
+
+	@Override
+	@Nonnull
+	public JavaType<Object> getDefaultTenantIdentifierJavaType() {
+		return delegate.getDefaultTenantIdentifierJavaType();
+	}
+
+	@Override
+	public boolean isJtaTrackByThread() {
+		return delegate.isJtaTrackByThread();
+	}
+
+	@Override
+	public boolean isNamedQueryStartupCheckingEnabled() {
+		return delegate.isNamedQueryStartupCheckingEnabled();
+	}
+
+	@Override
+	public boolean isAllowOutOfTransactionUpdateOperations() {
+		return delegate.isAllowOutOfTransactionUpdateOperations();
+	}
+
+	@Override
+	public boolean isSecondLevelCacheEnabled() {
+		return delegate.isSecondLevelCacheEnabled();
+	}
+
+	@Override
+	public boolean isQueryCacheEnabled() {
+		return delegate.isQueryCacheEnabled();
+	}
+
+	@Override
+	@Nonnull
+	public CacheLayout getQueryCacheLayout() {
+		return delegate.getQueryCacheLayout();
+	}
+
+	@Override
+	@Nullable
+	public TimestampsCacheFactory getTimestampsCacheFactory() {
+		return delegate.getTimestampsCacheFactory();
+	}
+
+	@Override
+	@Nullable
+	public String getCacheRegionPrefix() {
+		return delegate.getCacheRegionPrefix();
+	}
+
+	@Override
+	public boolean isMinimalPutsEnabled() {
+		return delegate.isMinimalPutsEnabled();
+	}
+
+	@Override
+	public boolean isStructuredCacheEntriesEnabled() {
+		return delegate.isStructuredCacheEntriesEnabled();
+	}
+
+	@Override
+	public boolean isDirectReferenceCacheEntriesEnabled() {
+		return delegate.isDirectReferenceCacheEntriesEnabled();
+	}
+
+	@Override
+	public boolean isAutoEvictCollectionCache() {
+		return delegate.isAutoEvictCollectionCache();
+	}
+
+	@Override
+	public int getJdbcBatchSize() {
+		return delegate.getJdbcBatchSize();
+	}
+
+	@Override
+	public boolean isScrollableResultSetsEnabled() {
+		return delegate.isScrollableResultSetsEnabled();
+	}
+
+	@Override
+	public boolean isGetGeneratedKeysEnabled() {
+		return delegate.isGetGeneratedKeysEnabled();
+	}
+
+	@Override
+	@Nullable
+	public Integer getJdbcFetchSize() {
+		return delegate.getJdbcFetchSize();
+	}
+
+	@Override
+	@Nonnull
+	public PhysicalConnectionHandlingMode getPhysicalConnectionHandlingMode() {
+		return delegate.getPhysicalConnectionHandlingMode();
+	}
+
+	@Override
+	public boolean doesConnectionProviderDisableAutoCommit() {
+		return delegate.doesConnectionProviderDisableAutoCommit();
+	}
+
+	@Override
+	public boolean isCommentsEnabled() {
+		return delegate.isCommentsEnabled();
+	}
+
+	@Override
+	@Nonnull
+	public CustomEntityDirtinessStrategy getCustomEntityDirtinessStrategy() {
+		return delegate.getCustomEntityDirtinessStrategy();
+	}
+
+	@Override
+	@Nonnull
+	public EntityNameResolver[] getEntityNameResolvers() {
+		return delegate.getEntityNameResolvers();
+	}
+
+	@Override
+	@Nonnull
+	public EntityNotFoundDelegate getEntityNotFoundDelegate() {
+		return delegate.getEntityNotFoundDelegate();
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, SqmFunctionDescriptor> getCustomSqlFunctionMap() {
+		return delegate.getCustomSqlFunctionMap();
+	}
+
+	@Override
+	public void setCheckNullability(boolean enabled) {
+		delegate.setCheckNullability( enabled );
+	}
+
+	@Override
+	public boolean isPreferUserTransaction() {
+		return delegate.isPreferUserTransaction();
+	}
+
+	@Override
+	@Nullable
+	public HqlTranslator getCustomHqlTranslator() {
+		return delegate.getCustomHqlTranslator();
+	}
+
+	@Override
+	@Nullable
+	public SqmTranslatorFactory getCustomSqmTranslatorFactory() {
+		return delegate.getCustomSqmTranslatorFactory();
+	}
+
+	@Override
+	@Nullable
+	public TimeZone getJdbcTimeZone() {
+		return delegate.getJdbcTimeZone();
+	}
+
+	@Override
+	@Nonnull
+	public TemporalTableStrategy getTemporalTableStrategy() {
+		return delegate.getTemporalTableStrategy();
+	}
+
+	@Override
+	@Nonnull
+	public AuditStrategy getAuditStrategy() {
+		return delegate.getAuditStrategy();
+	}
+
+	@Override
+	@Nonnull
+	public ValueHandlingMode getCriteriaValueHandlingMode() {
+		return delegate.getCriteriaValueHandlingMode();
+	}
+
+	@Override
+	public boolean isCriteriaCopyTreeEnabled() {
+		return delegate.isCriteriaCopyTreeEnabled();
+	}
+
+	@Override
+	public boolean isCriteriaPlanCacheEnabled() {
+		return delegate.isCriteriaPlanCacheEnabled();
+	}
+
+	public boolean getNativeJdbcParametersIgnored() {
+		return delegate.getNativeJdbcParametersIgnored();
+	}
+
+	@Override
+	@Nonnull
+	public JpaCompliance getJpaCompliance() {
+		return delegate.getJpaCompliance();
+	}
+
+	@Override
+	public boolean isFailOnPaginationOverCollectionFetchEnabled() {
+		return delegate.isFailOnPaginationOverCollectionFetchEnabled();
+	}
+
+	@Override
+	public CheckHandling getFinalPersistentFieldsHandling() {
+		return delegate.getFinalPersistentFieldsHandling();
+	}
+
+	@Override
+	@Nonnull
+	public ImmutableEntityUpdateQueryHandlingMode getImmutableEntityUpdateQueryHandlingMode() {
+		return delegate.getImmutableEntityUpdateQueryHandlingMode();
+	}
+
+	@Override
+	public boolean allowImmutableEntityUpdate() {
+		return delegate.allowImmutableEntityUpdate();
+	}
+
+	@Override
+	@Nullable
+	public String getDefaultCatalog() {
+		return delegate.getDefaultCatalog();
+	}
+
+	@Override
+	@Nullable
+	public String getDefaultSchema() {
+		return delegate.getDefaultSchema();
+	}
+
+	@Override
+	public boolean inClauseParameterPaddingEnabled() {
+		return delegate.inClauseParameterPaddingEnabled();
+	}
+
+	@Override
+	public boolean isPortableIntegerDivisionEnabled() {
+		return delegate.isPortableIntegerDivisionEnabled();
+	}
+
+	@Override
+	public int getQueryStatisticsMaxSize() {
+		return delegate.getQueryStatisticsMaxSize();
+	}
+
+	@Override
+	public boolean areJPACallbacksEnabled() {
+		return delegate.areJPACallbacksEnabled();
+	}
+
+	@Override
+	public boolean isCollectionsInDefaultFetchGroupEnabled() {
+		return delegate.isCollectionsInDefaultFetchGroupEnabled();
+	}
+
+	@Override
+	public boolean isUnownedAssociationTransientCheck() {
+		return delegate.isUnownedAssociationTransientCheck();
+	}
+
+	@Override
+	public boolean isUseOfJdbcNamedParametersEnabled() {
+		return delegate().isUseOfJdbcNamedParametersEnabled();
+	}
+
+	@Override
+	@Nullable
+	public SqmFunctionRegistry getCustomSqmFunctionRegistry() {
+		return delegate().getCustomSqmFunctionRegistry();
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForBoolean() {
+		return delegate.getPreferredSqlTypeCodeForBoolean();
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForDuration() {
+		return delegate.getPreferredSqlTypeCodeForDuration();
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForUuid() {
+		return delegate.getPreferredSqlTypeCodeForUuid();
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForInstant() {
+		return delegate.getPreferredSqlTypeCodeForInstant();
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForArray() {
+		return delegate.getPreferredSqlTypeCodeForArray();
+	}
+
+	@Override
+	@Nonnull
+	public TimeZoneStorageStrategy getDefaultTimeZoneStorageStrategy() {
+		return delegate.getDefaultTimeZoneStorageStrategy();
+	}
+
+	@Override
+	public boolean isDirectJavaTimeJdbcAccessEnabled(@Nonnull Class<?> javaTimeType) {
+		return delegate.isDirectJavaTimeJdbcAccessEnabled( javaTimeType );
+	}
+
+	@Override
+	@Deprecated(since = "8.0")
+	public boolean isPreferJavaTimeJdbcTypesEnabled() {
+		return delegate.isPreferJavaTimeJdbcTypesEnabled();
+	}
+
+	@Override
+	public boolean isPreferNativeEnumTypesEnabled() {
+		return delegate.isPreferNativeEnumTypesEnabled();
+	}
+
+	@Override
+	public boolean isPreferLocaleLanguageTagEnabled() {
+		return delegate.isPreferLocaleLanguageTagEnabled();
+	}
+
+	@Override
+	@Nonnull
+	public FormatMapper getJsonFormatMapper() {
+		return delegate.getJsonFormatMapper();
+	}
+
+	@Override
+	@Nonnull
+	public FormatMapper getXmlFormatMapper() {
+		return delegate.getXmlFormatMapper();
+	}
+
+	@Override
+	public boolean isXmlFormatMapperLegacyFormatEnabled() {
+		return delegate.isXmlFormatMapperLegacyFormatEnabled();
+	}
+
+	@Override
+	public boolean isPassProcedureParameterNames() {
+		return delegate.isPassProcedureParameterNames();
+	}
+
+	@Override
+	public boolean isPreferJdbcDatetimeTypesInNativeQueriesEnabled() {
+		return delegate.isPreferJdbcDatetimeTypesInNativeQueriesEnabled();
+	}
+
+	@Override
+	@Nullable
+	public CacheStoreMode getCacheStoreMode(@Nullable Map<String, Object> properties) {
+		return delegate.getCacheStoreMode( properties );
+	}
+
+	@Override
+	@Nullable
+	public CacheRetrieveMode getCacheRetrieveMode(@Nullable Map<String, Object> properties) {
+		return delegate.getCacheRetrieveMode( properties );
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, Object> getDefaultSessionProperties() {
+		return delegate.getDefaultSessionProperties();
+	}
+
+	@Override
+	@Nonnull
+	public GraphParserMode getGraphParserMode() {
+		return delegate.getGraphParserMode();
+	}
+
+	@Override
+	@Nonnull
+	public CacheMode getInitialSessionCacheMode() {
+		return delegate.getInitialSessionCacheMode();
+	}
+
+	@Override
+	@Nonnull
+	public FlushMode getInitialSessionFlushMode() {
+		return delegate.getInitialSessionFlushMode();
+	}
+
+	@Override
+	@Nonnull
+	public LockOptions getDefaultLockOptions() {
+		return delegate.getDefaultLockOptions();
+	}
+
+	@Override
+	public boolean isSafeModeEnabled() { return delegate.isSafeModeEnabled(); }
+}

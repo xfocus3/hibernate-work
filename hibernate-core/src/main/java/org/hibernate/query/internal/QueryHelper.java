@@ -1,0 +1,300 @@
+package org.hibernate.query.internal;
+
+import jakarta.persistence.TupleElement;
+import jakarta.persistence.criteria.CompoundSelection;
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.query.TupleTransformer;
+import org.hibernate.query.results.spi.ResultSetMapping;
+import org.hibernate.query.spi.HqlInterpretation;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.internal.DomainParameterXref;
+import org.hibernate.query.named.spi.NamedSqmQueryMemento;
+import org.hibernate.query.sqm.tree.spi.SqmStatement;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelectStatement;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelection;
+import org.hibernate.sql.results.internal.TupleMetadata;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import java.util.List;
+
+import static org.hibernate.query.sqm.internal.SqmUtil.isHqlTuple;
+import static org.hibernate.query.sqm.internal.SqmUtil.isSelectionAssignableToResultType;
+
+/**
+ * @author Steve Ebersole
+ */
+public class QueryHelper {
+	private QueryHelper() {
+		// disallow direct instantiation
+	}
+
+	@Nullable @SafeVarargs
+	public static <T> SqmBindableType<? extends T> highestPrecedenceType(@Nullable SqmBindableType<? extends T>... types) {
+		if ( types.length == 0 ) {
+			return null;
+		}
+
+		if ( types.length == 1 ) {
+			return types[0];
+		}
+
+		var highest = highestPrecedenceType2( types[0], types[1] );
+		for ( int i = 2; i < types.length; i++ ) {
+			highest = highestPrecedenceType2( highest, types[i] );
+		}
+
+		return highest;
+	}
+
+	@Nullable
+	public static <X> SqmBindableType<? extends X> highestPrecedenceType2(
+			@Nullable SqmBindableType<? extends X> type1,
+			@Nullable SqmBindableType<? extends X> type2) {
+		if ( type1 == null && type2 == null ) {
+			return null;
+		}
+		else if ( type1 == null ) {
+			return type2;
+		}
+		else if ( type2 == null ) {
+			return type1;
+		}
+
+		if ( type1 instanceof SqmPathSource ) {
+			return type1;
+		}
+
+		if ( type2 instanceof SqmPathSource ) {
+			return type2;
+		}
+
+		if ( type1.getExpressibleJavaType() == null ) {
+			return type2;
+		}
+		else if ( type2.getExpressibleJavaType() == null ) {
+			return type1;
+		}
+		// any other precedence rules?
+		else if ( type2.getExpressibleJavaType().isWider( type1.getExpressibleJavaType() ) ) {
+			return type2;
+		}
+
+		return type1;
+	}
+
+	@Nullable @SafeVarargs
+	public static <T> JavaType<? extends T> highestPrecedenceType(@Nullable JavaType<? extends T>... types) {
+		if ( types.length == 0 ) {
+			return null;
+		}
+
+		if ( types.length == 1 ) {
+			return types[0];
+		}
+
+		var highest = highestPrecedenceType2( types[0], types[1] );
+		for ( int i = 2; i < types.length; i++ ) {
+			highest = highestPrecedenceType2( highest, types[i] );
+		}
+
+		return highest;
+	}
+
+	@Nullable
+	public static <X> JavaType<? extends X> highestPrecedenceType2(
+			@Nullable JavaType<? extends X> type1,
+			@Nullable JavaType<? extends X> type2) {
+		if ( type1 == null && type2 == null ) {
+			return null;
+		}
+		else if ( type1 == null ) {
+			return type2;
+		}
+		else if ( type2 == null ) {
+			return type1;
+		}
+
+		// any other precedence rules?
+		if ( type2.isWider( type1 ) ) {
+			return type2;
+		}
+
+		return type1;
+	}
+
+	@SuppressWarnings("unchecked")
+	public static <R> Class<R> determineResultType(SqmSelectStatement<?> sqm, Class<?> expectedResultType) {
+		final var selections = sqm.getQuerySpec().getSelectClause().getSelections();
+		if ( selections.size() == 1 ) {
+			if ( Object[].class.equals( expectedResultType ) ) {
+				// for JPA compatibility
+				return (Class<R>) Object[].class;
+			}
+			else {
+				final var selection = selections.get( 0 );
+				if ( isSelectionAssignableToResultType( selection, expectedResultType ) ) {
+					final var nodeJavaType = selection.getNodeJavaType();
+					if ( nodeJavaType != null ) {
+						return (Class<R>) nodeJavaType.getJavaTypeClass();
+					}
+				}
+				// let's assume there's some way to instantiate it
+				return (Class<R>) expectedResultType;
+			}
+		}
+		else if ( expectedResultType != null ) {
+			// assume we can repackage the tuple as the given type - worry
+			// about how later (it's handled using a RowTransformer which is
+			// set up in ConcreteSqmSelectQueryPlan.determineRowTransformer)
+			return (Class<R>) expectedResultType;
+		}
+		else {
+			// for JPA compatibility
+			return (Class<R>) Object[].class;
+		}
+	}
+
+	public static TupleMetadata buildTupleMetadata(SqmStatement<?> statement, Class<?> resultType, TupleTransformer<?> rowTransformer) {
+		if ( statement instanceof SqmSelectStatement<?> select ) {
+			final var selections = select.getQueryPart().getFirstQuerySpec().getSelectClause().getSelections();
+			return isTupleMetadataRequired( resultType, selections )
+					? getTupleMetadata( selections, rowTransformer )
+					: null;
+		}
+		else {
+			return null;
+		}
+	}
+
+	private static <R> boolean isTupleMetadataRequired(Class<R> resultType, List<SqmSelection<?>> selections) {
+		final var selection = selections.size() == 1 ? selections.get( 0 ) : null;
+		return isHqlTuple( selection )
+			|| !isInstantiableWithoutMetadata( resultType )
+				&& !isSelectionAssignableToResultType( selection, resultType );
+	}
+
+	private static boolean isInstantiableWithoutMetadata(Class<?> resultType) {
+		return resultType == null
+			|| resultType.isArray()
+			|| Object.class == resultType
+			|| List.class == resultType;
+	}
+
+	private static TupleMetadata getTupleMetadata(List<SqmSelection<?>> selections, TupleTransformer<?> rowTransformer) {
+		if ( rowTransformer == null ) {
+			return new TupleMetadata( buildTupleElementArray( selections ), buildTupleAliasArray( selections ) );
+		}
+		else {
+			throw new IllegalArgumentException(
+					"Illegal combination of Tuple resultType and (non-JpaTupleBuilder) TupleTransformer: "
+							+ rowTransformer
+			);
+		}
+	}
+
+	private static TupleElement<?>[] buildTupleElementArray(List<SqmSelection<?>> selections) {
+		final int selectionsSize = selections.size();
+		if ( selectionsSize == 1 ) {
+			final var selectableNode = selections.get( 0 ).getSelectableNode();
+			if ( selectableNode instanceof CompoundSelection<?> ) {
+				final var selectionItems = selectableNode.getSelectionItems();
+				final int itemsSize = selectionItems.size();
+				final var elements = new TupleElement<?>[itemsSize];
+				for ( int i = 0; i < itemsSize; i++ ) {
+					elements[i] = selectionItems.get( i );
+				}
+				return elements;
+			}
+			else {
+				return new TupleElement<?>[] { selectableNode };
+			}
+		}
+		else {
+			final var elements = new TupleElement<?>[selectionsSize];
+			for ( int i = 0; i < selectionsSize; i++ ) {
+				elements[i] = selections.get( i ).getSelectableNode();
+			}
+			return elements;
+		}
+	}
+
+	private static String[] buildTupleAliasArray(List<SqmSelection<?>> selections) {
+		final int selectionsSize = selections.size();
+		if ( selectionsSize == 1 ) {
+			final var selectableNode = selections.get(0).getSelectableNode();
+			if ( selectableNode instanceof CompoundSelection<?> ) {
+				final var selectionItems = selectableNode.getSelectionItems();
+				final int itemsSize = selectionItems.size();
+				final var elements = new String[itemsSize];
+				for ( int i = 0; i < itemsSize; i++ ) {
+					elements[i] = selectionItems.get( i ).getAlias();
+				}
+				return elements;
+			}
+			else {
+				return new String[] { selectableNode.getAlias() };
+			}
+		}
+		else {
+			final String[] elements = new String[selectionsSize];
+			for ( int i = 0; i < selectionsSize; i++ ) {
+				elements[i] = selections.get( i ).getAlias();
+			}
+			return elements;
+		}
+	}
+
+	public static <R> Class<R> determineResultType(Class<R> explicitType, ResultSetMapping resultSetMapping) {
+		if ( explicitType != null ) {
+			return explicitType;
+		}
+
+		assert resultSetMapping.getResultBuilders() != null;
+		if ( resultSetMapping.getResultBuilders().isEmpty() ) {
+			//noinspection unchecked
+			return (Class<R>) Object.class;
+		}
+		else if ( resultSetMapping.getResultBuilders().size() > 1 ) {
+			//noinspection unchecked
+			return (Class<R>) Object[].class;
+		}
+		else {
+			//noinspection unchecked
+			return (Class<R>) resultSetMapping.getResultBuilders().get( 0 ).getJavaType();
+		}
+	}
+
+
+	@Nullable
+	public static int[] unnamedParameterIndices(DomainParameterXref domainParameterXref) {
+		final var jpaCriteriaParamResolutions = domainParameterXref
+				.getParameterResolutions()
+				.getJpaCriteriaParamResolutions();
+		if ( jpaCriteriaParamResolutions.isEmpty() ) {
+			return null;
+		}
+		int maxId = 0;
+		for ( var criteriaWrapper : jpaCriteriaParamResolutions.values() ) {
+			maxId = Math.max( maxId, criteriaWrapper.getCriteriaParameterId() );
+		}
+		final var unnamedParameterIndices = new int[maxId + 1];
+		for ( var entry : jpaCriteriaParamResolutions.entrySet() ) {
+			unnamedParameterIndices[entry.getValue().getCriteriaParameterId()] =
+					entry.getValue().getUnnamedParameterId();
+		}
+		return unnamedParameterIndices;
+
+	}
+
+	public static <T> HqlInterpretation<T> interpretation(
+			NamedSqmQueryMemento<?> memento,
+			Class<T> expectedResultType,
+			SharedSessionContractImplementor session) {
+		final var queryEngine = session.getFactory().getQueryEngine();
+		return queryEngine.getInterpretationCache()
+				.resolveHqlInterpretation( memento.getHqlString(), expectedResultType,
+						queryEngine.getHqlTranslator() );
+	}
+}

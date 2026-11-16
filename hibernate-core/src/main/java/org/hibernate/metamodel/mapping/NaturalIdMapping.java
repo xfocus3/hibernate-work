@@ -1,0 +1,115 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.List;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.cache.spi.access.NaturalIdDataAccess;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.loader.ast.spi.MultiNaturalIdLoader;
+import org.hibernate.loader.ast.spi.NaturalIdLoader;
+
+/// Mapping for an entity's natural-id, if one is defined.
+///
+/// Natural identifiers are an alternative form of uniquely
+/// identifying a specific row.  In this sense, they are similar
+/// to a primary key.  In fact most natural identifiers will also
+/// be classified as "candidate keys" (as in a column or group of
+/// columns that are considered candidates for primary-key).
+///
+/// However, a natural id has fewer restrictions than a primary
+/// key.  While these lessened restrictions make them inappropriate
+/// for use as a primary key, they are still generally usable as
+/// unique locators with caveats.  General reasons a natural id
+/// might be inappropriate for use as a primary key are
+///   - it contains nullable values
+///   - it contains modifiable values
+///
+/// @see org.hibernate.annotations.NaturalId
+/// @see org.hibernate.annotations.NaturalIdCache
+/// @see org.hibernate.annotations.NaturalIdClass
+/// @see org.hibernate.KeyType#NATURAL
+///
+/// @author Steve Ebersole
+@Incubating(since = "5.4")
+public interface NaturalIdMapping extends VirtualModelPart {
+	String PART_NAME = "{natural-id}";
+
+	/// A [class][org.hibernate.annotations.NaturalIdClass] which used
+	/// as a wrapper for natural-id values.
+	@Nullable Class<?> getNaturalIdClass();
+
+	/// The attribute(s) making up the natural-id.
+	@Nonnull
+	List<SingularAttributeMapping> getNaturalIdAttributes();
+
+	/// Whether the natural-id is mutable.
+	///
+	/// @apiNote For compound natural-ids, this is true if any of the attributes are mutable.
+	boolean isMutable();
+
+	@Nonnull
+	@Override
+	default String getPartName() {
+		return PART_NAME;
+	}
+
+	/// Access to the natural-id's L2 cache access.
+	/// Returns null if the natural-id is not configured for caching.
+	@Nullable
+	NaturalIdDataAccess getCacheAccess();
+
+	/// Verify the natural-id value(s) we are about to flush to the database
+	void verifyFlushState(
+			@Nonnull Object id,
+			@Nonnull Object[] currentState,
+			@Nullable Object[] loadedState,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/// Given an array of "full entity state", extract the normalized natural id representation.
+	///
+	/// @param state The attribute state array, or {@code null} if no database snapshot exists
+	///
+	/// @return The extracted natural id values, or {@code null} if the state or natural id is null.
+	@Nullable
+	Object extractNaturalIdFromEntityState(@Nullable Object[] state);
+
+	/// Given an entity instance, extract the normalized natural-id representation.
+	///
+	/// @param entity The entity instance
+	///
+	/// @return The extracted natural-id values.
+	@Nullable
+	Object extractNaturalIdFromEntity(@Nonnull Object entity);
+
+	/// Normalize a user-provided natural-id value into the representation Hibernate uses internally.
+	///
+	/// @param incoming The user-supplied value
+	/// @return The normalized, internal representation
+	@Nullable
+	Object normalizeInput(@Nullable Object incoming);
+
+	/// Whether the incoming value is in normalized internal form.
+	///
+	/// @see #normalizeInput
+	boolean isNormalized(@Nullable Object incoming);
+
+	/// Validates a natural id value(s) for the described natural-id based on the expected internal representation
+	void validateInternalForm(@Nullable Object naturalIdValue);
+
+	/// Calculate the hash-code of a natural-id value
+	///
+	/// @param value The natural-id value
+	/// @return The hash-code
+	int calculateHashCode(@Nullable Object value);
+
+	/// Make a loader capable of loading a single entity by natural-id
+	@Nonnull
+	NaturalIdLoader<?> makeLoader(@Nonnull EntityMappingType entityDescriptor);
+
+	/// Make a loader capable of loading multiple entities by natural-id
+	@Nonnull
+	MultiNaturalIdLoader<?> makeMultiLoader(@Nonnull EntityMappingType entityDescriptor);
+}

@@ -1,0 +1,18 @@
+package org.hibernate.query.sqm.spi;
+
+import org.hibernate.type.BindableType;
+import org.hibernate.type.BindingContext;
+
+/**
+ * An SQM node which may be used to disambiguate the type of an argument to a query parameter.
+ *
+ * @author Gavin King
+ *
+ * @since 7.0
+ */
+public interface SqmBindableType<J> extends SqmExpressible<J>, BindableType<J> {
+	@Override
+	default SqmBindableType<J> resolveExpressible(BindingContext bindingContext) {
+		return this;
+	}
+}

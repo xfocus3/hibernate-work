@@ -1,0 +1,187 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+import org.hibernate.LockOptions;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.build.AllowReflection;
+import org.hibernate.loader.ast.spi.SqlArrayMultiKeyLoader;
+import org.hibernate.metamodel.mapping.EntityIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SqlTypedMapping;
+import org.hibernate.metamodel.mapping.internal.SqlTypedMappingImpl;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseManager;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.internal.SqlTypedMappingJdbcParameter;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+
+import java.util.Locale;
+
+import static org.hibernate.loader.ast.internal.LoaderHelper.loadByArrayParameter;
+import static org.hibernate.loader.ast.internal.MultiKeyLoadHelper.trimIdBatch;
+import static org.hibernate.loader.ast.internal.MultiKeyLoadLogging.MULTI_KEY_LOAD_LOGGER;
+import static org.hibernate.pretty.MessageHelper.infoString;
+import static org.hibernate.sql.exec.spi.JdbcParameterBindings.NO_BINDINGS;
+
+/**
+ * {@link SingleIdEntityLoaderSupport} implementation based on using a single
+ * {@linkplain org.hibernate.type.SqlTypes#ARRAY array} parameter to pass the
+ * entire batch of ids.
+ *
+ * @author Steve Ebersole
+ */
+public class EntityBatchLoaderArrayParam<T>
+		extends AbstractEntityBatchLoader<T>
+		implements SqlArrayMultiKeyLoader {
+	private final int domainBatchSize;
+
+	private final SqlTypedMapping arraySqlTypedMapping;
+	private final JdbcParameter jdbcParameter;
+	private final SelectStatement sqlAst;
+	private final JdbcSelect jdbcSelectOperation;
+
+
+	/**
+	 * Instantiates the loader
+	 *
+	 * @param domainBatchSize The number of domain model parts (up to)
+	 *
+	 * @implNote We delay initializing the internal SQL AST state until first use.  Creating
+	 * the SQL AST internally relies on the entity's {@link EntityIdentifierMapping}. However, we
+	 * do create the static batch-loader for the entity in the persister constructor and
+	 * {@link EntityIdentifierMapping} is not available at that time.  On first use, we know we
+	 * have it available
+	 */
+	public EntityBatchLoaderArrayParam(
+			int domainBatchSize,
+			@Nonnull EntityMappingType entityDescriptor,
+			@Nonnull LoadQueryInfluencers loadQueryInfluencers) {
+		super( entityDescriptor, loadQueryInfluencers );
+		this.domainBatchSize = domainBatchSize;
+
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.enabledEntityArray(
+					entityDescriptor.getEntityName(),
+					domainBatchSize
+			);
+		}
+
+		final var identifierMapping = getLoadable().getIdentifierMapping();
+		final SelectableMapping selectable = identifierMapping.getSelectable( 0 );
+		final JdbcMapping jdbcMapping = selectable.getJdbcMapping();
+		arraySqlTypedMapping = new SqlTypedMappingImpl(
+				selectable.getLength(),
+				selectable.getArrayLength(),
+				selectable.getPrecision(),
+				selectable.getScale(),
+				selectable.getTemporalPrecision(),
+				MultiKeyLoadHelper.resolveArrayJdbcMapping(
+					jdbcMapping,
+					jdbcMapping.getJdbcJavaType().getJavaTypeClass(),
+					sessionFactory
+				)
+		);
+
+		jdbcParameter = new SqlTypedMappingJdbcParameter( arraySqlTypedMapping );
+		sqlAst = LoaderSelectBuilder.createSelectBySingleArrayParameter(
+				getLoadable(),
+				identifierMapping,
+				loadQueryInfluencers,
+				new LockOptions(),
+				jdbcParameter,
+				new SqlAliasBaseManager(),
+				sessionFactory
+		);
+
+		jdbcSelectOperation =
+				sessionFactory.getJdbcServices().getJdbcEnvironment().getSqlAstTranslatorFactory()
+						.buildTranslator( new SqlAstTranslationRequest.Select( sessionFactory, sqlAst ) )
+						.translate( NO_BINDINGS, QueryOptions.NONE );
+	}
+
+	@Override
+	public int getDomainBatchSize() {
+		return domainBatchSize;
+	}
+
+	@Nonnull
+	@AllowReflection
+	protected Object[] resolveIdsToInitialize(@Nonnull Object pkValue, @Nonnull SharedSessionContractImplementor session) {
+		//TODO: should this really be different to EntityBatchLoaderInPredicate impl?
+		final Object[] idsToLoad = new Object[domainBatchSize];
+		session.getPersistenceContextInternal().getBatchFetchQueue()
+				.collectBatchLoadableEntityIds(
+						domainBatchSize,
+						(index, value) -> idsToLoad[index] = value,
+						pkValue,
+						getLoadable()
+				);
+		return trimIdBatch( domainBatchSize, idsToLoad );
+	}
+
+	@Override
+	protected void initializeEntities(
+			@Nonnull Object[] idsToInitialize,
+			@Nonnull Object id,
+			@Nullable Object entityInstance,
+			@Nonnull LockOptions lockOptions,
+			@Nullable Boolean readOnly,
+			@Nonnull SharedSessionContractImplementor session) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.entityIdsToInitialize(
+					infoString( getLoadable(), id), idsToInitialize );
+		}
+
+		removeBatchLoadableEntityKeys( idsToInitialize, session );
+
+		loadByArrayParameter(
+				idsToInitialize,
+				sqlAst,
+				jdbcSelectOperation,
+				jdbcParameter,
+				arraySqlTypedMapping.getJdbcMapping(),
+				id,
+				entityInstance,
+				getLoadable().getRootEntityDescriptor(),
+				lockOptions,
+				readOnly,
+				session
+		);
+	}
+
+	private void removeBatchLoadableEntityKeys(@Nonnull Object[] idsToInitialize, @Nonnull SharedSessionContractImplementor session) {
+		final var batchFetchQueue = session.getPersistenceContextInternal().getBatchFetchQueue();
+		final var persister = getLoadable().getEntityPersister();
+		for ( Object initializedId : idsToInitialize ) {
+			if ( initializedId != null ) {
+				// found or not, remove the key from the batch-fetch queue
+				batchFetchQueue.removeBatchLoadableEntityKey( session.generateEntityKey( initializedId, persister ) );
+			}
+		}
+	}
+
+	@Nullable
+	@Override
+	public T load(@Nonnull Object pkValue, @Nonnull LockOptions lockOptions, @Nullable Boolean readOnly, @Nonnull SharedSessionContractImplementor session) {
+		return load( pkValue, null, lockOptions, readOnly, session );
+	}
+
+	@Nonnull
+	@Override
+	public String toString() {
+		return String.format(
+				Locale.ROOT,
+				"EntityBatchLoaderArrayParam(%s [%s])",
+				getLoadable().getEntityName(),
+				domainBatchSize
+		);
+	}
+}

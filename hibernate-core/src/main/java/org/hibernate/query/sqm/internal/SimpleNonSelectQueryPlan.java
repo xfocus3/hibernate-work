@@ -1,0 +1,226 @@
+package org.hibernate.query.sqm.internal;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.action.internal.BulkOperationCleanupAction;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.spi.DomainQueryExecutionContext;
+import org.hibernate.query.spi.NonSelectQueryPlan;
+import org.hibernate.query.spi.QueryParameterImplementor;
+import org.hibernate.query.sqm.spi.SqmParameterMappingModelResolutionAccess;
+import org.hibernate.query.sqm.sql.spi.SqmTranslation;
+import org.hibernate.query.sqm.sql.spi.SqmTranslationRequest;
+import org.hibernate.query.sqm.tree.spi.SqmDmlStatement;
+import org.hibernate.query.sqm.tree.spi.expression.SqmParameter;
+import org.hibernate.sql.ast.spi.query.MutationStatement;
+import org.hibernate.sql.exec.spi.ExecutionContext;
+import org.hibernate.sql.exec.spi.JdbcOperationQueryMutation;
+import org.hibernate.sql.exec.spi.JdbcParameterBindings;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.hibernate.query.sqm.internal.SqmJdbcExecutionContextAdapter.omittingLockingAndPaging;
+import static org.hibernate.query.sqm.internal.SqmUtil.generateJdbcParamsXref;
+
+
+/**
+ * @since 7.1
+ */
+public class SimpleNonSelectQueryPlan implements NonSelectQueryPlan {
+	private final SqmDmlStatement<?> statement;
+	private final DomainParameterXref domainParameterXref;
+
+	private volatile CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> interpretation;
+
+	public SimpleNonSelectQueryPlan(SqmDmlStatement<?> statement, DomainParameterXref domainParameterXref) {
+		this.statement = statement;
+		this.domainParameterXref = domainParameterXref;
+	}
+
+	// For Hibernate Reactive
+	protected SqmDmlStatement<?> getStatement() {
+		return statement;
+	}
+
+	@Override
+	public int executeUpdate(DomainQueryExecutionContext context) {
+		BulkOperationCleanupAction.schedule( context.getSession(), statement );
+		final var interpretation = getInterpretation( context );
+		return execute( interpretation.interpretation,
+				interpretation.jdbcParameterBindings,
+				omittingLockingAndPaging( context ) );
+	}
+
+	protected int execute(
+			CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> sqmInterpretation,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext) {
+		final var session = executionContext.getSession();
+		return session.getFactory().getJdbcServices().getJdbcMutationExecutor().execute(
+				sqmInterpretation.jdbcOperation(),
+				jdbcParameterBindings,
+				sql -> session
+						.getJdbcCoordinator()
+						.getStatementPreparer()
+						.prepareStatement( sql ),
+				(integer, preparedStatement) -> {},
+				executionContext
+		);
+	}
+
+	private JdbcParameterBindings createJdbcParameterBindings(
+			CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> sqmInterpretation,
+			DomainQueryExecutionContext executionContext) {
+		return SqmUtil.createJdbcParameterBindings(
+				executionContext.getQueryParameterBindings(),
+				domainParameterXref,
+				sqmInterpretation.jdbcParamsXref(),
+				new SqmParameterMappingModelResolutionAccess() {
+					//this is pretty ugly!
+					@Override @SuppressWarnings("unchecked")
+					public <T> MappingModelExpressible<T> getResolvedMappingModelType(SqmParameter<T> parameter) {
+						return (MappingModelExpressible<T>) sqmInterpretation.sqmParameterMappingModelTypes().get(parameter);
+					}
+				},
+				executionContext.getSession()
+		);
+	}
+
+	protected SqmTranslation<? extends MutationStatement> buildTranslation(
+			SqmDmlStatement<?> sqm,
+			DomainParameterXref domainParameterXref,
+			DomainQueryExecutionContext executionContext) {
+		final var sessionFactory = executionContext.getSession().getFactory();
+		return sessionFactory.getQueryEngine().getSqmTranslatorFactory()
+						.createMutationTranslator(
+								new SqmTranslationRequest.Mutation(
+										sqm,
+										executionContext.getQueryOptions(),
+										domainParameterXref,
+										executionContext.getQueryParameterBindings(),
+										executionContext.getSession().getLoadQueryInfluencers(),
+										sessionFactory.getSqlTranslationEngine()
+								)
+						)
+						.translate();
+	}
+
+	// For Hibernate Reactive
+	protected Interpretation getInterpretation(DomainQueryExecutionContext context) {
+		Interpretation builtInterpretation = null;
+		CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> localCopy = interpretation;
+
+		if ( localCopy == null ) {
+			synchronized ( this ) {
+				localCopy = interpretation;
+				if ( localCopy == null ) {
+					builtInterpretation = buildInterpretation( statement, domainParameterXref, context );
+					localCopy = builtInterpretation.interpretation;
+					interpretation = builtInterpretation.interpretation;
+				}
+				else {
+					builtInterpretation = updateInterpretation( localCopy, context );
+				}
+			}
+		}
+		else {
+			builtInterpretation = updateInterpretation( localCopy, context );
+		}
+
+		return builtInterpretation != null ? builtInterpretation
+				: new Interpretation( localCopy, createJdbcParameterBindings( localCopy, context ) );
+	}
+
+	private @Nullable Interpretation updateInterpretation(
+			CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> localCopy,
+			DomainQueryExecutionContext context) {
+		Interpretation builtInterpretation = null;
+		if ( localCopy.jdbcOperation().dependsOnParameterBindings() ) {
+			final var jdbcParameterBindings = createJdbcParameterBindings( localCopy, context );
+			// If the translation depends on the limit or lock options, we have to rebuild the JdbcSelect
+			// We could avoid this by putting the lock options into the cache key
+			if ( !localCopy.jdbcOperation()
+					.isCompatibleWith( jdbcParameterBindings, context.getQueryOptions() ) ) {
+				builtInterpretation = buildInterpretation(
+						localCopy.statement(),
+						localCopy.jdbcParamsXref(),
+						localCopy.sqmParameterMappingModelTypes(),
+						jdbcParameterBindings,
+						context
+				);
+				interpretation = builtInterpretation.interpretation;
+			}
+			else {
+				builtInterpretation = new Interpretation( localCopy, jdbcParameterBindings );
+			}
+		}
+		return builtInterpretation;
+	}
+
+	// For Hibernate Reactive
+	protected record Interpretation(
+			CacheableSqmInterpretation<MutationStatement, JdbcOperationQueryMutation> interpretation,
+			JdbcParameterBindings jdbcParameterBindings
+	) {}
+
+	protected Interpretation buildInterpretation(
+			SqmDmlStatement<?> sqm,
+			DomainParameterXref domainParameterXref,
+			DomainQueryExecutionContext executionContext) {
+		final var session = executionContext.getSession();
+
+		final var sqmInterpretation = buildTranslation( sqm, domainParameterXref, executionContext );
+		final var jdbcParamsXref =
+				generateJdbcParamsXref( domainParameterXref, sqmInterpretation::getJdbcParamsBySqmParam );
+		final var parameterModelTypeResolutions =
+				sqmInterpretation.getSqmParameterMappingModelTypeResolutions();
+
+		final var jdbcParameterBindings = SqmUtil.createJdbcParameterBindings(
+				executionContext.getQueryParameterBindings(),
+				domainParameterXref,
+				jdbcParamsXref,
+				new SqmParameterMappingModelResolutionAccess() {
+					@Override
+					@SuppressWarnings("unchecked")
+					public <T> MappingModelExpressible<T> getResolvedMappingModelType(SqmParameter<T> parameter) {
+						return (MappingModelExpressible<T>)
+								parameterModelTypeResolutions.get( parameter );
+					}
+				},
+				session
+		);
+		return buildInterpretation(
+				sqmInterpretation.getSqlAst(),
+				jdbcParamsXref,
+				parameterModelTypeResolutions,
+				jdbcParameterBindings,
+				executionContext
+		);
+	}
+
+	protected Interpretation buildInterpretation(
+			MutationStatement mutationStatement,
+			Map<QueryParameterImplementor<?>, Map<SqmParameter<?>, List<JdbcParametersList>>> jdbcParamsXref,
+			Map<SqmParameter<?>, MappingModelExpressible<?>> parameterModelTypeResolutions,
+			JdbcParameterBindings jdbcParameterBindings,
+			DomainQueryExecutionContext executionContext) {
+		final var sessionFactory = executionContext.getSession().getFactory();
+		final var mutationTranslator =
+				sessionFactory.getJdbcServices().getJdbcEnvironment().getSqlAstTranslatorFactory()
+						.buildTranslator( new SqlAstTranslationRequest.QueryMutation( sessionFactory, mutationStatement ) );
+		return new Interpretation(
+				new CacheableSqmInterpretation<>(
+						mutationStatement,
+						mutationTranslator.translate( jdbcParameterBindings,
+								executionContext.getQueryOptions() ),
+						jdbcParamsXref,
+						parameterModelTypeResolutions
+				),
+				jdbcParameterBindings
+		);
+	}
+
+}

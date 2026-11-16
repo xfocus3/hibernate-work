@@ -1,0 +1,35 @@
+package org.hibernate.orm.test.collection.ordered.joinedInheritence;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.Inheritance;
+import jakarta.persistence.InheritanceType;
+
+/**
+ * @author Steve Ebersole
+ */
+@Entity
+@Inheritance( strategy = InheritanceType.JOINED )
+public class Animal {
+	private Long id;
+	private long weight;
+
+	@Id
+	@GeneratedValue
+	public Long getId() {
+		return id;
+	}
+
+	public void setId(Long id) {
+		this.id = id;
+	}
+
+	public long getWeight() {
+		return weight;
+	}
+
+	public void setWeight(long weight) {
+		this.weight = weight;
+	}
+}

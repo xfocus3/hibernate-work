@@ -1,0 +1,46 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.Incubating;
+import org.hibernate.sql.results.internal.RowTransformerTupleTransformerAdapter;
+
+import java.util.List;
+
+/**
+ * Defines some transformation applied to each result of a {@link Query} before
+ * the results are packaged as a {@link List} and returned to the caller. Each
+ * result is received as a tuple (that is, as an {@code Object[]}), and may be
+ * transformed to some other type.
+ *
+ * @implNote Every {@code TupleTransformer} is automatically wrapped in an
+ * instance of {@link RowTransformerTupleTransformerAdapter}, adapting it to
+ * the {@link org.hibernate.sql.results.spi.RowTransformer} contract, which is
+ * always used to actually process the results internally.
+ *
+ * @see SelectionQuery#setTupleTransformer
+ * @see ResultListTransformer
+ * @see org.hibernate.sql.results.spi.RowTransformer
+ *
+ * @author Steve Ebersole
+ * @author Gavin King
+ *
+ * @since 6.0
+ */
+@Incubating(since = "6.0")
+@FunctionalInterface
+public interface TupleTransformer<T> {
+	/**
+	 * Tuples are the elements making up each "row" of the query result.
+	 * The contract here is to transform these elements into the final
+	 * row shape.
+	 *
+	 * @param tuple The result elements
+	 * @param aliases The result aliases ("parallel" array to tuple)
+	 *
+	 * @return The transformed row.
+	 */
+	@Nullable
+	T transformTuple(@Nonnull Object[] tuple, @Nonnull String[] aliases);
+}

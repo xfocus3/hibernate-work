@@ -1,0 +1,190 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.query.sqm.BinaryArithmeticOperator;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelectableNode;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import static org.hibernate.query.sqm.BinaryArithmeticOperator.ADD;
+import static org.hibernate.query.sqm.BinaryArithmeticOperator.SUBTRACT;
+import static org.hibernate.type.spi.TypeConfiguration.isDuration;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SqmBinaryArithmetic<T> extends AbstractSqmExpression<T> implements SqmSelectableNode<T> {
+	private final SqmExpression<?> lhsOperand;
+	private final BinaryArithmeticOperator operator;
+	private final SqmExpression<?> rhsOperand;
+
+	public SqmBinaryArithmetic(
+			@Nonnull BinaryArithmeticOperator operator,
+			@Nonnull SqmExpression<?> lhsOperand,
+			@Nonnull SqmExpression<?> rhsOperand,
+			@Nonnull NodeBuilder nodeBuilder) {
+		//noinspection unchecked
+		super(
+				(SqmBindableType<T>) // TODO: this cast is unsound
+						nodeBuilder.getTypeConfiguration().resolveArithmeticType(
+								lhsOperand.getExpressible(),
+								rhsOperand.getExpressible(),
+								operator
+						),
+				nodeBuilder
+		);
+
+		this.lhsOperand = lhsOperand;
+		this.operator = operator;
+		this.rhsOperand = rhsOperand;
+
+		final SqmBindableType<?> lhsExpressible = lhsOperand.getExpressible();
+		final SqmBindableType<?> rhsExpressible = rhsOperand.getExpressible();
+		if ( lhsExpressible == null
+				&& isDuration( rhsExpressible )
+				&& ( operator == ADD || operator == SUBTRACT ) ) {
+			return;
+		}
+		this.lhsOperand.applyInferableType( rhsExpressible, rhsOperand.getJavaTypeDescriptor() );
+		this.rhsOperand.applyInferableType( lhsExpressible, lhsOperand.getJavaTypeDescriptor() );
+	}
+
+	public SqmBinaryArithmetic(
+			@Nonnull BinaryArithmeticOperator operator,
+			@Nonnull SqmExpression<?> lhsOperand,
+			@Nonnull SqmExpression<?> rhsOperand,
+			@Nullable SqmBindableType<T> expressibleType,
+			@Nonnull NodeBuilder nodeBuilder) {
+		super( expressibleType, nodeBuilder );
+
+		this.operator = operator;
+
+		this.lhsOperand = lhsOperand;
+		this.rhsOperand = rhsOperand;
+	}
+
+	@Nonnull
+	@Override
+	public SqmBinaryArithmetic<T> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		final SqmBinaryArithmetic<T> expression = context.registerCopy(
+				this,
+				new SqmBinaryArithmetic<>(
+						operator,
+						lhsOperand.copy( context ),
+						rhsOperand.copy( context ),
+						getNodeType(),
+						nodeBuilder()
+				)
+		);
+		copyTo( expression, context );
+		return expression;
+	}
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return walker.visitBinaryArithmeticExpression( this );
+	}
+
+	/**
+	 * Get the left-hand operand.
+	 *
+	 * @return The left-hand operand.
+	 */
+	@Nonnull
+	public SqmExpression<?> getLeftHandOperand() {
+		return lhsOperand;
+	}
+
+	/**
+	 * Get the operator
+	 *
+	 * @return The operator
+	 */
+	@Nonnull
+	public BinaryArithmeticOperator getOperator() {
+		return operator;
+	}
+
+	/**
+	 * Get the right-hand operand.
+	 *
+	 * @return The right-hand operand.
+	 */
+	@Nonnull
+	public SqmExpression<?> getRightHandOperand() {
+		return rhsOperand;
+	}
+
+	@Override
+	protected void internalApplyInferableType(@Nullable SqmBindableType<?> type) {
+		rhsOperand.applyInferableType( type );
+		lhsOperand.applyInferableType( type );
+
+		super.internalApplyInferableType( type );
+	}
+
+	@Override
+	protected void internalApplyInferableType(@Nullable SqmBindableType<?> newType, @Nullable JavaType<?> newJavaType) {
+		rhsOperand.applyInferableType( newType, newJavaType );
+		lhsOperand.applyInferableType( newType, newJavaType );
+
+		super.internalApplyInferableType( newType, newJavaType );
+	}
+
+	@Nonnull
+	@Override
+	public String asLoggableText() {
+		return getOperator().toLoggableText( lhsOperand.asLoggableText(), rhsOperand.asLoggableText() );
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		lhsOperand.appendHqlString( hql, context );
+		hql.append( ' ' );
+		hql.append( operator.getOperatorSqlText() );
+		hql.append( ' ' );
+		rhsOperand.appendHqlString( hql, context );
+	}
+
+	@Override
+	public boolean equals(@Nullable Object object) {
+		return object instanceof SqmBinaryArithmetic<?> that
+			&& this.operator == that.operator
+			&& this.lhsOperand.equals( that.lhsOperand )
+			&& this.rhsOperand.equals( that.rhsOperand );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = lhsOperand.hashCode();
+		result = 31 * result + operator.hashCode();
+		result = 31 * result + rhsOperand.hashCode();
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return object instanceof SqmBinaryArithmetic<?> that
+			&& this.operator == that.operator
+			&& this.lhsOperand.isCompatible( that.lhsOperand )
+			&& this.rhsOperand.isCompatible( that.rhsOperand );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		int result = lhsOperand.cacheHashCode();
+		result = 31 * result + operator.hashCode();
+		result = 31 * result + rhsOperand.cacheHashCode();
+		return result;
+	}
+}

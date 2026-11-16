@@ -1,0 +1,65 @@
+package org.hibernate.boot.models.annotations.internal;
+
+import java.lang.annotation.Annotation;
+import java.util.Map;
+
+import org.hibernate.annotations.ManyToAny;
+import org.hibernate.boot.models.annotations.spi.AttributeMarker;
+import org.hibernate.models.spi.ModelsContext;
+import jakarta.persistence.CascadeType;
+
+@SuppressWarnings({ "ClassExplicitlyAnnotation", "unused" })
+@jakarta.annotation.Generated("org.hibernate.orm.build.annotations.ClassGeneratorProcessor")
+public class ManyToAnyAnnotation
+		implements ManyToAny, AttributeMarker, AttributeMarker.Fetchable, AttributeMarker.Cascadeable {
+	private jakarta.persistence.FetchType fetch;
+	private CascadeType[] cascade;
+
+	/**
+	 * Used in creating dynamic annotation instances (e.g. from XML)
+	 */
+	public ManyToAnyAnnotation(ModelsContext modelContext) {
+		this.fetch = jakarta.persistence.FetchType.EAGER;
+		this.cascade = new CascadeType[0];
+	}
+
+	/**
+	 * Used in creating annotation instances from JDK variant
+	 */
+	public ManyToAnyAnnotation(ManyToAny annotation, ModelsContext modelContext) {
+		this.fetch = annotation.fetch();
+		this.cascade = annotation.cascade();
+	}
+
+	/**
+	 * Used in creating annotation instances from Jandex variant
+	 */
+	public ManyToAnyAnnotation(Map<String, Object> attributeValues, ModelsContext modelContext) {
+		this.fetch = (jakarta.persistence.FetchType) attributeValues.get( "fetch" );
+		this.cascade = (CascadeType[]) attributeValues.getOrDefault( "cascade", new CascadeType[0] );
+	}
+
+	@Override
+	public Class<? extends Annotation> annotationType() {
+		return ManyToAny.class;
+	}
+
+	@Override
+	public jakarta.persistence.FetchType fetch() {
+		return fetch;
+	}
+
+	public void fetch(jakarta.persistence.FetchType value) {
+		this.fetch = value;
+	}
+
+	@Override
+	public CascadeType[] cascade() {
+		return cascade;
+	}
+
+	public void cascade(CascadeType[] value) {
+		this.cascade = value;
+	}
+
+}

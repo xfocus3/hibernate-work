@@ -1,0 +1,142 @@
+package org.hibernate.boot.beanvalidation;
+
+import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+
+import org.hibernate.HibernateException;
+import org.hibernate.boot.registry.classloading.spi.ClassLoadingException;
+import org.hibernate.boot.spi.ClassLoaderAccess;
+
+import jakarta.validation.groups.Default;
+
+import static org.hibernate.internal.util.StringHelper.split;
+
+/**
+ * @author Emmanuel Bernard
+ */
+public class GroupsPerOperation {
+	private static final String JPA_GROUP_PREFIX = "javax.persistence.validation.group.";
+	private static final String JAKARTA_JPA_GROUP_PREFIX = "jakarta.persistence.validation.group.";
+	private static final String HIBERNATE_GROUP_PREFIX = "org.hibernate.validator.group.";
+
+	private static final Class<?>[] DEFAULT_GROUPS = new Class<?>[] { Default.class };
+	private static final Class<?>[] EMPTY_GROUPS = new Class<?>[] { };
+
+	private final Map<Operation, Class<?>[]> groupsPerOperation = new EnumMap<>( Operation.class );
+
+	private GroupsPerOperation() {
+	}
+
+	public static GroupsPerOperation from(Map<String,Object> settings, ClassLoaderAccess classLoaderAccess) {
+		final GroupsPerOperation groupsPerOperation = new GroupsPerOperation();
+		applyOperationGrouping( groupsPerOperation, Operation.PERSIST, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.MERGE, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.REMOVE, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.INSERT, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.UPDATE, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.UPSERT, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.DELETE, settings, classLoaderAccess );
+		applyOperationGrouping( groupsPerOperation, Operation.DDL, settings, classLoaderAccess );
+		return groupsPerOperation;
+	}
+
+	private static void applyOperationGrouping(
+			GroupsPerOperation groupsPerOperation,
+			Operation operation,
+			Map<String,Object> settings,
+			ClassLoaderAccess classLoaderAccess) {
+		groupsPerOperation.groupsPerOperation.put(
+				operation,
+				buildGroupsForOperation( operation, settings, classLoaderAccess )
+		);
+	}
+
+	public static Class<?>[] buildGroupsForOperation(
+			Operation operation, Map<String,Object> settings, ClassLoaderAccess classLoaderAccess) {
+		Object property = settings.get( operation.getJakartaGroupPropertyName() );
+		if ( property == null ) {
+			property = settings.get( operation.getGroupPropertyName() );
+		}
+
+		if ( property == null ) {
+			return operation.validateByDefault ? DEFAULT_GROUPS : EMPTY_GROUPS;
+		}
+
+		if ( property instanceof Class<?>[] classes ) {
+			return classes;
+		}
+
+		if ( property instanceof String string ) {
+			final String[] groupNames = split( ",", string );
+			if ( groupNames.length == 1 && groupNames[0].isEmpty() ) {
+				return EMPTY_GROUPS;
+			}
+
+			final List<Class<?>> groupsList = new ArrayList<>( groupNames.length );
+			for ( String groupName : groupNames ) {
+				final String cleanedGroupName = groupName.trim();
+				if ( !cleanedGroupName.isEmpty() ) {
+					try {
+						groupsList.add( classLoaderAccess.classForName( cleanedGroupName ) );
+					}
+					catch ( ClassLoadingException e ) {
+						throw new HibernateException( "Unable to load class " + cleanedGroupName, e );
+					}
+				}
+			}
+			return groupsList.toArray( new Class<?>[0] );
+		}
+
+		//null is bad and excluded by instanceof => exception is raised
+		throw new HibernateException( JAKARTA_JPA_GROUP_PREFIX
+				+ operation.getJakartaGroupPropertyName()
+				+ " is of unknown type: String or Class<?>[] only");
+	}
+
+	public Class<?>[] get(Operation operation) {
+		return groupsPerOperation.get( operation );
+	}
+
+	public enum Operation {
+		PERSIST( "persist", JPA_GROUP_PREFIX + "pre-persist", JAKARTA_JPA_GROUP_PREFIX + "pre-persist" ),
+		MERGE( "merge", JAKARTA_JPA_GROUP_PREFIX + "pre-merge", JAKARTA_JPA_GROUP_PREFIX + "pre-merge" ),
+		REMOVE( "remove", JPA_GROUP_PREFIX + "pre-remove", JAKARTA_JPA_GROUP_PREFIX + "pre-remove" ),
+		INSERT( "insert", JAKARTA_JPA_GROUP_PREFIX + "pre-insert", JAKARTA_JPA_GROUP_PREFIX + "pre-insert", true ),
+		UPDATE( "update", JPA_GROUP_PREFIX + "pre-update", JAKARTA_JPA_GROUP_PREFIX + "pre-update", true ),
+		UPSERT( "upsert", JAKARTA_JPA_GROUP_PREFIX + "pre-upsert", JAKARTA_JPA_GROUP_PREFIX + "pre-upsert", true ),
+		DELETE( "delete", JAKARTA_JPA_GROUP_PREFIX + "pre-delete", JAKARTA_JPA_GROUP_PREFIX + "pre-delete" ),
+		DDL( "ddl", HIBERNATE_GROUP_PREFIX + "ddl", HIBERNATE_GROUP_PREFIX + "ddl", true );
+
+
+		private final String exposedName;
+		private final String groupPropertyName;
+		private final String jakartaGroupPropertyName;
+		private final boolean validateByDefault;
+
+		Operation(String exposedName, String groupProperty, String jakartaGroupPropertyName) {
+			this(exposedName, groupProperty, jakartaGroupPropertyName, false);
+		}
+
+		Operation(String exposedName, String groupProperty, String jakartaGroupPropertyName, boolean validateByDefault) {
+			this.exposedName = exposedName;
+			this.groupPropertyName = groupProperty;
+			this.jakartaGroupPropertyName = jakartaGroupPropertyName;
+			this.validateByDefault = validateByDefault;
+		}
+
+		public String getName() {
+			return exposedName;
+		}
+
+		public String getGroupPropertyName() {
+			return groupPropertyName;
+		}
+
+		public String getJakartaGroupPropertyName() {
+			return jakartaGroupPropertyName;
+		}
+	}
+
+}

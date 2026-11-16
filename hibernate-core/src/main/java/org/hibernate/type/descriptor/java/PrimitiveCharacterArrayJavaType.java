@@ -1,0 +1,140 @@
+package org.hibernate.type.descriptor.java;
+
+import java.io.Reader;
+import java.io.StringReader;
+import java.sql.Clob;
+import java.sql.NClob;
+import java.util.Arrays;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.jdbc.CharacterStream;
+import org.hibernate.engine.jdbc.internal.CharacterStreamImpl;
+import org.hibernate.type.descriptor.WrapperOptions;
+
+/**
+ * Descriptor for {@code char[]} handling.
+ *
+ * @author Steve Ebersole
+ */
+public class PrimitiveCharacterArrayJavaType extends AbstractClassJavaType<char[]> {
+	public static final PrimitiveCharacterArrayJavaType INSTANCE = new PrimitiveCharacterArrayJavaType();
+
+	@SuppressWarnings("unchecked")
+	protected PrimitiveCharacterArrayJavaType() {
+		super( char[].class, new ArrayMutabilityPlan(), IncomparableComparator.INSTANCE );
+	}
+
+	public String toString(char[] value) {
+		return new String( value );
+	}
+
+	public char[] fromString(CharSequence string) {
+		return string.toString().toCharArray();
+	}
+
+	@Override
+	public boolean isInstance(Object value) {
+		return value instanceof char[];
+	}
+
+	@Override
+	public char[] cast(Object value) {
+		return (char[]) value;
+	}
+
+	@Override
+	public boolean areEqual(char[] one, char[] another) {
+		return one == another
+			|| one != null && another != null && Arrays.equals( one, another );
+	}
+
+	@Override
+	public int extractHashCode(char[] chars) {
+		int hashCode = 1;
+		for ( char aChar : chars ) {
+			hashCode = 31 * hashCode + aChar;
+		}
+		return hashCode;
+	}
+
+	public <X> X unwrap(char[] value, Class<X> type, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+		if ( char[].class.isAssignableFrom( type ) ) {
+			return type.cast( value );
+		}
+		if ( String.class.isAssignableFrom( type ) ) {
+			return type.cast( new String( value ) );
+		}
+		if ( NClob.class.isAssignableFrom( type ) ) {
+			return type.cast( options.getLobCreator().createNClob( new String( value ) ) );
+		}
+		if ( Clob.class.isAssignableFrom( type ) ) {
+			return type.cast( options.getLobCreator().createClob( new String( value ) ) );
+		}
+		if ( Reader.class.isAssignableFrom( type ) ) {
+			return type.cast( new StringReader( new String( value ) ) );
+		}
+		if ( CharacterStream.class.isAssignableFrom( type ) ) {
+			return type.cast( new CharacterStreamImpl( new String( value ) ) );
+		}
+		throw unknownUnwrap( type );
+	}
+
+	public <X> @Nullable char[] wrap(@Nullable X value, WrapperOptions options) {
+		if ( value == null ) {
+			return null;
+		}
+		final var wrapped = wrapOrNull( value );
+		if ( wrapped == null ) {
+			throw unknownWrap( value.getClass() );
+		}
+		return wrapped;
+	}
+
+	private <X> @Nullable char[] wrapOrNull(@Nonnull X value) {
+		if (value instanceof char[] chars) {
+			return chars;
+		}
+		if (value instanceof String string) {
+			return string.toCharArray();
+		}
+		if (value instanceof Clob clob) {
+			return DataHelper.extractString( clob ).toCharArray();
+		}
+		if (value instanceof Reader reader) {
+			return DataHelper.extractString( reader ).toCharArray();
+		}
+		else if ( value instanceof Character character ) {
+			// Support binding a single element as parameter value
+			return new char[]{ character };
+		}
+		else {
+			return null;
+		}
+	}
+
+	@Override
+	public @Nullable char[] coerce(@Nullable Object value) {
+		try {
+			return wrap( value, null );
+		}
+		catch (Exception e) {
+			throw CoercionHelper.coercionException( e );
+		}
+	}
+
+	@Override
+	public @Nullable Object coerceOrNull(@Nonnull Object value) {
+		return wrapOrNull( value );
+	}
+
+	private static class ArrayMutabilityPlan extends MutableMutabilityPlan<char[]> {
+		@Override
+		protected char[] deepCopyNotNull(char[] value) {
+			return value.clone();
+		}
+	}
+}

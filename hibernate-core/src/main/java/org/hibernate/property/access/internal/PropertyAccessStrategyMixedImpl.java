@@ -1,0 +1,22 @@
+package org.hibernate.property.access.internal;
+
+import org.hibernate.property.access.spi.PropertyAccess;
+import org.hibernate.property.access.spi.PropertyAccessStrategy;
+import org.hibernate.property.access.spi.PropertyAccessorService;
+
+/**
+ * A PropertyAccessStrategy that selects between available getter/setter method and/or field.
+ *
+ * @author Steve Ebersole
+ */
+public class PropertyAccessStrategyMixedImpl implements PropertyAccessStrategy {
+	/**
+	 * Singleton access
+	 */
+	public static final PropertyAccessStrategy INSTANCE = new PropertyAccessStrategyMixedImpl();
+
+	@Override
+	public PropertyAccess buildPropertyAccess(PropertyAccessorService propertyAccessorService, Class<?> containerJavaType, String propertyName, boolean setterRequired) {
+		return new PropertyAccessMixedImpl( propertyAccessorService, this, containerJavaType, propertyName );
+	}
+}

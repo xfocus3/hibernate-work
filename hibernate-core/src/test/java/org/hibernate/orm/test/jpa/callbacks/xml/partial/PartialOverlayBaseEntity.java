@@ -1,0 +1,21 @@
+package org.hibernate.orm.test.jpa.callbacks.xml.partial;
+
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.MappedSuperclass;
+
+@MappedSuperclass
+public abstract class PartialOverlayBaseEntity {
+
+	@Id
+	@GeneratedValue
+	private Long id;
+
+	public Long getId() {
+		return id;
+	}
+
+	public void setId(Long id) {
+		this.id = id;
+	}
+}

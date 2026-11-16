@@ -1,0 +1,143 @@
+package org.hibernate.query.sqm.tuple.internal;
+
+import java.lang.reflect.Member;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.AttributeClassification;
+import org.hibernate.metamodel.model.domain.ManagedDomainType;
+import org.hibernate.metamodel.model.domain.SimpleDomainType;
+import org.hibernate.query.hql.spi.SqmCreationState;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.tree.spi.SqmJoinType;
+import org.hibernate.query.sqm.tree.spi.domain.SqmSingularJoin;
+import org.hibernate.query.sqm.tree.spi.domain.SqmSingularPersistentAttribute;
+import org.hibernate.query.sqm.tree.spi.domain.SqmDomainType;
+import org.hibernate.query.sqm.tree.spi.from.SqmFrom;
+import org.hibernate.query.sqm.tree.spi.from.SqmJoin;
+import org.hibernate.type.descriptor.java.JavaType;
+
+/**
+ * @author Christian Beikov
+ */
+public class AnonymousTupleSqmAssociationPathSourceNew<O, J>
+		extends AnonymousTupleSqmPathSourceNew<J>
+		implements SqmSingularPersistentAttribute<O, J> {
+
+	private final SimpleDomainType<J> domainType;
+
+	public AnonymousTupleSqmAssociationPathSourceNew(
+			String localPathName,
+			SqmPathSource<J> pathSource,
+			SqmDomainType<J> sqmPathType,
+			SimpleDomainType<J> domainType) {
+		super( localPathName, pathSource, sqmPathType );
+		this.domainType = domainType;
+	}
+
+	@Override
+	public SqmJoin<O, J> createSqmJoin(
+			SqmFrom<?, O> lhs,
+			SqmJoinType joinType,
+			@Nullable String alias,
+			boolean fetched,
+			SqmCreationState creationState) {
+		return new SqmSingularJoin<>(
+				lhs,
+				this,
+				alias,
+				joinType,
+				fetched,
+				creationState.getCreationContext().getNodeBuilder()
+		);
+	}
+
+	@Override
+	@Nonnull
+	public Class<J> getBindableJavaType() {
+		return domainType.getJavaType();
+	}
+
+	@Override
+	@Nonnull
+	public Class<J> getJavaType() {
+		return domainType.getJavaType();
+	}
+
+	@Override
+	@Nonnull
+	public SimpleDomainType<J> getType() {
+		return domainType;
+	}
+
+	@Override
+	@Nonnull
+	public ManagedDomainType<O> getDeclaringType() {
+		throw new UnsupportedOperationException( "Anonymous tuple path source does not have a declaring type" );
+	}
+
+	@Override
+	public SqmPathSource<J> getSqmPathSource() {
+		return this;
+	}
+
+	@Override
+	public boolean isId() {
+		return false;
+	}
+
+	@Override
+	public boolean isVersion() {
+		return false;
+	}
+
+	@Override
+	public boolean isOptional() {
+		return true;
+	}
+
+	@Override
+	@Nonnull
+	public JavaType<J> getAttributeJavaType() {
+		return domainType.getExpressibleJavaType();
+	}
+
+	@Override
+	@Nonnull
+	public AttributeClassification getAttributeClassification() {
+		return AttributeClassification.MANY_TO_ONE;
+	}
+
+	@Override
+	public SimpleDomainType<?> getKeyGraphType() {
+		return domainType;
+	}
+
+	@Override
+	@Nonnull
+	public String getName() {
+		return getPathName();
+	}
+
+	@Override
+	@Nonnull
+	public PersistentAttributeType getPersistentAttributeType() {
+		return PersistentAttributeType.MANY_TO_ONE;
+	}
+
+	@Override
+	@Nonnull
+	public Member getJavaMember() {
+		throw new UnsupportedOperationException( "Anonymous tuple path source does not have a java member" );
+	}
+
+	@Override
+	public boolean isAssociation() {
+		return true;
+	}
+
+	@Override
+	public boolean isCollection() {
+		return false;
+	}
+}

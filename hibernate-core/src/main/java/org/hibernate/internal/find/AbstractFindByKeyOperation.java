@@ -1,0 +1,447 @@
+package org.hibernate.internal.find;
+
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.EntityNotFoundException;
+import jakarta.persistence.FindOption;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.PessimisticLockScope;
+import jakarta.persistence.Timeout;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.CacheMode;
+import org.hibernate.EnabledFetchProfile;
+import org.hibernate.EntityFilterException;
+import org.hibernate.FetchNotFoundException;
+import org.hibernate.FindMultipleOption;
+import org.hibernate.JDBCException;
+import org.hibernate.KeyType;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.Locking;
+import org.hibernate.MappingException;
+import org.hibernate.NaturalIdSynchronization;
+import org.hibernate.ObjectDeletedException;
+import org.hibernate.ObjectNotFoundException;
+import org.hibernate.ReadOnlyMode;
+import org.hibernate.Timeouts;
+import org.hibernate.Transaction;
+import org.hibernate.TypeMismatchException;
+import org.hibernate.engine.spi.ExceptionConverter;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.exception.GenericJDBCException;
+import org.hibernate.exception.JDBCConnectionException;
+import org.hibernate.exception.LockTimeoutException;
+import org.hibernate.graph.GraphSemantic;
+import org.hibernate.graph.spi.RootGraphImplementor;
+import org.hibernate.jpa.internal.util.LockModeTypeHelper;
+import org.hibernate.loader.ast.spi.NaturalIdLoader;
+import org.hibernate.persister.entity.EntityPersister;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.function.Supplier;
+
+import static org.hibernate.Timeouts.WAIT_FOREVER;
+import static org.hibernate.engine.spi.NaturalIdResolutions.INVALID_NATURAL_ID_REFERENCE;
+import static org.hibernate.internal.NaturalIdHelper.performAnyNeededCrossReferenceSynchronizations;
+import static org.hibernate.internal.SessionLogging.SESSION_LOGGER;
+import static org.hibernate.jpa.SpecHints.HINT_SPEC_LOCK_TIMEOUT;
+
+/// Base support for loading a single entity by key
+/// (either [id][KeyType#IDENTIFIER] or [natural-id][KeyType#NATURAL]).
+///
+/// @see KeyType
+///
+/// @author Steve Ebersole
+public abstract class AbstractFindByKeyOperation<T> implements FindByKeyOperation<T>, NaturalIdLoader.Options {
+	private final EntityPersister entityDescriptor;
+
+	private KeyType keyType = KeyType.IDENTIFIER;
+
+	private CacheStoreMode cacheStoreMode;
+	private CacheRetrieveMode cacheRetrieveMode;
+	private boolean refreshSession;
+
+	private LockMode lockMode;
+	private PessimisticLockScope lockScope;
+	private Locking.FollowOn lockFollowOn;
+	private Timeout lockTimeout = WAIT_FOREVER;
+
+	private ReadOnlyMode readOnlyMode;
+
+	private RootGraphImplementor<?> rootGraph;
+	private GraphSemantic graphSemantic;
+
+	private Set<String> enabledFetchProfiles;
+
+	private NaturalIdSynchronization naturalIdSynchronization;
+
+	public AbstractFindByKeyOperation(
+			@Nonnull EntityPersister entityDescriptor,
+			@Nullable GraphSemantic graphSemantic,
+			@Nullable RootGraphImplementor<?> rootGraph,
+			@Nullable LockOptions defaultLockOptions,
+			@Nullable CacheMode defaultCacheMode,
+			boolean defaultReadOnly,
+			@Nonnull SessionFactoryImplementor sessionFactory,
+			FindOption... findOptions) {
+		this.entityDescriptor = entityDescriptor;
+
+		this.graphSemantic = graphSemantic;
+		this.rootGraph = rootGraph;
+
+		if ( defaultCacheMode != null ) {
+			cacheStoreMode = defaultCacheMode.getJpaStoreMode();
+			cacheRetrieveMode = defaultCacheMode.getJpaRetrieveMode();
+			refreshSession = defaultCacheMode == CacheMode.REFRESH_SESSION;
+		}
+
+		if ( defaultLockOptions != null ) {
+			lockMode = defaultLockOptions.getLockMode();
+			lockScope = defaultLockOptions.getScope();
+			lockTimeout = defaultLockOptions.getTimeout();
+			lockFollowOn = defaultLockOptions.getFollowOnStrategy();
+		}
+		if ( lockTimeout == WAIT_FOREVER ) {
+			final Object factoryTimeoutHint = sessionFactory.getProperties().get( HINT_SPEC_LOCK_TIMEOUT );
+			if ( factoryTimeoutHint != null ) {
+				lockTimeout = Timeouts.fromHintTimeout( factoryTimeoutHint );
+			}
+		}
+
+		readOnlyMode = defaultReadOnly ? ReadOnlyMode.READ_ONLY : ReadOnlyMode.READ_WRITE;
+
+		if ( findOptions != null ) {
+			for ( var option : findOptions ) {
+				if ( option instanceof KeyType keyType ) {
+					this.keyType = keyType;
+				}
+				else if ( option instanceof CacheStoreMode cacheStoreMode ) {
+					this.cacheStoreMode = cacheStoreMode;
+					this.refreshSession = false;
+				}
+				else if ( option instanceof CacheRetrieveMode cacheRetrieveMode ) {
+					this.cacheRetrieveMode = cacheRetrieveMode;
+					this.refreshSession = false;
+				}
+				else if ( option instanceof CacheMode cacheMode ) {
+					this.cacheStoreMode = cacheMode.getJpaStoreMode();
+					this.cacheRetrieveMode = cacheMode.getJpaRetrieveMode();
+					this.refreshSession = cacheMode == CacheMode.REFRESH_SESSION;
+				}
+				else if ( option instanceof LockModeType lockModeType ) {
+					this.lockMode = LockModeTypeHelper.getLockMode( lockModeType );
+				}
+				else if ( option instanceof LockMode lockMode ) {
+					this.lockMode = lockMode;
+				}
+				else if ( option instanceof PessimisticLockScope pessimisticLockScope ) {
+					this.lockScope = pessimisticLockScope;
+				}
+				else if ( option instanceof Locking.FollowOn followOn ) {
+					this.lockFollowOn = followOn;
+				}
+				else if ( option instanceof Timeout timeout ) {
+					this.lockTimeout = timeout;
+				}
+				else if ( option instanceof ReadOnlyMode readOnlyMode ) {
+					this.readOnlyMode = readOnlyMode;
+				}
+				else if ( option instanceof EnabledFetchProfile enabledFetchProfile ) {
+					this.enabledFetchProfile( enabledFetchProfile.profileName() );
+				}
+				else if ( option instanceof NaturalIdSynchronization naturalIdSynchronization ) {
+					this.naturalIdSynchronization = naturalIdSynchronization;
+				}
+				else if ( option instanceof GraphSemantic graphSemanticOption ) {
+					if ( rootGraph == null ) {
+						throw new IllegalArgumentException(
+								"GraphSemantic option was specified, but no Graph was supplied" );
+					}
+					this.graphSemantic = graphSemanticOption;
+				}
+				else if ( option instanceof FindMultipleOption findMultipleOption ) {
+					throw new IllegalArgumentException(
+							"Option '" + findMultipleOption + "' can only be used in 'findMultiple()'" );
+				}
+			}
+		}
+	}
+
+	private void enabledFetchProfile(String profileName) {
+		if ( enabledFetchProfiles == null ) {
+			enabledFetchProfiles = new HashSet<>();
+		}
+		enabledFetchProfiles.add( profileName );
+	}
+
+	public EntityPersister getEntityDescriptor() {
+		return entityDescriptor;
+	}
+
+	public KeyType getKeyType() {
+		return keyType;
+	}
+
+	public CacheStoreMode getCacheStoreMode() {
+		return cacheStoreMode;
+	}
+
+	public CacheRetrieveMode getCacheRetrieveMode() {
+		return cacheRetrieveMode;
+	}
+
+	public CacheMode getCacheMode() {
+		final var cacheMode = CacheMode.fromJpaModes( cacheRetrieveMode, cacheStoreMode );
+		return refreshSession && cacheMode == CacheMode.REFRESH
+				? CacheMode.REFRESH_SESSION
+				: cacheMode;
+	}
+
+	public ReadOnlyMode getReadOnlyMode() {
+		return readOnlyMode;
+	}
+
+	public RootGraphImplementor<?> getRootGraph() {
+		return rootGraph;
+	}
+
+	public GraphSemantic getGraphSemantic() {
+		return graphSemantic;
+	}
+
+	public Set<String> getEnabledFetchProfiles() {
+		return enabledFetchProfiles;
+	}
+
+	public NaturalIdSynchronization getNaturalIdSynchronization() {
+		return naturalIdSynchronization;
+	}
+
+	@Override
+	public T performFind(Object key) {
+		checkTransactionNeededForLock();
+
+		return withExceptionHandling( key, makeLockOptions(), () -> {
+			if ( getKeyType() == KeyType.NATURAL ) {
+				return findByNaturalId( key );
+			}
+			else {
+				return findById( key );
+			}
+		} );
+	}
+
+	private T findByNaturalId(Object key) {
+		final var session = getEntityHandler();
+
+		performAnyNeededCrossReferenceSynchronizations(
+				getNaturalIdSynchronization() != NaturalIdSynchronization.DISABLED,
+				getEntityDescriptor(),
+				session
+		);
+
+		final var normalizedKey = Helper.coerceNaturalId( getEntityDescriptor(), key );
+
+		final Object cachedResolution = getCachedNaturalIdResolution( normalizedKey );
+		if ( cachedResolution == INVALID_NATURAL_ID_REFERENCE ) {
+			return null;
+		}
+
+		if ( cachedResolution != null ) {
+			return findById( cachedResolution );
+		}
+
+		return withOptions( () -> {
+			@SuppressWarnings("unchecked")
+			final T loaded = (T) getEntityDescriptor().getNaturalIdLoader()
+					.load( normalizedKey, this, session );
+			return handleNaturalIdLoadResult( loaded );
+		} );
+	}
+
+	protected abstract T findById(Object key);
+
+	protected T handleNaturalIdLoadResult(T loaded) {
+		return loaded;
+	}
+
+	protected Object getCachedNaturalIdResolution(Object normalizedNaturalIdValue) {
+		beforeCachedNaturalIdResolution();
+		return getEntityHandler()
+				.getPersistenceContextInternal()
+				.getNaturalIdResolutions()
+				.findCachedIdByNaturalId( normalizedNaturalIdValue, getEntityDescriptor() );
+	}
+
+	protected void beforeCachedNaturalIdResolution() {
+	}
+
+	protected T withOptions(Supplier<T> action) {
+		final var session = getEntityHandler();
+		final var sessionCacheMode = session.getCacheMode();
+		final var cacheMode = getCacheModeForOptions();
+		boolean cacheModeChanged = false;
+		try {
+			if ( cacheMode != null && cacheMode != sessionCacheMode ) {
+				session.setCacheMode( cacheMode );
+				cacheModeChanged = true;
+			}
+			return withLoadQueryInfluencers( action );
+		}
+		finally {
+			if ( cacheModeChanged ) {
+				session.setCacheMode( sessionCacheMode );
+			}
+			afterOptions();
+		}
+	}
+
+	protected CacheMode getCacheModeForOptions() {
+		return getCacheMode();
+	}
+
+	protected void afterOptions() {
+	}
+
+	private T withLoadQueryInfluencers(Supplier<T> action) {
+		final var influencers = getEntityHandler().getLoadQueryInfluencers();
+		final var fetchProfiles =
+				influencers.adjustFetchProfiles( null, getEnabledFetchProfiles() );
+		final var graph = getRootGraph();
+		final var effectiveEntityGraph =
+				graph == null
+						? null
+						: influencers.applyEntityGraph( graph, getGraphSemantic() );
+		try {
+			return action.get();
+		}
+		finally {
+			if ( effectiveEntityGraph != null ) {
+				effectiveEntityGraph.clear();
+			}
+			if ( fetchProfiles != null ) {
+				influencers.setEnabledFetchProfileNames( fetchProfiles );
+			}
+		}
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// NaturalIdLoader.Options
+
+	@Nonnull
+	@Override
+	public LockMode getLockMode() {
+		return lockMode;
+	}
+
+	@Nonnull
+	@Override
+	public Timeout getLockTimeout() {
+		return lockTimeout;
+	}
+
+	@Nonnull
+	@Override
+	public PessimisticLockScope getLockScope() {
+		return lockScope;
+	}
+
+	@Nonnull
+	@Override
+	public Locking.FollowOn getLockFollowOn() {
+		return lockFollowOn;
+	}
+
+	protected LockOptions makeLockOptions() {
+		return Helper.makeLockOptions( getLockMode(), getLockScope(), getLockTimeout(), getLockFollowOn() );
+	}
+
+	protected void checkTransactionNeededForLock() {
+		Helper.checkTransactionNeededForLock( getEntityHandler(), getLockMode() );
+	}
+
+	protected void logIgnoringEntityNotFound(Object key) {
+		if ( SESSION_LOGGER.isDebugEnabled() ) {
+			SESSION_LOGGER.ignoringEntityNotFound( getEntityDescriptor().getEntityName(), key );
+		}
+	}
+
+
+	protected T withExceptionHandling(
+			Object key,
+			LockOptions lockOptions,
+			Supplier<T> action) {
+		try {
+			return action.get();
+		}
+		catch ( FetchNotFoundException e ) {
+			// This may happen if the entity has an association mapped with
+			// @NotFound(action = NotFoundAction.EXCEPTION) and this associated
+			// entity is not found
+			throw e;
+		}
+		catch ( EntityFilterException e ) {
+			// This may happen if the entity has an association which is
+			// filtered by a FilterDef and this associated entity is not found
+			throw e;
+		}
+		catch ( EntityNotFoundException e ) {
+			// We swallow other sorts of EntityNotFoundException and return null
+			// For example, DefaultLoadEventListener.proxyImplementation() throws
+			// EntityNotFoundException if there's an existing proxy in the session,
+			// but the underlying database row has been deleted (see HHH-7861)
+			logIgnoringEntityNotFound( key );
+			return null;
+		}
+		catch ( ObjectDeletedException e ) {
+			// the spec is silent about people doing remove() find() on the same PC
+			return null;
+		}
+		catch ( ObjectNotFoundException e ) {
+			// should not happen on the entity itself with get
+			// TODO: in fact this will occur instead of EntityNotFoundException
+			//       when using StandardEntityNotFoundDelegate, so probably we
+			//       should return null here, as we do above
+			throw new IllegalArgumentException( e.getMessage(), e );
+		}
+		catch (MappingException | TypeMismatchException | ClassCastException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch (jakarta.persistence.LockTimeoutException e) {
+			throw e;
+		}
+		catch (LockTimeoutException e) {
+			throw getExceptionConverter().convert( e, lockOptions );
+		}
+		catch ( JDBCException e ) {
+			if ( accessTransaction().isActive() ) {
+				if ( accessTransaction().isActive() && accessTransaction().getRollbackOnly()
+					&& (e instanceof GenericJDBCException || e instanceof JDBCConnectionException) ) {
+					// Assume situation HHH-12472 running on WildFly,
+					// but only if the exception is generic to avoid swallowing locking exceptions (HHH-20260)
+					// Just log the exception and return null
+					SESSION_LOGGER.jdbcExceptionThrownWithTransactionRolledBack( e );
+					return null;
+				}
+			}
+			throw getExceptionConverter().convert( e, lockOptions );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e, lockOptions );
+		}
+	}
+
+	protected abstract SharedSessionContractImplementor getEntityHandler();
+
+	protected Transaction accessTransaction() {
+		return getEntityHandler().accessTransaction();
+	}
+
+	protected ExceptionConverter getExceptionConverter() {
+		return getEntityHandler().getExceptionConverter();
+	}
+}

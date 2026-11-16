@@ -1,0 +1,17 @@
+package org.hibernate.community.dialect.sequence;
+
+import org.hibernate.dialect.sequence.spi.ANSISequenceSupport;
+import org.hibernate.dialect.sequence.spi.SequenceSupport;
+
+/**
+ * Sequence support for {@link org.hibernate.community.dialect.IngresDialect}.
+ */
+public final class IngresLegacySequenceSupport extends ANSISequenceSupport {
+
+	public static final SequenceSupport INSTANCE = new IngresLegacySequenceSupport();
+
+	@Override
+	public boolean supportsPooledSequences() {
+		return false;
+	}
+}

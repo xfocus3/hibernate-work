@@ -1,0 +1,19 @@
+plugins {
+    id "local.publishing-java-module"
+    id "local.publishing-group-relocation"
+}
+
+description = 'Hibernate\'s extensions for vector support'
+
+dependencies {
+    api project( ':hibernate-core' )
+
+    compileOnly libs.jdbc.mssql
+
+    testImplementation project( ':hibernate-testing' )
+    testImplementation project( path: ':hibernate-core', configuration: 'tests' )
+}
+
+test {
+    include '**/**'
+}

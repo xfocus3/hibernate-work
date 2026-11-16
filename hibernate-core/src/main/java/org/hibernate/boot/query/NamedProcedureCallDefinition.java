@@ -1,0 +1,25 @@
+package org.hibernate.boot.query;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.procedure.spi.NamedCallableQueryMemento;
+
+/**
+ * Boot-time descriptor of a named procedure/function query, as defined in
+ * annotations or xml
+ *
+ * @see jakarta.persistence.NamedStoredProcedureQuery
+ *
+ * @author Steve Ebersole
+ */
+public interface NamedProcedureCallDefinition extends NamedQueryDefinition<Object> {
+	/**
+	 * The name of the underlying database procedure or function name
+	 */
+	@Nonnull
+	String getProcedureName();
+
+	@Override
+	@Nonnull
+	NamedCallableQueryMemento resolve(@Nonnull SessionFactoryImplementor factory);
+}

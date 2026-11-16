@@ -1,0 +1,438 @@
+package org.hibernate.sql.exec.spi;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.QueryFlushMode;
+import jakarta.persistence.Timeout;
+import org.hibernate.Incubating;
+import org.hibernate.LockOptions;
+import org.hibernate.ScrollMode;
+import org.hibernate.ScrollableResults;
+import org.hibernate.graph.spi.AppliedGraph;
+import org.hibernate.query.ResultListTransformer;
+import org.hibernate.query.TupleTransformer;
+import org.hibernate.query.spi.Limit;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.spi.QueryParameterBindings;
+import org.hibernate.sql.exec.internal.BaseExecutionContext;
+import org.hibernate.sql.exec.internal.StandardStatementCreator;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+import org.hibernate.sql.results.spi.ResultsConsumer;
+import org.hibernate.sql.results.spi.RowTransformer;
+import org.hibernate.sql.results.spi.ScrollableResultsConsumer;
+
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * An executor for JdbcSelect operations.
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.0", group = "sql-execution")
+public interface JdbcSelectExecutor {
+
+	/**
+	 * @since 6.6
+	 */
+	@org.hibernate.SPI(org.hibernate.SPI.Role.SUPPLY)
+	<T, R> T executeQuery(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			Class<R> domainResultType,
+			StatementCreator statementCreator,
+			ResultsConsumer<T, R> resultsConsumer);
+
+	/**
+	 * @since 6.6
+	 */
+	@org.hibernate.SPI(org.hibernate.SPI.Role.SUPPLY)
+	default <T, R> T executeQuery(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			Class<R> domainResultType,
+			int resultCountEstimate,
+			ResultsConsumer<T, R> resultsConsumer) {
+		return executeQuery(
+				jdbcSelect,
+				jdbcParameterBindings,
+				executionContext,
+				rowTransformer,
+				domainResultType,
+				resultCountEstimate,
+				StandardStatementCreator.getStatementCreator( null ),
+				resultsConsumer
+		);
+	}
+
+	/**
+	 * @since 6.6
+	 */
+	@org.hibernate.SPI(org.hibernate.SPI.Role.SUPPLY)
+	default <T, R> T executeQuery(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			Class<R> domainResultType,
+			int resultCountEstimate,
+			StatementCreator statementCreator,
+			ResultsConsumer<T, R> resultsConsumer) {
+		return executeQuery(
+				jdbcSelect,
+				jdbcParameterBindings,
+				executionContext,
+				rowTransformer,
+				domainResultType,
+				statementCreator,
+				resultsConsumer
+		);
+	}
+
+	default <R> List<R> list(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			ListResultsConsumer.UniqueSemantic uniqueSemantic) {
+		return list( jdbcSelect, jdbcParameterBindings, executionContext, rowTransformer, null, uniqueSemantic );
+	}
+
+	default <R> List<R> list(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			Class<R> requestedJavaType,
+			ListResultsConsumer.UniqueSemantic uniqueSemantic) {
+		return list(
+				jdbcSelect,
+				jdbcParameterBindings,
+				executionContext,
+				rowTransformer,
+				requestedJavaType,
+				uniqueSemantic,
+				-1
+		);
+	}
+
+	/**
+	 * @since 6.6
+	 */
+	default <R> List<R> list(
+			JdbcSelect jdbcSelect,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			Class<R> requestedJavaType,
+			ListResultsConsumer.UniqueSemantic uniqueSemantic,
+			int resultCountEstimate) {
+		// Only do auto flushing for top level queries
+		return executeQuery(
+				jdbcSelect,
+				jdbcParameterBindings,
+				executionContext,
+				rowTransformer,
+				requestedJavaType,
+				resultCountEstimate,
+				ListResultsConsumer.instance( uniqueSemantic )
+		);
+	}
+
+	default <R> ScrollableResults<R> scroll(
+			JdbcSelect jdbcSelect,
+			ScrollMode scrollMode,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer) {
+		return scroll( jdbcSelect, scrollMode, jdbcParameterBindings, executionContext, rowTransformer, -1 );
+	}
+
+	/**
+	 * @since 6.6
+	 */
+	default <R> ScrollableResults<R> scroll(
+			JdbcSelect jdbcSelect,
+			ScrollMode scrollMode,
+			JdbcParameterBindings jdbcParameterBindings,
+			ExecutionContext executionContext,
+			RowTransformer<R> rowTransformer,
+			int resultCountEstimate) {
+		return executeQuery(
+				jdbcSelect,
+				jdbcParameterBindings,
+				getScrollContext( executionContext ),
+				rowTransformer,
+				null,
+				resultCountEstimate,
+				StandardStatementCreator.getStatementCreator( scrollMode ),
+				ScrollableResultsConsumer.instance()
+		);
+	}
+
+	/**
+	 * @since 6.6
+	 */
+	@FunctionalInterface
+	interface StatementCreator {
+		PreparedStatement createStatement(ExecutionContext executionContext, String sql) throws SQLException;
+	}
+
+	/*
+		When `Query#scroll()` is call the query is not executed immediately, a new ExecutionContext with the values
+		of the `persistenceContext.isDefaultReadOnly()` and of the `queryOptions.isReadOnly()` set at the moment of
+		the Query#scroll() call is created in order to use it when the query will be executed.
+	 */
+	private ExecutionContext getScrollContext(ExecutionContext context) {
+		class ScrollableExecutionContext extends BaseExecutionContext implements QueryOptions {
+
+			private final Timeout timeout;
+			private final QueryFlushMode queryFlushMode;
+			private final Boolean readOnly;
+			private final AppliedGraph appliedGraph;
+			private final TupleTransformer<?> tupleTransformer;
+			private final ResultListTransformer<?> resultListTransformer;
+			private final Boolean resultCachingEnabled;
+			private final CacheRetrieveMode cacheRetrieveMode;
+			private final CacheStoreMode cacheStoreMode;
+			private final String resultCacheRegionName;
+			private final LockOptions lockOptions;
+			private final String comment;
+			private final List<String> databaseHints;
+			private final Integer fetchSize;
+			private final Limit limit;
+			private final Boolean limitInMemoryEnabled;
+			// Preserved across the SqlOmittingQueryOptions wrap so that runtime
+			// JdbcParameter binders that the converter injected (offset/limit)
+			// can still see the application-set limit even though getLimit()
+			// reports NONE for SQL rendering.
+			private final Limit originalLimit;
+			private final ExecutionContext context;
+
+			public ScrollableExecutionContext(
+					@Nullable Timeout timeout,
+					@Nonnull QueryFlushMode queryFlushMode,
+					@Nullable Boolean readOnly,
+					AppliedGraph appliedGraph,
+					@Nullable TupleTransformer<?> tupleTransformer,
+					@Nullable ResultListTransformer<?> resultListTransformer,
+					@Nullable Boolean resultCachingEnabled,
+					CacheRetrieveMode cacheRetrieveMode,
+					CacheStoreMode cacheStoreMode,
+					@Nullable String resultCacheRegionName,
+					LockOptions lockOptions,
+					String comment,
+					List<String> databaseHints,
+					@Nullable Integer fetchSize,
+					Limit limit,
+					@Nullable Boolean limitInMemoryEnabled,
+					Limit originalLimit,
+					@Nonnull ExecutionContext context) {
+				super( context.getSession() );
+				this.timeout = timeout;
+				this.queryFlushMode = queryFlushMode;
+				this.readOnly = readOnly;
+				this.appliedGraph = appliedGraph;
+				this.tupleTransformer = tupleTransformer;
+				this.resultListTransformer = resultListTransformer;
+				this.resultCachingEnabled = resultCachingEnabled;
+				this.cacheRetrieveMode = cacheRetrieveMode;
+				this.cacheStoreMode = cacheStoreMode;
+				this.resultCacheRegionName = resultCacheRegionName;
+				this.lockOptions = lockOptions;
+				this.comment = comment;
+				this.databaseHints = databaseHints;
+				this.fetchSize = fetchSize;
+				this.limit = limit;
+				this.limitInMemoryEnabled = limitInMemoryEnabled;
+				this.originalLimit = originalLimit;
+				this.context = context;
+			}
+
+			@Override
+			public boolean isScrollResult() {
+				return true;
+			}
+
+			@Override
+			@Nonnull
+			public QueryOptions getQueryOptions() {
+				return this;
+			}
+
+			@Override
+			@Nullable
+			public Timeout getTimeout() {
+				return timeout;
+			}
+
+			@Override
+			@Nonnull
+			public QueryFlushMode getQueryFlushMode() {
+				return queryFlushMode;
+			}
+
+			@Override
+			@Nullable
+			public Boolean isReadOnly() {
+				return readOnly;
+			}
+
+			@Override
+			@Nullable
+			public AppliedGraph getAppliedGraph() {
+				return appliedGraph;
+			}
+
+			@Override
+			@Nullable
+			public TupleTransformer<?> getTupleTransformer() {
+				return tupleTransformer;
+			}
+
+			@Override
+			@Nullable
+			public ResultListTransformer<?> getResultListTransformer() {
+				return resultListTransformer;
+			}
+
+			@Override
+			@Nullable
+			public Boolean isResultCachingEnabled() {
+				return resultCachingEnabled;
+			}
+
+			@Override
+			@Nullable
+			public Boolean getQueryPlanCachingEnabled() {
+				return null;
+			}
+
+			@Override
+			@Nullable
+			public CacheRetrieveMode getCacheRetrieveMode() {
+				return cacheRetrieveMode;
+			}
+
+			@Override
+			@Nullable
+			public CacheStoreMode getCacheStoreMode() {
+				return cacheStoreMode;
+			}
+
+			@Override
+			@Nullable
+			public String getResultCacheRegionName() {
+				return resultCacheRegionName;
+			}
+
+			@Override
+			@Nonnull
+			public LockOptions getLockOptions() {
+				return lockOptions;
+			}
+
+			@Override
+			@Nullable
+			public String getComment() {
+				return comment;
+			}
+
+			@Override
+			@Nonnull
+			public List<String> getDatabaseHints() {
+				return databaseHints;
+			}
+
+			@Override
+			@Nullable
+			public Integer getFetchSize() {
+				return fetchSize;
+			}
+
+			@Override
+			@Nonnull
+			public Limit getLimit() {
+				return limit;
+			}
+
+			@Override
+			@Nullable
+			public Boolean isLimitInMemoryEnabled() {
+				return limitInMemoryEnabled;
+			}
+
+			@Override
+			@Nonnull
+			public Limit peekOriginalLimit() {
+				return originalLimit;
+			}
+
+			@Override
+			public QueryParameterBindings getQueryParameterBindings() {
+				return context.getQueryParameterBindings();
+			}
+
+			@Override
+			public Callback getCallback() {
+				return context.getCallback();
+			}
+
+			@Override
+			public boolean hasCallbackActions() {
+				return context.hasCallbackActions();
+			}
+
+			@Override
+			public boolean upgradeLocks() {
+				return context.upgradeLocks();
+			}
+
+			@Override
+			@Nullable
+			public Set<String> getEnabledFetchProfiles() {
+				return null;
+			}
+
+			@Override
+			@Nullable
+			public Set<String> getDisabledFetchProfiles() {
+				return null;
+			}
+		}
+
+		final var options = context.getQueryOptions();
+		final Boolean optionsReadOnly = options.isReadOnly();
+		return new ScrollableExecutionContext(
+				options.getTimeout(),
+				options.getQueryFlushMode(),
+				optionsReadOnly == null
+						? context.getSession().getPersistenceContext().isDefaultReadOnly()
+						: optionsReadOnly,
+				options.getAppliedGraph(),
+				options.getTupleTransformer(),
+				options.getResultListTransformer(),
+				options.isResultCachingEnabled(),
+				options.getCacheRetrieveMode(),
+				options.getCacheStoreMode(),
+				options.getResultCacheRegionName(),
+				options.getLockOptions(),
+				options.getComment(),
+				options.getDatabaseHints(),
+				options.getFetchSize(),
+				options.getLimit(),
+				options.isLimitInMemoryEnabled(),
+				options.peekOriginalLimit(),
+				context
+		);
+	}
+
+}

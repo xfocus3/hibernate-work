@@ -1,0 +1,193 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import java.util.function.Consumer;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.tree.spi.jpa.ParameterCollector;
+import org.hibernate.type.BindableType;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelectableNode;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import static org.hibernate.query.sqm.tree.spi.expression.SqmExpressionHelper.toSqmType;
+
+/**
+ * Acts as the per-use wrapper for a {@link JpaCriteriaParameter}
+ * ({@link jakarta.persistence.criteria.CriteriaBuilder#parameter}).
+ * <p>
+ * {@code JpaCriteriaParameter} is the "domain query parameter"
+ * ({@link org.hibernate.query.QueryParameter} while
+ * {@code SqmJpaCriteriaParameterWrapper} is the {@link SqmParameter}
+ */
+public class SqmJpaCriteriaParameterWrapper<T>
+		extends AbstractSqmExpression<T>
+		implements SqmParameter<T> {
+	private final JpaCriteriaParameter<T> jpaCriteriaParameter;
+	private final int criteriaParameterId;
+	private final int unnamedParameterId;
+
+	public SqmJpaCriteriaParameterWrapper(
+			@Nullable BindableType<T> type,
+			@Nonnull JpaCriteriaParameter<T> jpaCriteriaParameter,
+			int criteriaParameterId,
+			int unnamedParameterId,
+			@Nonnull NodeBuilder criteriaBuilder) {
+		super( toSqmType( type, criteriaBuilder ), criteriaBuilder );
+		this.jpaCriteriaParameter = jpaCriteriaParameter;
+		this.criteriaParameterId = criteriaParameterId;
+		this.unnamedParameterId = unnamedParameterId;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJpaCriteriaParameterWrapper<T> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		return context.registerCopy(
+				this,
+				new SqmJpaCriteriaParameterWrapper<>(
+						getNodeType(),
+						jpaCriteriaParameter.copy( context ),
+						criteriaParameterId,
+						unnamedParameterId,
+						nodeBuilder()
+				)
+		);
+	}
+
+	@Override
+	public @Nullable String getName() {
+		return jpaCriteriaParameter.getName();
+	}
+
+	@Override
+	public @Nullable Integer getPosition() {
+		// for criteria anyway, these cannot be positional
+		return null;
+	}
+
+	@Nonnull
+	public JpaCriteriaParameter<T> getJpaCriteriaParameter() {
+		return jpaCriteriaParameter;
+	}
+
+	/**
+	 * The 0-based encounter of a {@link JpaCriteriaParameter} instance in a
+	 * {@link org.hibernate.query.sqm.spi.SqmQuerySource#CRITERIA} query.
+	 *
+	 * @see ParameterCollector
+	 */
+	public int getCriteriaParameterId() {
+		return criteriaParameterId;
+	}
+
+	/**
+	 * The 0-based encounter of an unnamed {@link JpaCriteriaParameter} instance in a
+	 * {@link org.hibernate.query.sqm.spi.SqmQuerySource#CRITERIA} query.
+	 * If the {@link #getJpaCriteriaParameter()} has a name, returns -1.
+	 *
+	 * @see ParameterCollector
+	 */
+	public int getUnnamedParameterId() {
+		return unnamedParameterId;
+	}
+
+	@Override
+	public @Nonnull Class<T> getParameterType() {
+		return jpaCriteriaParameter.getParameterType();
+	}
+
+	@Override
+	public @Nullable JavaType<T> getJavaTypeDescriptor() {
+		final SqmBindableType<T> nodeType = getNodeType();
+		return nodeType == null ? jpaCriteriaParameter.getJavaTypeDescriptor() : nodeType.getExpressibleJavaType();
+	}
+
+	@Override
+	public boolean allowMultiValuedBinding() {
+		return jpaCriteriaParameter.allowsMultiValuedBinding();
+	}
+
+	@Override
+	public @Nullable BindableType<T> getAnticipatedType() {
+		return getNodeType();
+	}
+
+	@Nonnull
+	@Override
+	public SqmParameter<T> copy() {
+		return new SqmJpaCriteriaParameterWrapper<>(
+				getNodeType(),
+				jpaCriteriaParameter,
+				criteriaParameterId,
+				unnamedParameterId,
+				nodeBuilder()
+		);
+	}
+
+	/**
+	 * Unsupported.  Visitation for a criteria parameter should be handled
+	 * as part of {@link SemanticQueryWalker#visitJpaCriteriaParameter}.
+	 * This wrapper is intended just for representing unique SqmParameter
+	 * references for each {@link JpaCriteriaParameter} occurrence in the
+	 * SQM tree as part of the {@link org.hibernate.query.QueryParameter}
+	 * to {@link SqmParameter} to {@link JdbcParameter} transformation.
+	 * Each occurrence requires a unique {@link SqmParameter} to make
+	 * sure we ultimately get the complete set of {@code JdbcParameter}
+	 * references.
+	 */
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		throw new UnsupportedOperationException(
+				"""
+				Direct SemanticQueryWalker visitation of a SqmJpaCriteriaParameterWrapper \
+				is not supported. Visitation for a criteria parameter should be handled \
+				during SemanticQueryWalker#visitJpaCriteriaParameter. This wrapper is \
+				intended only for representing unique SQM parameter nodes for each criteria \
+				parameter in the SQM tree as part of the QueryParameter -> SqmParameter -> JdbcParameter \
+				transformation. Each occurrence requires a unique SqmParameter to make sure we \
+				ultimately get the complete set of JdbcParameter references.\
+				"""
+		);
+	}
+
+	@Override
+	public void visitSubSelectableNodes(@Nonnull Consumer<SqmSelectableNode<?>> jpaSelectionConsumer) {
+		// nothing to do
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		jpaCriteriaParameter.appendHqlString( hql, context );
+	}
+
+	@Override
+	public final boolean equals(@Nullable Object o) {
+		return o instanceof SqmJpaCriteriaParameterWrapper<?> that
+			&& criteriaParameterId == that.criteriaParameterId;
+	}
+
+	@Override
+	public int hashCode() {
+		return criteriaParameterId;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return equals( object );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		return hashCode();
+	}
+}

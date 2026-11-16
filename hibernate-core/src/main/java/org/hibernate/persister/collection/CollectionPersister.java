@@ -1,0 +1,529 @@
+package org.hibernate.persister.collection;
+
+import java.util.Comparator;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.Filter;
+import org.hibernate.HibernateException;
+import org.hibernate.Incubating;
+import org.hibernate.Internal;
+import org.hibernate.MappingException;
+import org.hibernate.action.queue.internal.PreparedCollectionMutation;
+import org.hibernate.action.queue.spi.decompose.DecompositionContext;
+import org.hibernate.action.queue.spi.plan.FlushOperation;
+import org.hibernate.cache.spi.access.CollectionDataAccess;
+import org.hibernate.cache.spi.entry.CacheEntryStructure;
+import org.hibernate.collection.spi.CollectionSemantics;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.metamodel.CollectionClassification;
+import org.hibernate.metamodel.mapping.ManagedMappingType;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.metamodel.mapping.Restrictable;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.persister.collection.mutation.RowMutationOperations;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.generator.BeforeExecutionGenerator;
+import org.hibernate.type.CollectionType;
+import org.hibernate.type.Type;
+
+/**
+ * A strategy for persisting a mapped collection role. A
+ * {@code CollectionPersister} orchestrates rendering of SQL statements
+ * corresponding to basic lifecycle events, including {@code insert},
+ * {@code update}, and {@code delete} statements, and their execution via
+ * JDBC.
+ * <p>
+ * Concrete implementations of this interface handle
+ * {@linkplain OneToManyPersister one-to-many} and
+ * {@linkplain BasicCollectionPersister many-to-many} association
+ * cardinalities, and to a certain extent abstract the details of those
+ * mappings from collaborators.
+ * <p>
+ * Note that an instance of {@link PersistentCollection} may change roles.
+ * This object implements persistence of a collection instance while the
+ * instance is referenced in a particular role.
+ * <p>
+ * This interface defines a contract between the persistence strategy and
+ * the actual {@linkplain PersistentCollection persistent collection framework}
+ * and {@link org.hibernate.engine.spi.SessionImplementor session}. It does
+ * not define operations that are required for querying collections, nor
+ * for loading by outer join. Implementations are highly coupled to the
+ * {@link PersistentCollection} hierarchy, since double dispatch is used to
+ * load and update collection elements.
+ * <p>
+ * Unless a custom {@link org.hibernate.persister.spi.PersisterFactory} is
+ * used, it is expected that implementations of {@link CollectionPersister}
+ * define a constructor accepting the following arguments:
+ * <ol>
+ *     <li>
+ *         {@link org.hibernate.mapping.Collection} - The metadata about
+ *         the collection to be handled by the persister,
+ *     </li>
+ *     <li>
+ *         {@link CollectionDataAccess} - the second level caching strategy
+ *         for this collection, and
+ *     </li>
+ *     <li>
+ *         {@link RuntimeModelCreationContext} - access to additional
+ *         information useful while constructing the persister.
+ *     </li>
+ * </ol>
+ *
+ * @see PersistentCollection
+ * @see PluralAttributeMapping
+ *
+ * @author Gavin King
+ */
+@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+public interface CollectionPersister extends Restrictable {
+	/**
+	 * The NavigableRole for this collection.
+	 */
+	@Nonnull
+	NavigableRole getNavigableRole();
+
+	/**
+	 * Get the name of this collection role (the fully qualified class name,
+	 * extended by a "property path")
+	 */
+	@Nonnull
+	default String getRole() {
+		return getNavigableRole().getFullPath();
+	}
+
+	@Nonnull
+	default PluralAttributeMapping getAttributeMapping() {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	/// Decomposes a prepared collection mutation into graph-native operations.
+	@org.hibernate.Internal
+	void decompose(
+			@Nonnull PreparedCollectionMutation mutation,
+			int ordinalBase,
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull DecompositionContext decompositionContext,
+			@Nonnull Consumer<FlushOperation> operationConsumer);
+
+	/**
+	 * Get the persister of the entity that "owns" this collection
+	 */
+	@Nonnull
+	EntityPersister getOwnerEntityPersister();
+
+	/**
+	 * Initialize the given collection with the given key
+	 */
+	void initialize(@Nonnull Object key, @Nonnull SharedSessionContractImplementor session) throws HibernateException;
+
+	/**
+	 * Is this collection role cacheable
+	 */
+	boolean hasCache();
+
+	/**
+	 * Whether {@link #remove(Object, SharedSessionContractImplementor)} might actually do something,
+	 * or if it is definitely a no-op.
+	 */
+	default boolean needsRemove() {
+		return true;
+	}
+
+	@Nonnull
+	@Internal
+	RowMutationOperations getRowMutationOperations();
+
+	@Internal
+	boolean isRowInsertEnabled();
+
+	@Internal
+	boolean isRowDeleteEnabled();
+
+	@Nullable
+	@Internal
+	boolean[] getIndexColumnIsSettable();
+
+	@Nonnull
+	@Internal
+	boolean[] getElementColumnIsSettable();
+
+	@Nonnull
+	@Internal
+	UnaryOperator<Object> getIndexIncrementer();
+
+	/**
+	 * Access to the collection's cache region
+	 */
+	@Nullable
+	CollectionDataAccess getCacheAccessStrategy();
+
+	/**
+	 * Get the structure used to store data into the collection's
+	 * {@linkplain #getCacheAccessStrategy() cache region}.
+	 */
+	@Nonnull
+	CacheEntryStructure getCacheEntryStructure();
+
+	@Incubating(since = "6.5")
+	boolean useShallowQueryCacheLayout();
+
+	/**
+	 * Return the element class of an array, or null otherwise
+	 */
+	@Nullable
+	Class<?> getElementClass();
+
+	/**
+	 * Is this an array of primitive values?
+	 */
+	boolean isPrimitiveArray();
+	/**
+	 * Is this an array?
+	 */
+	boolean isArray();
+	/**
+	 * Is this a one-to-many association?
+	 */
+	boolean isOneToMany();
+	/**
+	 * Is this a many-to-many association?  Note that this is mainly
+	 * a convenience feature as the single persister does not
+	 * contain all the information needed to handle a many-to-many
+	 * itself, as internally it is looked at as two many-to-ones.
+	 */
+	boolean isManyToMany();
+
+	/**
+	 * Is this an "indexed" collection? (list or map)
+	 */
+	boolean hasIndex();
+	/**
+	 * Is this collection lazily initialized?
+	 */
+	boolean isLazy();
+	/**
+	 * Is this collection "inverse", so state changes are not
+	 * propagated to the database.
+	 */
+	boolean isInverse();
+	/**
+	 * Completely remove the persistent state of the collection
+	 */
+	void remove(@Nonnull Object id, @Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * (Re)create the collection's persistent state
+	 */
+	void recreate(
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull Object key,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Delete the persistent state of any elements that were removed from
+	 * the collection
+	 */
+	void deleteRows(
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull Object key,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Update the persistent state of any elements that were modified
+	 */
+	void updateRows(
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull Object key,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Insert the persistent state of any new collection elements
+	 */
+	void insertRows(
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull Object key,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Process queued operations within the PersistentCollection.
+	 */
+	void processQueuedOps(
+			@Nonnull PersistentCollection<?> collection,
+			@Nonnull Object key,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Get the surrogate key generation strategy (optional operation)
+	 */
+	@Nullable
+	BeforeExecutionGenerator getGenerator();
+
+	/**
+	 * Does this collection implement "orphan delete"?
+	 */
+	boolean hasOrphanDelete();
+
+	/**
+	 * Is this an ordered collection? (An ordered collection is
+	 * ordered by the initialization operation, not by sorting
+	 * that happens in memory, as in the case of a sorted collection.)
+	 */
+	boolean hasOrdering();
+
+	boolean hasManyToManyOrdering();
+
+	/**
+	 * Get the "space" that holds the persistent state
+	 */
+	@Nonnull
+	String[] getCollectionSpaces();
+
+	/**
+	 * Is cascade delete handled by the database-level
+	 * foreign key constraint definition?
+	 */
+	boolean isCascadeDeleteEnabled();
+
+	/**
+	 * Does this collection cause version increment of the
+	 * owning entity?
+	 */
+	boolean isVersioned();
+
+	/**
+	 * Can the elements of this collection change?
+	 */
+	boolean isMutable();
+
+	//public boolean isSubselectLoadable();
+
+	void postInstantiate() throws MappingException;
+
+	@Nonnull
+	SessionFactoryImplementor getFactory();
+
+	boolean isAffectedByEnabledFilters(@Nonnull SharedSessionContractImplementor session);
+
+	default boolean isAffectedByEnabledFilters(@Nonnull LoadQueryInfluencers influencers) {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	default boolean isAffectedByEnabledFilters(@Nonnull LoadQueryInfluencers influencers, boolean onlyApplyForLoadByKeyFilters) {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	default boolean isAffectedByEnabledFilters(
+			@Nonnull Set<ManagedMappingType> visitedTypes,
+			@Nonnull LoadQueryInfluencers influencers,
+			boolean onlyApplyForLoadByKey) {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	default boolean isAffectedByEntityGraph(@Nonnull LoadQueryInfluencers influencers) {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	default boolean isAffectedByEnabledFetchProfiles(@Nonnull LoadQueryInfluencers influencers) {
+		throw new UnsupportedOperationException( "CollectionPersister used for [" + getRole() + "] does not support SQL AST" );
+	}
+
+	default boolean isExtraLazy() {
+		return false;
+	}
+	int getSize(@Nonnull Object key, @Nonnull SharedSessionContractImplementor session);
+	boolean indexExists(@Nonnull Object key, @Nonnull Object index, @Nonnull SharedSessionContractImplementor session);
+	boolean elementExists(@Nonnull Object key, @Nullable Object element, @Nonnull SharedSessionContractImplementor session);
+	@Nullable
+	Object getElementByIndex(@Nonnull Object key, @Nonnull Object index, @Nonnull SharedSessionContractImplementor session, @Nullable Object owner);
+	default int getBatchSize() {
+		return -1;
+	}
+	default boolean isBatchLoadable() {
+		return getBatchSize() > 1;
+	}
+	default boolean isSubselectLoadable() {
+		return false;
+	}
+
+	/**
+	 * @return the name of the property this collection is mapped by
+	 */
+	@Nullable
+	String getMappedByProperty();
+
+	/**
+	 * For sorted collections, the comparator to use.  Non-parameterized
+	 * because for SORTED_SET the elements are compared but for SORTED_MAP the
+	 * keys are compared
+	 *
+	 * @see CollectionClassification#SORTED_MAP
+	 * @see CollectionClassification#SORTED_SET
+	 */
+	@Nullable
+	Comparator<?> getSortingComparator();
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// mapping model
+
+	@Nonnull
+	CollectionSemantics<?,?> getCollectionSemantics();
+
+
+	void applyBaseManyToManyRestrictions(
+			@Nonnull Consumer<Predicate> predicateConsumer,
+			@Nonnull TableGroup tableGroup,
+			boolean useQualifier,
+			@Nonnull Map<String, Filter> enabledFilters,
+			@Nullable Set<String> treatAsDeclarations,
+			@Nullable SqlAstCreationState creationState);
+
+
+
+	/**
+	 * Generates the collection's key column aliases, based on the given
+	 * suffix.
+	 *
+	 * @param suffix The suffix to use in the key column alias generation.
+	 * @return The key column aliases.
+	 *
+	 * @deprecated Read-by-position makes this irrelevant.  Currently still used
+	 * by {@link org.hibernate.query.sql.internal.SQLQueryParser}
+	 */
+	@Nonnull
+	@Deprecated( since = "6", forRemoval = true )
+	String[] getKeyColumnAliases(@Nonnull String suffix);
+
+	/**
+	 * Generates the collection's index column aliases, based on the given
+	 * suffix.
+	 *
+	 * @param suffix The suffix to use in the index column alias generation.
+	 * @return The key column aliases, or null if not indexed.
+	 *
+	 * @deprecated Read-by-position makes this irrelevant.  Currently still used
+	 * by {@link org.hibernate.query.sql.internal.SQLQueryParser}
+	 */
+	@Nullable
+	@Deprecated( since = "6", forRemoval = true )
+	String[] getIndexColumnAliases(@Nonnull String suffix);
+
+	/**
+	 * Generates the collection's element column aliases, based on the given
+	 * suffix.
+	 *
+	 * @param suffix The suffix to use in the element column alias generation.
+	 * @return The key column aliases.
+	 *
+	 * @deprecated Read-by-position makes this irrelevant.  Currently still used
+	 * by {@link org.hibernate.query.sql.internal.SQLQueryParser}
+	 */
+	@Nonnull
+	@Deprecated( since = "6", forRemoval = true )
+	String[] getElementColumnAliases(@Nonnull String suffix);
+
+	/**
+	 * Generates the collection's identifier column aliases, based on the given
+	 * suffix.
+	 *
+	 * @param suffix The suffix to use in the key column alias generation.
+	 * @return The key column aliases.
+	 *
+	 * @deprecated Read-by-position makes this irrelevant.  Currently still used
+	 * by {@link org.hibernate.query.sql.internal.SQLQueryParser}
+	 */
+	@Nullable
+	@Deprecated( since = "6", forRemoval = true )
+	String getIdentifierColumnAlias(@Nonnull String suffix);
+
+	/**
+	 * Get the associated {@code Type}
+	 *
+	 * @deprecated Hibernate is moving away from {@link Type}.  Corresponding
+	 * {@linkplain org.hibernate.metamodel.mapping mapping metamodel} calls should
+	 * be used instead - here (generally), {@link PluralAttributeMapping}
+	 */
+	@Nonnull
+	@Deprecated( forRemoval = true )
+	CollectionType getCollectionType();
+
+	/**
+	 * Get the "key" type (the type of the foreign key)
+	 *
+	 * @deprecated Hibernate is moving away from {@link Type}.  Corresponding
+	 * {@linkplain org.hibernate.metamodel.mapping mapping metamodel} calls should
+	 * be used instead - here, {@link PluralAttributeMapping#getKeyDescriptor()}
+	 */
+	@Nonnull
+	@Deprecated( forRemoval = true )
+	Type getKeyType();
+
+	/**
+	 * Get the "index" type for a list or map (optional operation)
+	 *
+	 * @deprecated Hibernate is moving away from {@link Type}.  Corresponding
+	 * {@linkplain org.hibernate.metamodel.mapping mapping metamodel} calls should
+	 * be used instead - here, {@link PluralAttributeMapping#getIndexDescriptor()}
+	 */
+	@Nullable
+	@Deprecated( forRemoval = true )
+	Type getIndexType();
+
+	/**
+	 * Get the "element" type
+	 *
+	 * @deprecated Hibernate is moving away from {@link Type}.  Corresponding
+	 * {@linkplain org.hibernate.metamodel.mapping mapping metamodel} calls should
+	 * be used instead - here, {@link PluralAttributeMapping#getElementDescriptor()}
+	 */
+	@Nonnull
+	@Deprecated( forRemoval = true )
+	Type getElementType();
+
+	/**
+	 * Get the type of the surrogate key
+	 *
+	 * @deprecated Hibernate is moving away from {@link Type}.  Corresponding
+	 * {@linkplain org.hibernate.metamodel.mapping mapping metamodel} calls should
+	 * be used instead - here, {@link PluralAttributeMapping#getIdentifierDescriptor()}
+	 */
+	@Nullable
+	@Deprecated( forRemoval = true )
+	Type getIdentifierType();
+
+	@Nullable
+	String getIdentifierColumnName();
+
+	@Nonnull
+	String getTableName();
+
+	/**
+	 * Generate a list of collection index and element columns
+	 */
+	@Nonnull
+	String selectFragment(@Nonnull String alias, @Nonnull String columnSuffix);
+
+	@Nullable
+	String[] getCollectionPropertyColumnAliases(@Nonnull String propertyName, @Nonnull String string);
+
+	/**
+	 * Get the persister of the element class, if this is a
+	 * collection of entities (optional operation).  Note that
+	 * for a one-to-many association, the returned persister
+	 * must be {@code OuterJoinLoadable}.
+	 */
+	@Nullable
+	EntityPersister getElementPersister();
+}

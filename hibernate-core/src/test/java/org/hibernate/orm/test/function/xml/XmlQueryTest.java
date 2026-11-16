@@ -1,0 +1,27 @@
+package org.hibernate.orm.test.function.xml;
+
+import org.hibernate.testing.orm.junit.DialectFeatureChecks;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.RequiresDialectFeature;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.Test;
+
+/**
+ * @author Christian Beikov
+ */
+@DomainModel
+@SessionFactory
+@RequiresDialectFeature( feature = DialectFeatureChecks.SupportsXmlquery.class)
+public class XmlQueryTest {
+
+	@Test
+	public void testSimple(SessionFactoryScope scope) {
+		scope.inSession( em -> {
+			//tag::hql-xmlquery-example[]
+			em.createQuery( "select xmlquery('/a/val' passing '<a><val>asd</val></a>')" ).getResultList();
+			//end::hql-xmlquery-example[]
+		} );
+	}
+
+}

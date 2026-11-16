@@ -1,0 +1,115 @@
+package org.hibernate.id.enhanced;
+
+import org.hibernate.HibernateException;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import static org.hibernate.id.IdentifierGeneratorHelper.makeIntegralValue;
+import static org.hibernate.id.enhanced.OptimizerLogger.OPTIMIZER_MESSAGE_LOGGER;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+
+import java.io.Serializable;
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Variation of {@link PooledOptimizer} which interprets the incoming database
+ * value as the lo value, rather than the hi value, as well as using thread local
+ * to cache the generation state.
+ *
+ * @author Stuart Douglas
+ * @author Scott Marlow
+ * @author Steve Ebersole
+ * @see PooledOptimizer
+ */
+public class PooledLoThreadLocalOptimizer extends AbstractOptimizer {
+
+	private final ThreadLocal<GenerationState> singleTenantState = ThreadLocal.withInitial( GenerationState::new );
+	private final ThreadLocal<Map<String, GenerationState>> multiTenantStates = ThreadLocal.withInitial( HashMap::new );
+
+	/**
+	 * Constructs a {@code PooledLoThreadLocalOptimizer}.
+	 *
+	 * @param returnClass The Java type of the values to be generated
+	 * @param incrementSize The increment size.
+	 */
+	public PooledLoThreadLocalOptimizer(Class<?> returnClass, int incrementSize) {
+		super( returnClass, incrementSize );
+		if ( incrementSize < 1 ) {
+			throw new HibernateException( "increment size cannot be less than 1" );
+		}
+		OPTIMIZER_MESSAGE_LOGGER.creatingPooledLoOptimizer( incrementSize, returnClass.getName() );
+	}
+
+	@Override
+	public Serializable generate(AccessCallback callback) {
+		return locateGenerationState( callback.getTenantIdentifier() )
+				.generate( callback, incrementSize, returnClass );
+	}
+
+	private GenerationState locateGenerationState(String tenantIdentifier) {
+		if ( tenantIdentifier == null ) {
+			return singleTenantState.get();
+		}
+		else {
+			var states = multiTenantStates.get();
+			var state = states.get( tenantIdentifier );
+			if ( state == null ) {
+				state = new GenerationState();
+				states.put( tenantIdentifier, state );
+			}
+			return state;
+		}
+	}
+
+	@Override
+	public void reset() {
+		singleTenantState.remove();
+		multiTenantStates.remove();
+	}
+
+	// for Hibernate testsuite use only
+	private GenerationState noTenantGenerationState() {
+		final var noTenantState = locateGenerationState( null );
+		if ( noTenantState == null ) {
+			throw new IllegalStateException( "Could not locate previous generation state for no-tenant" );
+		}
+		return noTenantState;
+	}
+
+	// for Hibernate testsuite use only
+	@Override
+	public Long getLastSourceValue() {
+		return noTenantGenerationState().lastSourceValue;
+	}
+
+	@Override
+	public boolean applyIncrementSizeToSourceValues() {
+		return true;
+	}
+
+	private static class GenerationState {
+		// last value read from db source
+		private Long lastSourceValue;
+		// the current generator value
+		private long value;
+		// the value at which we'll hit the db again
+		private long upperLimitValue;
+
+		private Serializable generate(AccessCallback callback, int incrementSize, Class<?> returnClass) {
+			if ( lastSourceValue == null || value >= upperLimitValue ) {
+				lastSourceValue = callback.getNextValue();
+				upperLimitValue = lastSourceValue + incrementSize;
+				value = lastSourceValue;
+				// handle cases where initial-value is less that one (hsqldb for instance).
+				while ( value < 1 ) {
+					value++;
+				}
+			}
+			return makeIntegralValue( value++, returnClass );
+		}
+	}
+
+	@Override
+	public Expression createLowValueExpression(Expression databaseValue, SessionFactoryImplementor sessionFactory) {
+		return databaseValue;
+	}
+}

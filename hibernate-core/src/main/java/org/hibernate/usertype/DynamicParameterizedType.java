@@ -1,0 +1,79 @@
+package org.hibernate.usertype;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.SPI;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+import static org.hibernate.SPI.Role.USE;
+
+import org.hibernate.Incubating;
+
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Type;
+import java.util.Properties;
+
+/**
+ * Types which implement this interface will have
+ * {@link ParameterizedType#setParameterValues(Properties)} called with an
+ * instance of the class {@link DynamicParameterizedType.ParameterType}
+ * instead of the key {@value PARAMETER_TYPE}.
+ *
+ * @author Janario Oliveira
+ * @author Yanming Zhou
+ *
+ * @deprecated This very old approach was never properly implemented in all
+ * contexts, and never actually achieved the type safety it aimed for. Just
+ * use {@link ParameterizedType} for now.
+ */
+@Deprecated(since = "7.0", forRemoval = true)
+@SPI({ USE, IMPLEMENT })
+public interface DynamicParameterizedType extends ParameterizedType {
+	String PARAMETER_TYPE = "org.hibernate.type.ParameterType";
+
+	String IS_DYNAMIC = "org.hibernate.type.ParameterType.dynamic";
+
+	String RETURNED_CLASS = "org.hibernate.type.ParameterType.returnedClass";
+	String IS_PRIMARY_KEY = "org.hibernate.type.ParameterType.primaryKey";
+	String ENTITY = "org.hibernate.type.ParameterType.entityClass";
+	String PROPERTY = "org.hibernate.type.ParameterType.propertyName";
+	String ACCESS_TYPE = "org.hibernate.type.ParameterType.accessType";
+	String XPROPERTY = "org.hibernate.type.ParameterType.xproperty";
+
+	interface ParameterType {
+
+		@Nonnull
+		Class<?> getReturnedClass();
+
+		/// The returned Java type, including type arguments when available.
+		/// Defaults to the raw {@linkplain #getReturnedClass() class}.
+		@Incubating(since = "6.5")
+		@Nonnull
+		default Type getReturnedJavaType() {
+			return getReturnedClass();
+		}
+
+		@Nonnull
+		Annotation[] getAnnotationsMethod();
+
+		@Nullable
+		String getCatalog();
+
+		@Nullable
+		String getSchema();
+
+		@Nullable
+		String getTable();
+
+		boolean isPrimaryKey();
+
+		/// Column names in mapping order. A formula has a null entry.
+		@Nonnull
+		String[] getColumns();
+
+		/// Column lengths in mapping order. An entry is null for a formula or an unspecified length.
+		@Nonnull
+		Long[] getColumnLengths();
+	}
+}

@@ -1,0 +1,245 @@
+package org.hibernate.processor.test.integ.test;
+
+import jakarta.data.exceptions.DataException;
+import jakarta.data.page.PageRequest;
+import org.hibernate.processor.test.integ.model.Book;
+import org.hibernate.processor.test.integ.repository.BookRepository;
+import org.hibernate.processor.test.integ.repository._BookRepository;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.Jira;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import java.util.List;
+import java.util.NoSuchElementException;
+import java.util.Optional;
+import java.util.stream.Stream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@DomainModel(annotatedClasses = { Book.class, BookRepository.class })
+@SessionFactory
+class BookRepositoryTest {
+
+	@AfterEach
+	void cleanup(SessionFactoryScope scope) {
+		scope.getSessionFactory().getSchemaManager().truncate();
+	}
+
+	@Test
+	void testInsertAndFind(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insert( new Book( "978-0-13-468599-1", "Effective Java", 416 ) );
+			Book found = repo.byIsbn( "978-0-13-468599-1" );
+			assertNotNull( found );
+			assertEquals( "Effective Java", found.getTitle() );
+			assertEquals( 416, found.getPages() );
+		} );
+	}
+
+	@Test
+	void testFindOptionalPresent(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insert( new Book( "978-0-13-468599-1", "Effective Java", 416 ) );
+			Optional<Book> found = repo.maybeByIsbn( "978-0-13-468599-1" );
+			assertTrue( found.isPresent() );
+			assertEquals( "Effective Java", found.get().getTitle() );
+		} );
+	}
+
+	@Test
+	void testFindOptionalEmpty(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			Optional<Book> found = repo.maybeByIsbn( "nonexistent" );
+			assertTrue( found.isEmpty() );
+		} );
+	}
+
+	@Test
+	void testFindNonExistentThrows(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			assertThrows( DataException.class, () -> repo.byIsbn( "nonexistent" ) );
+		} );
+	}
+
+	@Test
+	void testInsertBatch(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insertAll( List.of(
+					new Book( "isbn-1", "Book One", 100 ),
+					new Book( "isbn-2", "Book Two", 200 )
+			) );
+			assertEquals( 2, repo.countAll() );
+		} );
+	}
+
+	@Test
+	void testUpdate(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			Book book = new Book( "isbn-u", "Original", 100 );
+			repo.insert( book );
+			book.setTitle( "Updated" );
+			repo.update( book );
+			assertEquals( "Updated", repo.byIsbn( "isbn-u" ).getTitle() );
+		} );
+	}
+
+	@Test
+	void testDelete(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			Book book = new Book( "isbn-d", "To Delete", 50 );
+			repo.insert( book );
+			assertNotNull( repo.byIsbn( "isbn-d" ) );
+			repo.delete( book );
+			assertThrows( DataException.class, () -> repo.byIsbn( "isbn-d" ) );
+		} );
+	}
+
+	@Test
+	void testSaveAsInsert(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			Book book = new Book( "isbn-s", "First", 100 );
+			repo.save( book );
+			assertEquals( "First", repo.byIsbn( "isbn-s" ).getTitle() );
+		} );
+	}
+
+	@Test
+	void testQueryWithLike(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insertAll( List.of(
+					new Book( "isbn-q1", "Java Programming", 300 ),
+					new Book( "isbn-q2", "Java Concurrency", 400 ),
+					new Book( "isbn-q3", "Python Basics", 200 )
+			) );
+			List<Book> javaBooks = repo.titleLike( "Java%" );
+			assertEquals( 2, javaBooks.size() );
+		} );
+	}
+
+	@Test
+	void testQueryWithMinPages(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insertAll( List.of(
+					new Book( "isbn-p1", "Short", 50 ),
+					new Book( "isbn-p2", "Medium", 200 ),
+					new Book( "isbn-p3", "Long", 500 )
+			) );
+			List<Book> longBooks = repo.booksWithMorePages( 100 );
+			assertEquals( 2, longBooks.size() );
+			assertEquals( "Long", longBooks.get( 0 ).getTitle() );
+		} );
+	}
+
+	@Test
+	void testDeleteByCriteria(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insert( new Book( "isbn-dc", "Criteria", 100 ) );
+			assertNotNull( repo.byIsbn( "isbn-dc" ) );
+			repo.deleteByIsbn( "isbn-dc" );
+			assertThrows( DataException.class, () -> repo.byIsbn( "isbn-dc" ) );
+		} );
+	}
+
+	@ParameterizedTest(name = "title={0}, pages={1}, page={2}")
+	@MethodSource("nullableQueryArguments")
+	void testQueryWithNullableParameters(String title, Integer pages, long page,
+			List<String> expectedIsbns, long expectedTotal, SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insertAll( List.of(
+					new Book( "isbn-1", "Java", 100 ),
+					new Book( "isbn-2", "Java", 200 ),
+					new Book( "isbn-3", "Python", 200 )
+			) );
+
+			var result = repo.search( title, pages, PageRequest.ofPage( page ).size( 2 ) );
+			assertEquals( expectedIsbns, result.content().stream().map( Book::getIsbn ).toList() );
+			assertEquals( expectedTotal, result.totalElements() );
+		} );
+	}
+
+	static Stream<Arguments> nullableQueryArguments() {
+		return Stream.of(
+				Arguments.of( "Java", 100, 1L, List.of( "isbn-1" ), 1L ),
+				Arguments.of( null, 200, 1L, List.of( "isbn-2", "isbn-3" ), 2L ),
+				Arguments.of( "Java", null, 1L, List.of( "isbn-1", "isbn-2" ), 2L ),
+				Arguments.of( null, null, 1L, List.of( "isbn-1", "isbn-2" ), 3L ),
+				Arguments.of( null, null, 2L, List.of( "isbn-3" ), 3L ),
+				Arguments.of( "Missing", null, 1L, List.of(), 0L )
+		);
+	}
+
+	@Test
+	@Jira("https://hibernate.atlassian.net/browse/HHH-21081")
+	void testEmptyCursoredPageAfterDeletion(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			var first = new Book( "isbn-1", "First", 100 );
+			var second = new Book( "isbn-2", "Second", 200 );
+			repo.insertAll( List.of( first, second ) );
+
+			var firstPage = repo.allBooks( PageRequest.ofSize( 1 ).withoutTotal() );
+			assertEquals( List.of( "isbn-1" ), firstPage.content().stream().map( Book::getIsbn ).toList() );
+			assertTrue( firstPage.hasNext() );
+			var nextRequest = firstPage.nextPageRequest();
+			assertEquals( 2L, nextRequest.pageNumber() );
+
+			// The extra row observed by the first query disappears before the next request.
+			repo.delete( second );
+
+			var emptyPage = repo.allBooks( nextRequest );
+			assertEquals( nextRequest, emptyPage.pageRequest() );
+			assertTrue( emptyPage.content().isEmpty() );
+			assertFalse( emptyPage.hasNext() );
+			assertFalse( emptyPage.hasPrevious() );
+			assertThrows( NoSuchElementException.class, emptyPage::nextPageRequest );
+			assertThrows( NoSuchElementException.class, emptyPage::previousPageRequest );
+		} );
+	}
+
+	@Test
+	void testCountAll(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			assertEquals( 0, repo.countAll() );
+			repo.insert( new Book( "isbn-c1", "One", 100 ) );
+			repo.insert( new Book( "isbn-c2", "Two", 200 ) );
+			assertEquals( 2, repo.countAll() );
+		} );
+	}
+
+	@Test
+	void testFindByTitle(SessionFactoryScope scope) {
+		scope.inStatelessTransaction( session -> {
+			var repo = new _BookRepository( session );
+			repo.insertAll( List.of(
+					new Book( "isbn-t1", "Same Title", 100 ),
+					new Book( "isbn-t2", "Same Title", 200 ),
+					new Book( "isbn-t3", "Different", 300 )
+			) );
+			List<Book> books = repo.byTitle( "Same Title" );
+			assertEquals( 2, books.size() );
+		} );
+	}
+}

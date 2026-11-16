@@ -1,0 +1,9 @@
+/// Strategies for efficient retrieval of database-generated values.
+///
+/// @see org.hibernate.generator.values.GeneratedValuesMutationDelegate
+/// @since 8.0
+@Incubating(since = "6.5")
+@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+package org.hibernate.generator.values;
+
+import org.hibernate.Incubating;

@@ -1,0 +1,75 @@
+:shared-attributes-dir: {doc-main-dir}/asciidoc/shared
+
+[[preface]]
+== Preface
+
+Hibernate is an object/relational mapping (ORM) framework for Java applications.
+
+Hibernate maps Java domain models to relational data and supports business logic implemented in Java, in the database, or across both.
+Applications can combine entity-based persistence with native SQL and stored procedure calls, using Hibernate’s result mapping facilities to translate query results into Java objects.
+
+[[getting-started]]
+=== Getting Started
+
+include::{shared-attributes-dir}/background.adoc[]
+
+[TIP]
+====
+Start with the link:{doc-quick-start-url}[Quick Start] guide for a tutorial, or
+link:{doc-introduction-url}[Introduction to Hibernate] for an overview of commonly used features.
+This User Guide provides detailed reference material.
+The link:{doc-topical-url}[topical guides] cover subjects such as logging, compatibility, and support.
+====
+
+
+[[user-guide-reading-map]]
+=== Finding your way through this guide
+
+Use this reference guide by task, or follow the chapter order from mapping and setup through runtime operations, querying, and performance.
+The following links provide starting points for common tasks.
+
+[cols="1,3",options="header"]
+|===
+|Task |Start here
+
+|[[system-requirements]]Check system requirements
+|<<compatibility-dependencies>> for the required Java runtime, Jakarta Persistence, and JDBC versions.
+
+|Understand the main APIs
+|<<architecture>>.
+
+|Map application data
+|<<domain-model>>.
+
+|Configure and start Hibernate
+|<<bootstrap>> and <<database>>.
+See <<schema-generation>> for schema operations and DDL scripts, <<BytecodeEnhancement>> for enhancement capabilities and build-time or runtime setup,
+and <<tooling>> for Gradle, Maven, and Ant integration, metamodel generation, and other build services.
+
+|Manage entity state and transactions
+|<<pc,Persistence Context>>, <<transactions>>, and <<locking>>.
+
+|Construct and execute queries
+|<<hql,Query APIs and execution>>, <<criteria>>, <<QuerySpecification,Programmatic query specifications>>, <<sql,Native SQL Queries>>, and <<stored-procedures>>.
+See <<query-language,Function integration>> for registering custom functions, and the
+link:{doc-query-language-url}[Query Language guide] for HQL syntax and built-in functions.
+
+|Plan loading and tune performance
+|<<fetching>>, <<batch,Batching>>, <<caching>>, <<statistics>>, and <<best-practices>>.
+
+|Use integrations and specialized features
+|<<multitenacy,Multitenancy>>, <<events>>, <<beans>>, <<spatial>>, and <<vector-module>>.
+
+|Evaluate portability across databases or persistence providers
+|<<portability>> for portability boundaries, mapping and query choices, and target-environment verification.
+
+|Look up settings and diagnostic events
+|<<settings,Configuration Settings>> and <<appendix-monitoring-with-JFR>>.
+|===
+
+=== Get Involved
+
+* Report bugs and request enhancements through the https://hibernate.org/issuetracker[issue tracker].
+* Contribute fixes, features, or documentation improvements using the https://hibernate.org/community/contribute/[contribution guidelines].
+* Ask questions, help other users, and join development discussions through the forums, Zulip,
+  and mailing lists linked from the https://hibernate.org/community/[community page].

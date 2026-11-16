@@ -1,0 +1,48 @@
+package org.hibernate.property.access.spi;
+
+import org.hibernate.metamodel.spi.ManagedTypeRepresentationStrategy;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * Defines how a given persistent attribute is accessed by exposing
+ * a {@link Getter} and a {@link Setter} for the attribute.
+ * <p>
+ * Instances are obtained from a {@link PropertyAccessStrategy}.
+ *
+ * @see ManagedTypeRepresentationStrategy
+ *
+ * @author Steve Ebersole
+ * @author Gavin King
+ */
+public interface PropertyAccess {
+	/**
+	 * Access to the {@link PropertyAccessStrategy} that created this instance.
+	 *
+	 * @return The {@code PropertyAccessStrategy}
+	 */
+	PropertyAccessStrategy getPropertyAccessStrategy();
+
+	/**
+	 * Obtain the delegate for getting values of the persistent attribute.
+	 *
+	 * @return The property getter
+	 */
+	Getter getGetter();
+
+	/**
+	 * Obtain the delegate for setting values of the persistent attribute.
+	 *
+	 * @return The property setter
+	 */
+	@Nullable Setter getSetter();
+
+	/**
+	 * The monomorphic value accessor for this property.
+	 * Replaces the value-access role of {@link Getter#get} / {@link Setter#set}.
+	 *
+	 * <p>The default implementation wraps the getter/setter via method references.
+	 * Concrete implementations may return a pre-built optimized accessor instead.
+	 */
+	PropertyValueAccessor getPropertyValueAccessor();
+}

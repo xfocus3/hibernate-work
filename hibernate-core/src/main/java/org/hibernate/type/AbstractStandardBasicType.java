@@ -1,0 +1,401 @@
+package org.hibernate.type;
+
+import org.hibernate.SPI;
+
+import java.io.Serializable;
+import java.sql.CallableStatement;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.ZonedDateTime;
+import java.util.Comparator;
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.Hibernate;
+import org.hibernate.MappingException;
+import org.hibernate.bytecode.enhance.spi.LazyPropertyInitializer;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.util.collections.ArrayHelper;
+import org.hibernate.query.sqm.CastType;
+import org.hibernate.type.descriptor.ValueBinder;
+import org.hibernate.type.descriptor.ValueExtractor;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.java.MutabilityPlan;
+import org.hibernate.type.descriptor.java.MutableMutabilityPlan;
+import org.hibernate.type.descriptor.jdbc.JdbcLiteralFormatter;
+import org.hibernate.type.descriptor.jdbc.JdbcType;
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+import static org.hibernate.SPI.Role.USE;
+
+/**
+ * Convenience base class for {@link BasicType} implementations.
+ * Packages a {@link JavaType} with a {@link JdbcType}.
+ *
+ * @author Steve Ebersole
+ * @author Brett Meyer
+ */
+@SPI({ USE, IMPLEMENT })
+public abstract class AbstractStandardBasicType<T>
+		implements BasicType<T>, ProcedureParameterExtractionAware<T>, ProcedureParameterNamedBinder<T> {
+
+	private final JdbcType jdbcType;
+	private final JavaType<T> javaType;
+	private final int[] sqlTypes;
+	private final ValueBinder<T> jdbcValueBinder;
+	private final ValueExtractor<T> jdbcValueExtractor;
+	private final JdbcLiteralFormatter<T> jdbcLiteralFormatter;
+	private final @Nullable Type typeForEqualsHashCode;
+	private final Class<?> javaTypeClass;
+	private final MutabilityPlan<T> mutabilityPlan;
+	private final Comparator<T> javatypeComparator;
+
+	@SPI(IMPLEMENT)
+	public AbstractStandardBasicType(JdbcType jdbcType, JavaType<T> javaType) {
+		this.jdbcType = jdbcType;
+		this.javaType = javaType;
+		sqlTypes = new int[] { jdbcType.getDdlTypeCode() };
+
+		jdbcValueBinder = jdbcType.getBinder( javaType );
+		jdbcValueExtractor = jdbcType.getExtractor( javaType );
+		jdbcLiteralFormatter = jdbcType.getJdbcLiteralFormatter( javaType );
+
+		//A very simple dispatch optimisation, make these a constant:
+		javaTypeClass = javaType.getJavaTypeClass();
+		mutabilityPlan = javaType.getMutabilityPlan();
+		javatypeComparator = javaType.getComparator();
+		typeForEqualsHashCode = javaType.useObjectEqualsHashCode() ? null : this;
+	}
+
+	@Nonnull
+	@Override
+	public ValueExtractor<T> getJdbcValueExtractor() {
+		return jdbcValueExtractor;
+	}
+
+	@Nonnull
+	@Override
+	public ValueBinder<T> getJdbcValueBinder() {
+		return jdbcValueBinder;
+	}
+
+	@Nullable
+	@Override
+	public JdbcLiteralFormatter<T> getJdbcLiteralFormatter() {
+		return jdbcLiteralFormatter;
+	}
+
+	@Override
+	@Nonnull
+	public Class<T> getJavaType() {
+		return BasicType.super.getJavaType();
+	}
+
+	public T fromString(CharSequence string) {
+		return javaType.fromString( string );
+	}
+
+	protected MutabilityPlan<T> getMutabilityPlan() {
+		return mutabilityPlan;
+	}
+
+	@Override
+	public boolean[] toColumnNullness(@Nullable Object value, MappingContext mapping) {
+		return value == null ? ArrayHelper.FALSE : ArrayHelper.TRUE;
+	}
+
+	@Override
+	public String[] getRegistrationKeys() {
+		return registerUnderJavaType()
+				? new String[] { getName(), javaType.getTypeName() }
+				: new String[] { getName() };
+	}
+
+	protected boolean registerUnderJavaType() {
+		return false;
+	}
+
+	// final implementations ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Nonnull
+	public final JavaType<T> getJavaTypeDescriptor() {
+		return javaType;
+	}
+
+	@Nonnull
+	public final JdbcType getJdbcType() {
+		return jdbcType;
+	}
+
+	@Override
+	public final Class<?> getReturnedClass() {
+		return javaTypeClass;
+	}
+
+	@Override
+	public final int getColumnSpan(MappingContext mapping) throws MappingException {
+		return 1;
+	}
+
+	@Override
+	public final int[] getSqlTypeCodes(MappingContext mappingContext) throws MappingException {
+		return sqlTypes;
+	}
+
+	@Override
+	public final boolean isAssociationType() {
+		return false;
+	}
+
+	@Override
+	public final boolean isCollectionType() {
+		return false;
+	}
+
+	@Override
+	public final boolean isComponentType() {
+		return false;
+	}
+
+	@Override
+	public final boolean isEntityType() {
+		return false;
+	}
+
+	@Override
+	public final boolean isAnyType() {
+		return false;
+	}
+
+	@Override
+	public final boolean isSame(@Nullable Object x, @Nullable Object y) {
+		return isEqual( x, y );
+	}
+
+	@Override
+	public final boolean isEqual(@Nullable Object x, @Nullable Object y, SessionFactoryImplementor factory) {
+		return isEqual( x, y );
+	}
+
+	@Override
+	public boolean isEqual(@Nullable Object one, @Nullable Object another) {
+		if ( one == another ) {
+			return true;
+		}
+		else if ( one == null || another == null ) {
+			return false;
+		}
+		else if ( typeForEqualsHashCode == null ) {
+			return one.equals( another );
+		}
+		else {
+			return javaType.areEqual( javaType.cast( one ), javaType.cast(  another ) );
+		}
+	}
+
+	@Override
+	public int getHashCode(Object object) {
+		return typeForEqualsHashCode == null
+				? object.hashCode()
+				: javaType.extractHashCode( javaType.cast( object ) );
+	}
+
+	@Override
+	public final int getHashCode(Object x, SessionFactoryImplementor factory) {
+		return getHashCode( x );
+	}
+
+	@Override
+	public @Nullable Type getTypeForEqualsHashCode() {
+		return typeForEqualsHashCode;
+	}
+
+	@Override
+	public final int compare(@Nullable Object x, @Nullable Object y) {
+		return this.javatypeComparator.compare( javaType.cast( x ) , javaType.cast( y )  );
+	}
+
+	@Override
+	public final boolean isDirty(@Nullable Object old, @Nullable Object current, SharedSessionContractImplementor session) {
+		return isDirty( old, current );
+	}
+
+	@Override
+	public final boolean isDirty(@Nullable Object old, @Nullable Object current, boolean[] checkable, SharedSessionContractImplementor session) {
+		return checkable[0] && isDirty( old, current );
+	}
+
+	protected final boolean isDirty(Object old, Object current) {
+		// MutableMutabilityPlan.INSTANCE is a special plan for which we always
+		// have to assume the value is dirty, because we can't actually copy a
+		// value, but have no knowledge about the mutability of the java type
+		return getMutabilityPlan() == MutableMutabilityPlan.INSTANCE
+			|| !isSame( old, current );
+	}
+
+	@Override
+	public final boolean isModified(
+			@Nullable Object oldHydratedState,
+			@Nullable Object currentState,
+			boolean[] checkable,
+			SharedSessionContractImplementor session) {
+		return isDirty( oldHydratedState, currentState );
+	}
+
+	@Override
+	public final void nullSafeSet(
+			PreparedStatement st,
+			@Nullable Object value,
+			int index,
+			final SharedSessionContractImplementor session)
+				throws SQLException {
+		nullSafeSet( st, javaType.cast( value ) , index, (WrapperOptions) session );
+	}
+
+	protected void nullSafeSet(PreparedStatement st, T value, int index, WrapperOptions options)
+			throws SQLException {
+		getJdbcValueBinder().bind( st, value, index, options );
+	}
+
+	@Override
+	public final String toLoggableString(@Nullable Object value, SessionFactoryImplementor factory) {
+		return value == LazyPropertyInitializer.UNFETCHED_PROPERTY
+			|| !Hibernate.isInitialized( value )
+				? "<uninitialized>"
+				: javaType.extractLoggableRepresentation(
+						javaType.cast( javaType.coerce( value ) ) );
+	}
+
+	@Override
+	public final boolean isMutable() {
+		return getMutabilityPlan().isMutable();
+	}
+
+	@Nullable
+	@Override
+	public Object deepCopy(@Nullable Object value, SessionFactoryImplementor factory) {
+		return getMutabilityPlan().deepCopy( javaType.cast( value ) );
+	}
+
+	@Nullable
+	@Override
+	public final Serializable disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session, @Nullable Object owner) {
+		return getMutabilityPlan().disassemble( javaType.cast( value ), session );
+	}
+
+	@Nullable
+	@Override
+	public final Object assemble(@Nullable Serializable cached, SharedSessionContractImplementor session, Object owner) {
+		return getMutabilityPlan().assemble( cached, session );
+	}
+
+	@Nullable
+	@Override
+	public final Object replace(@Nullable Object original, @Nullable Object target, SharedSessionContractImplementor session, Object owner, Map<Object, Object> copyCache) {
+		return original == null && target == null
+				? null
+				: javaType.getReplacement( javaType.cast( original ), javaType.cast( target ), session );
+
+	}
+
+	@Nullable
+	@Override
+	public Object replace(
+			@Nullable Object original,
+			@Nullable Object target,
+			SharedSessionContractImplementor session,
+			Object owner,
+			Map<Object, Object> copyCache,
+			ForeignKeyDirection foreignKeyDirection) {
+		return ForeignKeyDirection.FROM_PARENT == foreignKeyDirection
+				// TODO: use cast() .. currently failing on embeddable discriminators where
+				//       the concrete class is passed in instead of its disciminator value
+//				? javaType.getReplacement( javaType.cast( original ) , javaType.cast( target ) , session )
+				? javaType.getReplacement( (T) original, (T) target, session )
+				: target;
+	}
+
+	@Override
+	public boolean canDoExtraction() {
+		return true;
+	}
+
+	@Override
+	public T extract(CallableStatement statement, int startIndex, final SharedSessionContractImplementor session) throws SQLException {
+		return getJdbcValueExtractor().extract( statement, startIndex, session );
+	}
+
+	@Override
+	public T extract(CallableStatement statement, String paramName, final SharedSessionContractImplementor session) throws SQLException {
+		return getJdbcValueExtractor().extract( statement, paramName, session );
+	}
+
+	@Override
+	public void nullSafeSet(
+			PreparedStatement st,
+			@Nullable Object value,
+			int index,
+			boolean[] settable,
+			SharedSessionContractImplementor session)
+				throws SQLException {
+
+	}
+
+	@Override
+	public void nullSafeSet(CallableStatement st, T value, String name, SharedSessionContractImplementor session) throws SQLException {
+		nullSafeSet( st, value, name, (WrapperOptions) session );
+	}
+
+	protected final void nullSafeSet(CallableStatement st, Object value, String name, WrapperOptions options) throws SQLException {
+		getJdbcValueBinder().bind( st, javaType.cast( value ), name, options );
+	}
+
+	@Override
+	public boolean canDoSetting() {
+		return true;
+	}
+
+	@Nonnull
+	@Override
+	public CastType getCastType() {
+		// The following is only necessary because we interpret a model part, e.g.
+		//
+		// @JdbcTypeCode( Types.INTEGER )
+		// Boolean bool;
+		//
+		// as BasicTypeImpl( IntegerJdbcType, BooleanJavaType ) instead of
+		// as ConvertedBasicTypeImpl( NumericBooleanConverter ).
+		//
+		// Due to that, we have to handle some conversions in wrap/unwrap of BooleanJavaType
+		// and the cast type determination here. Note that we interpret the converter in ConvertedBasicTypeImpl
+		// to properly determine the correct cast type
+		final var jdbcType = getJdbcType();
+		switch ( jdbcType.getDdlTypeCode() ) {
+			case Types.BIT:
+			case Types.SMALLINT:
+			case Types.TINYINT:
+			case Types.INTEGER:
+				if ( getJavaType() == Boolean.class ) {
+					return CastType.INTEGER_BOOLEAN;
+				}
+				break;
+			case Types.CHAR:
+			case Types.NCHAR:
+				if ( getJavaType() == Boolean.class ) {
+					return CastType.YN_BOOLEAN;
+				}
+				break;
+			case Types.TIMESTAMP_WITH_TIMEZONE:
+				if ( getJavaType() == ZonedDateTime.class ) {
+					return CastType.ZONE_TIMESTAMP;
+				}
+				break;
+		}
+		return jdbcType.getCastType();
+	}
+}

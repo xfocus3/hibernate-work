@@ -1,0 +1,133 @@
+package org.hibernate.cfg;
+
+import org.hibernate.Incubating;
+import org.hibernate.context.spi.CurrentTenantIdentifierResolver;
+import org.hibernate.context.spi.MultiTenancy;
+import org.hibernate.engine.jdbc.connections.spi.MultiTenantConnectionProvider;
+
+/**
+ * @author Steve Ebersole
+ */
+public interface MultiTenancySettings {
+
+	/**
+	 * Specifies a {@link MultiTenantConnectionProvider} to use, either:
+	 * <ul>
+	 *     <li>an instance of {@code MultiTenantConnectionProvider},
+	 *     <li>a {@link Class} representing a class that implements {@code MultiTenantConnectionProvider}, or
+	 *     <li>the name of a class that implements {@code MultiTenantConnectionProvider}.
+	 * </ul>
+	 *
+	 * Since {@code MultiTenantConnectionProvider} is also a service, it may be configured
+	 * directly via the {@link org.hibernate.boot.registry.StandardServiceRegistryBuilder}.
+	 *
+	 * @since 4.1
+	 */
+	String MULTI_TENANT_CONNECTION_PROVIDER = "hibernate.multi_tenant_connection_provider";
+
+	/**
+	 * Specifies a {@link CurrentTenantIdentifierResolver} to use, either:
+	 * <ul>
+	 *     <li>an instance of {@code CurrentTenantIdentifierResolver},
+	 *     <li>a {@link Class} representing a class that implements {@code CurrentTenantIdentifierResolver}, or
+	 *     <li>the name of a class that implements {@code CurrentTenantIdentifierResolver}.
+	 * </ul>
+	 *
+	 * @see CurrentTenantIdentifierResolver
+	 * @see MultiTenancy#getTenantIdentifierResolver()
+	 * @see org.hibernate.boot.SessionFactoryBuilder#applyCurrentTenantIdentifierResolver
+	 *
+	 * @since 4.1
+	 */
+	String MULTI_TENANT_IDENTIFIER_RESOLVER = "hibernate.tenant_identifier_resolver";
+
+	/**
+	 * During bootstrap, Hibernate needs access to a {@code Connection} for access
+	 * to the {@link java.sql.DatabaseMetaData}. This setting configures the tenant id
+	 * to use when obtaining the {@link javax.sql.DataSource} to use for this access.
+	 */
+	String TENANT_IDENTIFIER_TO_USE_FOR_ANY_KEY = "hibernate.multi_tenant.datasource.identifier_for_any";
+
+	/**
+	 * Specifies a {@link org.hibernate.context.spi.TenantSchemaMapper} to use, either:
+	 * <ul>
+	 *     <li>an instance of {@code TenantSchemaMapper},
+	 *     <li>a {@link Class} representing a class that implements {@code TenantSchemaMapper}, or
+	 *     <li>the name of a class that implements {@code TenantSchemaMapper}.
+	 * </ul>
+	 * When a tenant schema mapper is set, {@link java.sql.Connection#setSchema(String)}}
+	 * is called on newly acquired JDBC connections with the schema name returned by
+	 * {@link org.hibernate.context.spi.TenantSchemaMapper#schemaName}.
+	 * <p>
+	 * By default, there is no tenant schema mapper.
+	 *
+	 * @see org.hibernate.context.spi.TenantSchemaMapper
+	 * @see MultiTenancy#getTenantSchemaMapper()
+	 * @see org.hibernate.boot.SessionFactoryBuilder#applyTenantSchemaMapper
+	 *
+	 * @since 7.1
+	 */
+	@Incubating(since = "7.3")
+	String MULTI_TENANT_SCHEMA_MAPPER = "hibernate.multi_tenant.schema_mapper";
+
+	/**
+	 * Specifies a {@link org.hibernate.context.spi.TenantCredentialsMapper} to use, either:
+	 * <ul>
+	 *     <li>an instance of {@code TenantCredentialsMapper},
+	 *     <li>a {@link Class} representing a class that implements {@code TenantCredentialsMapper}, or
+	 *     <li>the name of a class that implements {@code TenantCredentialsMapper}.
+	 * </ul>
+	 * When a tenant credentials mapper is set,
+	 * {@link org.hibernate.engine.jdbc.connections.spi.ConnectionProvider#getConnection(String, String)}
+	 * is used to acquire JDBC connections, or
+	 * {@link org.hibernate.engine.jdbc.connections.spi.ConnectionProvider#getConnection(String, String, String)}
+	 * is used when a tenant data source mapper is also configured.
+	 * This typically requires that the JDBC {@code DataSource}
+	 * correctly implements the method {@link javax.sql.DataSource#getConnection(String, String)}.
+	 * <p>
+	 * By default, there is no tenant credentials mapper.
+	 *
+	 * @see org.hibernate.context.spi.TenantCredentialsMapper
+	 * @see MultiTenancy#getTenantCredentialsMapper()
+	 * @see org.hibernate.boot.SessionFactoryBuilder#applyTenantCredentialsMapper
+	 *
+	 * @since 7.3
+	 */
+	@Incubating(since = "7.3")
+	String MULTI_TENANT_CREDENTIALS_MAPPER = "hibernate.multi_tenant.credentials_mapper";
+
+	/**
+	 * Specifies a {@link org.hibernate.context.spi.TenantDataSourceMapper} to use, either:
+	 * <ul>
+	 *     <li>an instance of {@code TenantDataSourceMapper},
+	 *     <li>a {@link Class} implementing {@code TenantDataSourceMapper},
+	 *     <li>the name of such a class, or
+	 *     <li>{@code "default"}, to use tenant identifiers as names within the JNDI
+	 *         context identified by {@value org.hibernate.cfg.JdbcSettings#DATASOURCE},
+	 *         or beneath the parent context when that setting names a data source.
+	 * </ul>
+	 * Configuring a mapper automatically selects
+	 * {@link org.hibernate.engine.jdbc.connections.internal.DataSourceConnectionProvider}
+	 * unless a connection provider or a multi-tenant connection provider is explicitly supplied.
+	 * By default, there is no tenant data source mapper.
+	 *
+	 * @see org.hibernate.context.spi.TenantDataSourceMapper
+	 * @see MultiTenancy#getTenantDataSourceMapper()
+	 *
+	 * @since 8.0
+	 */
+	@Incubating(since = "8.0")
+	String MULTI_TENANT_DATASOURCE_MAPPER = "hibernate.multi_tenant.datasource_mapper";
+
+	/**
+	 * Specifies whether database-level row-level security (RLS) for multi-tenancy is enabled.
+	 * <p>
+	 * By default, row-level security is used if the database supports it.
+	 *
+	 * @since 8.0
+	 *
+	 * @settingDefault true
+	 */
+	@Incubating(since = "8.0")
+	String MULTI_TENANT_RLS_ENABLED = "hibernate.multi_tenant.rls_enabled";
+}

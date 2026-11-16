@@ -1,0 +1,55 @@
+package org.hibernate.orm.env;
+
+import org.gradle.StartParameter;
+import org.gradle.api.Plugin;
+import org.gradle.api.initialization.Settings;
+import org.hibernate.build.JpaVersion;
+
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * @author Steve Ebersole
+ */
+public class EnvironmentSettingsPlugin implements Plugin<Settings> {
+
+	@Override
+	public void apply(Settings settings) {
+		final JpaVersion jpaVersion = JpaVersion.from( settings );
+		settings.getExtensions().add( "jpaVersion", jpaVersion );
+		settings.getExtensions().add( JpaVersion.EXT_KEY, jpaVersion.getOsgiName() );
+		final String dbVersion = getP( settings, "dbVersion" );
+		final String dbSuffix = dbVersion == null ? "" : ("-" + dbVersion);
+		settings.getExtensions().add( "db", Objects.requireNonNullElse( getP( settings, "db" ), "h2" ) + dbSuffix );
+		String ciNode = getP( settings, "ci.node" );
+		if ( ciNode != null ) {
+			settings.getExtensions().add( "ci.node", ciNode );
+		}
+
+		settings.getExtensions().getExtraProperties().set(
+				"isCiEnvironment", CiEnvironment.isCiEnvironment()
+		);
+		settings.getExtensions().getExtraProperties().set(
+				"populateRemoteBuildCache",
+				Boolean.parseBoolean( CiEnvironment.getSetting( "POPULATE_REMOTE_GRADLE_CACHE" ).orElse( "false" ) )
+		);
+		settings.getExtensions().getExtraProperties().set(
+				"useRemoteCache",
+				!Boolean.parseBoolean( CiEnvironment.getSetting( "DISABLE_REMOTE_GRADLE_CACHE" ).orElse( "false" ) )
+		);
+	}
+
+	private static String getP(Settings settings, String key) {
+		StartParameter startParameter = settings.getStartParameter();
+		// the `-P` settings passed at command-line
+		final Map<String, String> projectProperties = startParameter.getProjectProperties();
+		final String projectProperty = projectProperties.get( key );
+		if ( projectProperty != null && !projectProperty.isEmpty() ) {
+			return projectProperty;
+		}
+		else {
+			return null;
+		}
+	}
+
+}

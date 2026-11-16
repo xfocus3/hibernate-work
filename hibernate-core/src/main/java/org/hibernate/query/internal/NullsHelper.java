@@ -1,0 +1,73 @@
+package org.hibernate.query.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.dialect.sql.ast.spi.NullOrdering;
+import org.hibernate.query.SortDirection;
+
+import jakarta.persistence.criteria.Nulls;
+
+/**
+ * @author Steve Ebersole
+ */
+public class NullsHelper {
+
+	/**
+	 * Is this null precedence the default for the given sort order and null ordering.
+	 */
+	public static boolean isDefaultOrdering(
+			@Nonnull Nulls precedence,
+			@Nonnull SortDirection sortOrder,
+			@Nonnull NullOrdering nullOrdering) {
+		return switch ( precedence ) {
+			case NONE -> true;
+			case FIRST -> switch ( nullOrdering ) {
+				case FIRST -> true;
+				case LAST -> false;
+				case SMALLEST -> sortOrder == SortDirection.ASCENDING;
+				case GREATEST -> sortOrder == SortDirection.DESCENDING;
+			};
+			case LAST -> switch ( nullOrdering ) {
+				case LAST -> true;
+				case FIRST -> false;
+				case SMALLEST -> sortOrder == SortDirection.DESCENDING;
+				case GREATEST -> sortOrder == SortDirection.ASCENDING;
+			};
+		};
+	}
+
+	/**
+	 * Interprets a string representation of {@link Nulls}, returning {@code null} by default.
+	 * For alternative default handling, see {@link #parse(String, Nulls)}
+	 *
+	 * @param name The String representation to interpret
+	 *
+	 * @return The recognized {@link Nulls}, or {@code null}
+	 */
+	@Nullable
+	public static Nulls parse(@Nonnull String name) {
+		for ( var value : Nulls.values() ) {
+			if ( value.name().equalsIgnoreCase( name ) ) {
+				return value;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Interprets a string representation of {@link Nulls}, returning the specified default if not recognized.
+	 *
+	 * @param name The String representation to interpret
+	 * @param defaultValue The default value to use
+	 *
+	 * @return The recognized {@link Nulls}, or {@code defaultValue}.
+	 */
+	@Nonnull
+	public static Nulls parse(@Nonnull String name, @Nonnull Nulls defaultValue) {
+		final var value = parse( name );
+		return value != null ? value : defaultValue;
+	}
+
+	private NullsHelper() {
+	}
+}

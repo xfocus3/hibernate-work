@@ -1,0 +1,15 @@
+package org.hibernate.processor.test.data.restriction;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.ManyToOne;
+
+@Entity
+public class DataRestrictionBook {
+	@Id
+	String isbn;
+	String title;
+	int pages;
+	@ManyToOne
+	DataRestrictionPublisher publisher;
+}

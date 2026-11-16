@@ -1,0 +1,299 @@
+[[query-language]]
+== Function integration
+:function-example-dir-hql: {core-project-dir}/src/test/java/org/hibernate/orm/test/query/hql
+:srf-example-dir-hql: {core-project-dir}/src/test/java/org/hibernate/orm/test/function/srf
+
+The Query Language guide describes built-in syntax and functions, including its
+link:{doc-query-language-url}#hql-functions-arrays[array], link:{doc-query-language-url}#hql-functions-json[JSON], and link:{doc-query-language-url}#hql-functions-xml[XML] appendices and their dialect support tables.
+See link:{doc-query-language-url}#hql-from-set-returning-functions[set-returning functions] for root/join syntax and ordinality.
+For execution, see <<hql,Query APIs and execution>>; for value mappings, see <<basic,Domain Model basic values>>.
+
+[[query-language-function-contributors]]
+=== Contributing functions
+
+A link:{doc-javadoc-url}org/hibernate/boot/model/FunctionContributor.html[`FunctionContributor`]
+registers custom HQL functions, including scalar, aggregate, and set-returning functions.
+Its `contributeFunctions()` callback receives `FunctionContributions`, which provides access to
+the link:{doc-javadoc-url}org/hibernate/query/sqm/function/SqmFunctionRegistry.html[`SqmFunctionRegistry`].
+Choose a descriptor appropriate to the function's arguments, result type, and SQL rendering:
+
+* `namedDescriptorBuilder()` creates a builder for a scalar function rendered as a database function call.
+* `namedAggregateDescriptorBuilder()` creates a builder for an aggregate function.
+* `namedSetReturningDescriptorBuilder()` creates a builder for a function that returns rows for use in the `from` clause.
+
+Configure the builder, then call `.register()` to add the descriptor to the registry.
+Obtaining or configuring a builder alone does not register the function.
+
+The registry also supports SQL-pattern descriptors and custom function descriptors.
+Registration describes how Hibernate validates and translates a function call; it does not
+create the function in the database.
+
+Expose a contributor through Java service loading by listing its implementation class in
+`META-INF/services/org.hibernate.boot.model.FunctionContributor`.
+For programmatic registration during native bootstrap, use
+link:{doc-javadoc-url}org/hibernate/cfg/Configuration.html#registerFunctionContributor(org.hibernate.boot.model.FunctionContributor)[`Configuration.registerFunctionContributor()`]
+or link:{doc-javadoc-url}org/hibernate/boot/MetadataBuilder.html#applyFunctions(org.hibernate.boot.model.FunctionContributor)[`MetadataBuilder.applyFunctions()`].
+Complete registration during `contributeFunctions()` and retain neither its supplied
+`FunctionContributions` nor the mutable registry after the callback returns.
+See link:{doc-dialect-provider-url}#dialect-provider-function-contracts[function contribution contracts]
+for lifecycle and descriptor details.
+
+[[query-language-scalar-registration]]
+=== Registering a scalar function
+
+This contributor exposes the HQL name `guide_lower` as a call to the database's `lower` function.
+It requires exactly one string argument and declares a string result type.
+The database must support the rendered function; this example uses an existing database function
+rather than creating a new one.
+
+[source,java,indent=0]
+----
+include::{function-example-dir-hql}/FunctionIntegrationGuideTest.java[tags=function-integration-scalar-contributor]
+----
+
+Here, `STRING` is `FunctionParameterType.STRING`, used to validate argument types;
+`StandardBasicTypes.STRING` supplies the mapped result type.
+Expose this class using the service descriptor described above, or supply an instance
+through one of the programmatic registration APIs. An invocation can then use the HQL name:
+
+[source,java,indent=0]
+----
+include::{function-example-dir-hql}/FunctionIntegrationGuideTest.java[tags=function-integration-scalar-invocation]
+----
+
+=== Registering custom set-returning functions
+
+For a database-defined set-returning function, register its row structure and SQL rendering
+using a `FunctionContributor`:
+
+[[hql-from-set-returning-functions-contributor-example]]
+====
+[source, java, indent=0]
+----
+include::{srf-example-dir-hql}/CustomSetReturningFunctionTest.java[tags=hql-set-returning-function-contributor-example]
+----
+====
+
+The database function `mySrf` must already exist and return a column named `v2`.
+The descriptor exposes that column to HQL as `val`, with an integer type.
+The registered function can then be used in the `from` clause, accessing that result as `e.val`:
+
+[[hql-from-set-returning-functions-custom-example]]
+====
+[source, java, indent=0]
+----
+include::{srf-example-dir-hql}/CustomSetReturningFunctionTest.java[tags=hql-set-returning-function-custom-example]
+----
+====
+
+NOTE: `index(alias)` accesses a returned row's 1-based ordinal. Support for ordinality on
+user-defined set-returning functions depends on the dialect. Where implemented, Hibernate
+may emulate it using a lateral subquery and `row_number()`, with additional execution cost;
+some dialect/function combinations remain unsupported. See
+link:{doc-query-language-url}#hql-from-set-returning-functions[set-returning functions]
+for ordinality and query syntax.
+
+[discrete]
+=== Moved language reference links
+
+The following links preserve earlier User Guide section and example URLs.
+The full descriptions are now in the Query Language guide.
+
+.Set-returning functions reference links
+[%collapsible]
+====
+[cols="1,2",options="header"]
+|===
+|Earlier target |Current reference
+|[[hql-from-set-returning-functions]]Set returning |link:{doc-query-language-url}#hql-from-set-returning-functions[Set returning]
+|[[hql-from-set-returning-functions-generate-series]]Set returning generate series |link:{doc-query-language-url}#hql-from-set-returning-functions-generate-series[Set returning generate series]
+|[[hql-generate-series-example]]Generate series example |link:{doc-query-language-url}#hql-generate-series-example[Generate series example]
+|[[hql-generate-series-ordinality-example]]Generate series ordinality example |link:{doc-query-language-url}#hql-generate-series-ordinality-example[Generate series ordinality example]
+|[[hql-generate-series-temporal-example]]Generate series temporal example |link:{doc-query-language-url}#hql-generate-series-temporal-example[Generate series temporal example]
+|[[hql-join-set-returning-function]]Join set returning function |link:{doc-query-language-url}#hql-join-set-returning-function[Join set returning function]
+|===
+====
+
+.Arrays reference links
+[%collapsible]
+====
+[cols="1,2",options="header"]
+|===
+|Earlier target |Current reference
+|[[hql-functions-arrays]]Arrays |link:{doc-query-language-url}#hql-functions-arrays[Arrays]
+|[[hql-array-functions]]Array |link:{doc-query-language-url}#hql-array-functions[Array]
+|[[hql-array-constructor-functions]]Array constructor |link:{doc-query-language-url}#hql-array-constructor-functions[Array constructor]
+|[[hql-array-constructor-example]]Array constructor example |link:{doc-query-language-url}#hql-array-constructor-example[Array constructor example]
+|[[hql-array-constructor-hql-example]]Array constructor HQL example |link:{doc-query-language-url}#hql-array-constructor-hql-example[Array constructor HQL example]
+|[[hql-array-aggregate-functions]]Array aggregate |link:{doc-query-language-url}#hql-array-aggregate-functions[Array aggregate]
+|[[hql-array-agg-example]]Array agg example |link:{doc-query-language-url}#hql-array-agg-example[Array agg example]
+|[[hql-array-position-functions]]Array position |link:{doc-query-language-url}#hql-array-position-functions[Array position]
+|[[hql-array-position-example]]Array position example |link:{doc-query-language-url}#hql-array-position-example[Array position example]
+|[[hql-array-position-hql-example]]Array position HQL example |link:{doc-query-language-url}#hql-array-position-hql-example[Array position HQL example]
+|[[hql-array-positions-functions]]Array positions |link:{doc-query-language-url}#hql-array-positions-functions[Array positions]
+|[[hql-array-positions-example]]Array positions example |link:{doc-query-language-url}#hql-array-positions-example[Array positions example]
+|[[hql-array-length-functions]]Array length |link:{doc-query-language-url}#hql-array-length-functions[Array length]
+|[[hql-array-length-example]]Array length example |link:{doc-query-language-url}#hql-array-length-example[Array length example]
+|[[hql-array-length-hql-example]]Array length HQL example |link:{doc-query-language-url}#hql-array-length-hql-example[Array length HQL example]
+|[[hql-array-concat-functions]]Array concat |link:{doc-query-language-url}#hql-array-concat-functions[Array concat]
+|[[hql-array-concat-example]]Array concat example |link:{doc-query-language-url}#hql-array-concat-example[Array concat example]
+|[[hql-array-concat-pipe-example]]Array concat pipe example |link:{doc-query-language-url}#hql-array-concat-pipe-example[Array concat pipe example]
+|[[hql-array-concat-pipe-element-example]]Array concat pipe element example |link:{doc-query-language-url}#hql-array-concat-pipe-element-example[Array concat pipe element example]
+|[[hql-array-prepend-functions]]Array prepend |link:{doc-query-language-url}#hql-array-prepend-functions[Array prepend]
+|[[hql-array-prepend-example]]Array prepend example |link:{doc-query-language-url}#hql-array-prepend-example[Array prepend example]
+|[[hql-array-append-functions]]Array append |link:{doc-query-language-url}#hql-array-append-functions[Array append]
+|[[hql-array-append-example]]Array append example |link:{doc-query-language-url}#hql-array-append-example[Array append example]
+|[[hql-array-contains-functions]]Array contains |link:{doc-query-language-url}#hql-array-contains-functions[Array contains]
+|[[hql-array-contains-example]]Array contains example |link:{doc-query-language-url}#hql-array-contains-example[Array contains example]
+|[[hql-array-contains-hql-example]]Array contains HQL example |link:{doc-query-language-url}#hql-array-contains-hql-example[Array contains HQL example]
+|[[hql-array-includes-functions]]Array includes |link:{doc-query-language-url}#hql-array-includes-functions[Array includes]
+|[[hql-array-includes-example]]Array includes example |link:{doc-query-language-url}#hql-array-includes-example[Array includes example]
+|[[hql-array-contains-array-example]]Array contains array example |link:{doc-query-language-url}#hql-array-contains-array-example[Array contains array example]
+|[[hql-array-includes-nullable-example]]Array includes nullable example |link:{doc-query-language-url}#hql-array-includes-nullable-example[Array includes nullable example]
+|[[hql-array-contains-array-nullable-example]]Array contains array nullable example |link:{doc-query-language-url}#hql-array-contains-array-nullable-example[Array contains array nullable example]
+|[[hql-array-includes-hql-example]]Array includes HQL example |link:{doc-query-language-url}#hql-array-includes-hql-example[Array includes HQL example]
+|[[hql-array-intersects-functions]]Array intersects |link:{doc-query-language-url}#hql-array-intersects-functions[Array intersects]
+|[[hql-array-overlaps-functions]]Array overlaps |link:{doc-query-language-url}#hql-array-overlaps-functions[Array overlaps]
+|[[hql-array-intersects-example]]Array intersects example |link:{doc-query-language-url}#hql-array-intersects-example[Array intersects example]
+|[[hql-array-overlaps-example]]Array overlaps example |link:{doc-query-language-url}#hql-array-overlaps-example[Array overlaps example]
+|[[hql-array-intersects-nullable-example]]Array intersects nullable example |link:{doc-query-language-url}#hql-array-intersects-nullable-example[Array intersects nullable example]
+|[[hql-array-overlaps-nullable-example]]Array overlaps nullable example |link:{doc-query-language-url}#hql-array-overlaps-nullable-example[Array overlaps nullable example]
+|[[hql-array-intersects-hql-example]]Array intersects HQL example |link:{doc-query-language-url}#hql-array-intersects-hql-example[Array intersects HQL example]
+|[[hql-array-overlaps-hql-example]]Array overlaps HQL example |link:{doc-query-language-url}#hql-array-overlaps-hql-example[Array overlaps HQL example]
+|[[hql-array-get-functions]]Array get |link:{doc-query-language-url}#hql-array-get-functions[Array get]
+|[[hql-array-get-example]]Array get example |link:{doc-query-language-url}#hql-array-get-example[Array get example]
+|[[hql-array-set-functions]]Array set |link:{doc-query-language-url}#hql-array-set-functions[Array set]
+|[[hql-array-set-example]]Array set example |link:{doc-query-language-url}#hql-array-set-example[Array set example]
+|[[hql-array-remove-functions]]Array remove |link:{doc-query-language-url}#hql-array-remove-functions[Array remove]
+|[[hql-array-remove-example]]Array remove example |link:{doc-query-language-url}#hql-array-remove-example[Array remove example]
+|[[hql-array-remove-index-functions]]Array remove index |link:{doc-query-language-url}#hql-array-remove-index-functions[Array remove index]
+|[[hql-array-remove-index-example]]Array remove index example |link:{doc-query-language-url}#hql-array-remove-index-example[Array remove index example]
+|[[hql-array-slice-functions]]Array slice |link:{doc-query-language-url}#hql-array-slice-functions[Array slice]
+|[[hql-array-slice-example]]Array slice example |link:{doc-query-language-url}#hql-array-slice-example[Array slice example]
+|[[hql-array-slice-hql-example]]Array slice HQL example |link:{doc-query-language-url}#hql-array-slice-hql-example[Array slice HQL example]
+|[[hql-array-replace-functions]]Array replace |link:{doc-query-language-url}#hql-array-replace-functions[Array replace]
+|[[hql-array-replace-example]]Array replace example |link:{doc-query-language-url}#hql-array-replace-example[Array replace example]
+|[[hql-array-trim-functions]]Array trim |link:{doc-query-language-url}#hql-array-trim-functions[Array trim]
+|[[hql-array-trim-example]]Array trim example |link:{doc-query-language-url}#hql-array-trim-example[Array trim example]
+|[[hql-array-reverse-functions]]Array reverse |link:{doc-query-language-url}#hql-array-reverse-functions[Array reverse]
+|[[hql-array-reverse-example]]Array reverse example |link:{doc-query-language-url}#hql-array-reverse-example[Array reverse example]
+|[[hql-array-sort-functions]]Array sort |link:{doc-query-language-url}#hql-array-sort-functions[Array sort]
+|[[hql-array-sort-example]]Array sort example |link:{doc-query-language-url}#hql-array-sort-example[Array sort example]
+|[[hql-array-sort-descending-nulls-last-example]]Array sort descending nulls last example |link:{doc-query-language-url}#hql-array-sort-descending-nulls-last-example[Array sort descending nulls last example]
+|[[hql-array-fill-functions]]Array fill |link:{doc-query-language-url}#hql-array-fill-functions[Array fill]
+|[[hql-array-fill-example]]Array fill example |link:{doc-query-language-url}#hql-array-fill-example[Array fill example]
+|[[hql-array-to-string-functions]]Array to string |link:{doc-query-language-url}#hql-array-to-string-functions[Array to string]
+|[[hql-array-to-string-example]]Array to string example |link:{doc-query-language-url}#hql-array-to-string-example[Array to string example]
+|[[hql-array-to-string-hql-example]]Array to string HQL example |link:{doc-query-language-url}#hql-array-to-string-hql-example[Array to string HQL example]
+|[[hql-array-unnest]]Array unnest |link:{doc-query-language-url}#hql-array-unnest[Array unnest]
+|[[hql-array-unnest-struct-example]]Array unnest struct example |link:{doc-query-language-url}#hql-array-unnest-struct-example[Array unnest struct example]
+|[[hql-array-unnest-example]]Array unnest example |link:{doc-query-language-url}#hql-array-unnest-example[Array unnest example]
+|[[hql-contains-predicate]]Contains predicate |link:{doc-query-language-url}#hql-contains-predicate[Contains predicate]
+|[[hql-contains-predicate-bnf]]Contains predicate bnf |link:{doc-query-language-url}#hql-contains-predicate-bnf[Contains predicate bnf]
+|[[hql-intersects-predicate]]Intersects predicate |link:{doc-query-language-url}#hql-intersects-predicate[Intersects predicate]
+|[[hql-intersects-predicate-bnf]]Intersects predicate bnf |link:{doc-query-language-url}#hql-intersects-predicate-bnf[Intersects predicate bnf]
+|===
+====
+
+.JSON reference links
+[%collapsible]
+====
+[cols="1,2",options="header"]
+|===
+|Earlier target |Current reference
+|[[hql-functions-json]]JSON |link:{doc-query-language-url}#hql-functions-json[JSON]
+|[[hql-json-functions]]JSON |link:{doc-query-language-url}#hql-json-functions[JSON]
+|[[hql-json-object-function]]JSON object function |link:{doc-query-language-url}#hql-json-object-function[JSON object function]
+|[[hql-json-object-bnf]]JSON object bnf |link:{doc-query-language-url}#hql-json-object-bnf[JSON object bnf]
+|[[hql-json-object-example]]JSON object example |link:{doc-query-language-url}#hql-json-object-example[JSON object example]
+|[[hql-json-object-on-null-example]]JSON object on null example |link:{doc-query-language-url}#hql-json-object-on-null-example[JSON object on null example]
+|[[hql-json-array-function]]JSON array function |link:{doc-query-language-url}#hql-json-array-function[JSON array function]
+|[[hql-json-array-bnf]]JSON array bnf |link:{doc-query-language-url}#hql-json-array-bnf[JSON array bnf]
+|[[hql-json-array-example]]JSON array example |link:{doc-query-language-url}#hql-json-array-example[JSON array example]
+|[[hql-json-array-on-null-example]]JSON array on null example |link:{doc-query-language-url}#hql-json-array-on-null-example[JSON array on null example]
+|[[hql-json-value-function]]JSON value function |link:{doc-query-language-url}#hql-json-value-function[JSON value function]
+|[[hql-json-value-bnf]]JSON value bnf |link:{doc-query-language-url}#hql-json-value-bnf[JSON value bnf]
+|[[hql-json-value-example]]JSON value example |link:{doc-query-language-url}#hql-json-value-example[JSON value example]
+|[[hql-json-value-passing-example]]JSON value passing example |link:{doc-query-language-url}#hql-json-value-passing-example[JSON value passing example]
+|[[hql-json-value-returning-example]]JSON value returning example |link:{doc-query-language-url}#hql-json-value-returning-example[JSON value returning example]
+|[[hql-json-value-on-error-example]]JSON value on error example |link:{doc-query-language-url}#hql-json-value-on-error-example[JSON value on error example]
+|[[hql-json-value-on-empty-example]]JSON value on empty example |link:{doc-query-language-url}#hql-json-value-on-empty-example[JSON value on empty example]
+|[[hql-json-exists-function]]JSON exists function |link:{doc-query-language-url}#hql-json-exists-function[JSON exists function]
+|[[hql-json-exists-bnf]]JSON exists bnf |link:{doc-query-language-url}#hql-json-exists-bnf[JSON exists bnf]
+|[[hql-json-exists-example]]JSON exists example |link:{doc-query-language-url}#hql-json-exists-example[JSON exists example]
+|[[hql-json-exists-passing-example]]JSON exists passing example |link:{doc-query-language-url}#hql-json-exists-passing-example[JSON exists passing example]
+|[[hql-json-exists-on-error-example]]JSON exists on error example |link:{doc-query-language-url}#hql-json-exists-on-error-example[JSON exists on error example]
+|[[hql-json-query-function]]JSON query function |link:{doc-query-language-url}#hql-json-query-function[JSON query function]
+|[[hql-json-query-bnf]]JSON query bnf |link:{doc-query-language-url}#hql-json-query-bnf[JSON query bnf]
+|[[hql-json-query-example]]JSON query example |link:{doc-query-language-url}#hql-json-query-example[JSON query example]
+|[[hql-json-query-passing-example]]JSON query passing example |link:{doc-query-language-url}#hql-json-query-passing-example[JSON query passing example]
+|[[hql-json-query-wrapper-example]]JSON query wrapper example |link:{doc-query-language-url}#hql-json-query-wrapper-example[JSON query wrapper example]
+|[[hql-json-query-on-error-example]]JSON query on error example |link:{doc-query-language-url}#hql-json-query-on-error-example[JSON query on error example]
+|[[hql-json-query-on-empty-example]]JSON query on empty example |link:{doc-query-language-url}#hql-json-query-on-empty-example[JSON query on empty example]
+|[[hql-json-arrayagg-function]]JSON arrayagg function |link:{doc-query-language-url}#hql-json-arrayagg-function[JSON arrayagg function]
+|[[hql-json-arrayagg-bnf]]JSON arrayagg bnf |link:{doc-query-language-url}#hql-json-arrayagg-bnf[JSON arrayagg bnf]
+|[[hql-json-arrayagg-example]]JSON arrayagg example |link:{doc-query-language-url}#hql-json-arrayagg-example[JSON arrayagg example]
+|[[hql-json-arrayagg-null-example]]JSON arrayagg null example |link:{doc-query-language-url}#hql-json-arrayagg-null-example[JSON arrayagg null example]
+|[[hql-json-arrayagg-order-by-example]]JSON arrayagg order by example |link:{doc-query-language-url}#hql-json-arrayagg-order-by-example[JSON arrayagg order by example]
+|[[hql-json-objectagg-function]]JSON objectagg function |link:{doc-query-language-url}#hql-json-objectagg-function[JSON objectagg function]
+|[[hql-json-objectagg-bnf]]JSON objectagg bnf |link:{doc-query-language-url}#hql-json-objectagg-bnf[JSON objectagg bnf]
+|[[hql-json-objectagg-example]]JSON objectagg example |link:{doc-query-language-url}#hql-json-objectagg-example[JSON objectagg example]
+|[[hql-json-objectagg-null-example]]JSON objectagg null example |link:{doc-query-language-url}#hql-json-objectagg-null-example[JSON objectagg null example]
+|[[hql-json-objectagg-unique-keys-example]]JSON objectagg unique keys example |link:{doc-query-language-url}#hql-json-objectagg-unique-keys-example[JSON objectagg unique keys example]
+|[[hql-json-set-function]]JSON set function |link:{doc-query-language-url}#hql-json-set-function[JSON set function]
+|[[hql-json-set-example]]JSON set example |link:{doc-query-language-url}#hql-json-set-example[JSON set example]
+|[[hql-json-remove-function]]JSON remove function |link:{doc-query-language-url}#hql-json-remove-function[JSON remove function]
+|[[hql-json-remove-example]]JSON remove example |link:{doc-query-language-url}#hql-json-remove-example[JSON remove example]
+|[[hql-json-replace-function]]JSON replace function |link:{doc-query-language-url}#hql-json-replace-function[JSON replace function]
+|[[hql-json-replace-example]]JSON replace example |link:{doc-query-language-url}#hql-json-replace-example[JSON replace example]
+|[[hql-json-insert-function]]JSON insert function |link:{doc-query-language-url}#hql-json-insert-function[JSON insert function]
+|[[hql-json-insert-example]]JSON insert example |link:{doc-query-language-url}#hql-json-insert-example[JSON insert example]
+|[[hql-json-mergepatch-function]]JSON mergepatch function |link:{doc-query-language-url}#hql-json-mergepatch-function[JSON mergepatch function]
+|[[hql-json-mergepatch-example]]JSON mergepatch example |link:{doc-query-language-url}#hql-json-mergepatch-example[JSON mergepatch example]
+|[[hql-json-array-append-function]]JSON array append function |link:{doc-query-language-url}#hql-json-array-append-function[JSON array append function]
+|[[hql-json-array-append-example]]JSON array append example |link:{doc-query-language-url}#hql-json-array-append-example[JSON array append example]
+|[[hql-json-array-insert-function]]JSON array insert function |link:{doc-query-language-url}#hql-json-array-insert-function[JSON array insert function]
+|[[hql-json-array-insert-example]]JSON array insert example |link:{doc-query-language-url}#hql-json-array-insert-example[JSON array insert example]
+|[[hql-json-table-function]]JSON table function |link:{doc-query-language-url}#hql-json-table-function[JSON table function]
+|[[hql-json-table-bnf]]JSON table bnf |link:{doc-query-language-url}#hql-json-table-bnf[JSON table bnf]
+|[[hql-json-table-simple-example]]JSON table simple example |link:{doc-query-language-url}#hql-json-table-simple-example[JSON table simple example]
+|===
+====
+
+.XML reference links
+[%collapsible]
+====
+[cols="1,2",options="header"]
+|===
+|Earlier target |Current reference
+|[[hql-functions-xml]]XML |link:{doc-query-language-url}#hql-functions-xml[XML]
+|[[hql-xml-functions]]XML |link:{doc-query-language-url}#hql-xml-functions[XML]
+|[[hql-xmlelement-function]]XMLelement function |link:{doc-query-language-url}#hql-xmlelement-function[XMLelement function]
+|[[hql-xmlelement-bnf]]XMLelement bnf |link:{doc-query-language-url}#hql-xmlelement-bnf[XMLelement bnf]
+|[[hql-xmlelement-example]]XMLelement example |link:{doc-query-language-url}#hql-xmlelement-example[XMLelement example]
+|[[hql-xmlelement-attributes-content-example]]XMLelement attributes content example |link:{doc-query-language-url}#hql-xmlelement-attributes-content-example[XMLelement attributes content example]
+|[[hql-xmlcomment-function]]XMLcomment function |link:{doc-query-language-url}#hql-xmlcomment-function[XMLcomment function]
+|[[hql-xmlcomment-example]]XMLcomment example |link:{doc-query-language-url}#hql-xmlcomment-example[XMLcomment example]
+|[[hql-xmlforest-function]]XMLforest function |link:{doc-query-language-url}#hql-xmlforest-function[XMLforest function]
+|[[hql-xmlforest-bnf]]XMLforest bnf |link:{doc-query-language-url}#hql-xmlforest-bnf[XMLforest bnf]
+|[[hql-xmlforest-example]]XMLforest example |link:{doc-query-language-url}#hql-xmlforest-example[XMLforest example]
+|[[hql-xmlconcat-function]]XMLconcat function |link:{doc-query-language-url}#hql-xmlconcat-function[XMLconcat function]
+|[[hql-xmlconcat-example]]XMLconcat example |link:{doc-query-language-url}#hql-xmlconcat-example[XMLconcat example]
+|[[hql-xmlpi-function]]XMLpi function |link:{doc-query-language-url}#hql-xmlpi-function[XMLpi function]
+|[[hql-xmlpi-bnf]]XMLpi bnf |link:{doc-query-language-url}#hql-xmlpi-bnf[XMLpi bnf]
+|[[hql-xmlpi-example]]XMLpi example |link:{doc-query-language-url}#hql-xmlpi-example[XMLpi example]
+|[[hql-xmlpi-content-example]]XMLpi content example |link:{doc-query-language-url}#hql-xmlpi-content-example[XMLpi content example]
+|[[hql-xmlquery-function]]XMLquery function |link:{doc-query-language-url}#hql-xmlquery-function[XMLquery function]
+|[[hql-xmlquery-bnf]]XMLquery bnf |link:{doc-query-language-url}#hql-xmlquery-bnf[XMLquery bnf]
+|[[hql-xmlquery-example]]XMLquery example |link:{doc-query-language-url}#hql-xmlquery-example[XMLquery example]
+|[[hql-xmlexists-function]]XMLexists function |link:{doc-query-language-url}#hql-xmlexists-function[XMLexists function]
+|[[hql-xmlexists-bnf]]XMLexists bnf |link:{doc-query-language-url}#hql-xmlexists-bnf[XMLexists bnf]
+|[[hql-xmlexists-example]]XMLexists example |link:{doc-query-language-url}#hql-xmlexists-example[XMLexists example]
+|[[hql-xmlagg-function]]XMLagg function |link:{doc-query-language-url}#hql-xmlagg-function[XMLagg function]
+|[[hql-xmlagg-bnf]]XMLagg bnf |link:{doc-query-language-url}#hql-xmlagg-bnf[XMLagg bnf]
+|[[hql-xmlagg-example]]XMLagg example |link:{doc-query-language-url}#hql-xmlagg-example[XMLagg example]
+|[[hql-xmltable-function]]XMLtable function |link:{doc-query-language-url}#hql-xmltable-function[XMLtable function]
+|[[hql-xmltable-bnf]]XMLtable bnf |link:{doc-query-language-url}#hql-xmltable-bnf[XMLtable bnf]
+|[[hql-xmltable-simple-example]]XMLtable simple example |link:{doc-query-language-url}#hql-xmltable-simple-example[XMLtable simple example]
+|===
+====

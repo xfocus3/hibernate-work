@@ -1,0 +1,21 @@
+package org.hibernate.dialect.function.json;
+
+import org.hibernate.sql.ast.spi.translation.SqlAstTranslator;
+import org.hibernate.sql.spi.SqlAppender;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.type.spi.TypeConfiguration;
+
+/**
+ * HSQLDB json_arrayagg function.
+ */
+public class HSQLJsonArrayAggFunction extends JsonArrayAggFunction {
+
+	public HSQLJsonArrayAggFunction(TypeConfiguration typeConfiguration) {
+		super( false, typeConfiguration );
+	}
+
+	@Override
+	protected void renderReturningClause(SqlAppender sqlAppender, Expression arg, SqlAstTranslator<?> translator) {
+		// No returning clause needed
+	}
+}

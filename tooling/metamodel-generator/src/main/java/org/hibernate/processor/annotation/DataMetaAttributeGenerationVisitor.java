@@ -1,0 +1,195 @@
+package org.hibernate.processor.annotation;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.processor.Context;
+
+import javax.lang.model.element.Element;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.ArrayType;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.ExecutableType;
+import javax.lang.model.type.PrimitiveType;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.type.TypeVariable;
+import javax.lang.model.util.SimpleTypeVisitor8;
+import javax.lang.model.util.Types;
+
+import static org.hibernate.processor.util.Constants.EMBEDDABLE;
+import static org.hibernate.processor.util.Constants.ENTITY;
+import static org.hibernate.processor.util.Constants.JD_BASIC_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_BOOLEAN_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_COMPARABLE_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_NAVIGABLE_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_NUMERIC_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_TEMPORAL_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.JD_TEXT_ATTRIBUTE;
+import static org.hibernate.processor.util.Constants.MAPPED_SUPERCLASS;
+import static org.hibernate.processor.util.TypeUtils.getTargetEntity;
+import static org.hibernate.processor.util.TypeUtils.hasAnnotation;
+import static org.hibernate.processor.util.TypeUtils.isPluralAttribute;
+import static org.hibernate.processor.util.TypeUtils.isPropertyGetter;
+import static org.hibernate.processor.util.TypeUtils.toArrayTypeString;
+import static org.hibernate.processor.util.TypeUtils.toPrimitiveTypeString;
+
+/**
+ * @author Gavin King
+ */
+public class DataMetaAttributeGenerationVisitor extends SimpleTypeVisitor8<DataAnnotationMetaAttribute, Element> {
+
+	private final AnnotationMetaEntity entity;
+	private final Context context;
+	private final @Nullable String path;
+
+	DataMetaAttributeGenerationVisitor(AnnotationMetaEntity entity, Context context) {
+		this.entity = entity;
+		this.context = context;
+		this.path = null;
+	}
+
+	DataMetaAttributeGenerationVisitor(AnnotationMetaEntity entity, String path, Context context) {
+		this.entity = entity;
+		this.context = context;
+		this.path = path;
+	}
+
+	private Types typeUtils() {
+		return context.getTypeUtils();
+	}
+
+	@Override
+	public @Nullable DataAnnotationMetaAttribute visitPrimitive(PrimitiveType primitiveType, Element element) {
+		return dataAttribute(
+				element,
+				primitiveType,
+				typeUtils().boxedClass( primitiveType ).asType().toString(),
+				toPrimitiveTypeString( primitiveType )
+		);
+	}
+
+	@Override
+	public @Nullable DataAnnotationMetaAttribute visitArray(ArrayType arrayType, Element element) {
+		final var type = toArrayTypeString( arrayType, context );
+		return new DataAnnotationMetaAttribute(
+				entity,
+				element,
+				JD_BASIC_ATTRIBUTE,
+				type,
+				type,
+				path
+		);
+	}
+
+	@Override
+	public @Nullable DataAnnotationMetaAttribute visitTypeVariable(TypeVariable typeVariable, Element element) {
+		// METAGEN-29 - for a type variable we use the upper bound
+		final var upperBound = typeUtils().erasure( typeVariable.getUpperBound() );
+		return dataAttribute( element, upperBound, upperBound.toString(), upperBound.toString() );
+	}
+
+	@Override
+	public @Nullable DataAnnotationMetaAttribute visitDeclared(DeclaredType declaredType, Element element) {
+		final var returnedElement = (TypeElement) typeUtils().asElement( declaredType );
+		if ( returnedElement == null ) {
+			return null;
+		}
+		// WARNING: .toString() is necessary here since Name equals does not compare to String
+		final var targetEntity = getTargetEntity( element.getAnnotationMirrors() );
+		if ( isPluralAttribute( element ) ) {
+//			final String returnTypeName = returnedElement.getQualifiedName().toString();
+//			final String collection = Constants.COLLECTIONS.get( returnTypeName );
+			return null;
+		}
+		else {
+			final var type = targetEntity != null ? targetEntity : returnedElement.getQualifiedName().toString();
+			return targetEntity != null || isManagedType( returnedElement )
+					? new DataAnnotationMetaAttribute(
+							entity,
+							element,
+							JD_NAVIGABLE_ATTRIBUTE,
+							type,
+							type,
+							path
+					)
+					: dataAttribute( element, declaredType, type, type );
+		}
+	}
+
+	@Override
+	public @Nullable DataAnnotationMetaAttribute visitExecutable(ExecutableType executable, Element element) {
+		return isPropertyGetter( executable, element )
+				? executable.getReturnType().accept(this, element)
+				: null;
+	}
+
+	private DataAnnotationMetaAttribute dataAttribute(
+			Element element,
+			TypeMirror type,
+			String typeDeclaration,
+			String classLiteralType) {
+		final var metaType = getMetaType( type );
+		return new DataAnnotationMetaAttribute(
+				entity,
+				element,
+				metaType,
+				typeDeclaration,
+				requiresClassLiteral( metaType ) ? classLiteralType : null,
+				path
+		);
+	}
+
+	private static boolean requiresClassLiteral(String metaType) {
+		return !JD_TEXT_ATTRIBUTE.equals( metaType );
+	}
+
+	private String getMetaType(TypeMirror type) {
+		final var boxedType =
+				type.getKind().isPrimitive()
+						? typeUtils().boxedClass( (PrimitiveType) type ).asType()
+						: typeUtils().erasure( type );
+		if ( isSameType( boxedType, String.class.getName() ) ) {
+			return JD_TEXT_ATTRIBUTE;
+		}
+		else if ( isSameType( boxedType, Boolean.class.getName() ) ) {
+			return JD_BOOLEAN_ATTRIBUTE;
+		}
+		else if ( isAssignableTo( boxedType, Number.class.getName() )
+				&& isAssignableToComparable( boxedType, boxedType ) ) {
+			return JD_NUMERIC_ATTRIBUTE;
+		}
+		else if ( isAssignableTo( boxedType, "java.time.temporal.Temporal" )
+				&& isAssignableToComparable( boxedType, typeUtils().getWildcardType( null, boxedType ) ) ) {
+			return JD_TEMPORAL_ATTRIBUTE;
+		}
+		else if ( isAssignableToComparable( boxedType, typeUtils().getWildcardType( null, boxedType ) ) ) {
+			return JD_COMPARABLE_ATTRIBUTE;
+		}
+		else {
+			return JD_BASIC_ATTRIBUTE;
+		}
+	}
+
+	private boolean isManagedType(TypeElement typeElement) {
+		return hasAnnotation( typeElement, ENTITY, EMBEDDABLE, MAPPED_SUPERCLASS );
+	}
+
+	private boolean isSameType(TypeMirror type, String typeName) {
+		final var typeElement = context.getTypeElementForFullyQualifiedName( typeName );
+		return typeElement != null
+				&& typeUtils().isSameType( typeUtils().erasure( type ), typeUtils().erasure( typeElement.asType() ) );
+	}
+
+	private boolean isAssignableTo(TypeMirror type, String typeName) {
+		final var typeElement = context.getTypeElementForFullyQualifiedName( typeName );
+		return typeElement != null
+				&& typeUtils().isAssignable( typeUtils().erasure( type ), typeUtils().erasure( typeElement.asType() ) );
+	}
+
+	private boolean isAssignableToComparable(TypeMirror type, TypeMirror comparableArgument) {
+		final var typeElement = context.getTypeElementForFullyQualifiedName( Comparable.class.getName() );
+		return typeElement != null
+				&& typeUtils().isAssignable(
+						type,
+						typeUtils().getDeclaredType( typeElement, comparableArgument )
+				);
+	}
+}

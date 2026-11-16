@@ -1,0 +1,12 @@
+/// Supported aggregate-column mapping, rendering, DDL, and capability
+/// contracts supplied by a Dialect.
+///
+/// This extension family is incubating and may change as aggregate-column
+/// support evolves.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "aggregate-columns")
+package org.hibernate.dialect.aggregate.spi;
+
+import org.hibernate.Incubating;

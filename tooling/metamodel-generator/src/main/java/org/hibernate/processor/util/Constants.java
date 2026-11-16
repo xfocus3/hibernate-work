@@ -1,0 +1,267 @@
+package org.hibernate.processor.util;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * @author Hardy Ferentschik
+ */
+public final class Constants {
+
+	// All this is to avoid loading classes we don't need to load
+
+	public static final String ENTITY = "jakarta.persistence.Entity";
+	public static final String MAPPED_SUPERCLASS = "jakarta.persistence.MappedSuperclass";
+	public static final String EMBEDDABLE = "jakarta.persistence.Embeddable";
+	public static final String EMBEDDED = "jakarta.persistence.Embedded";
+	public static final String ENUMERATED = "jakarta.persistence.Enumerated";
+	public static final String LOB = "jakarta.persistence.Lob";
+	public static final String ID = "jakarta.persistence.Id";
+	public static final String ID_CLASS = "jakarta.persistence.IdClass";
+	public static final String EMBEDDED_ID = "jakarta.persistence.EmbeddedId";
+	public static final String NATURAL_ID = "org.hibernate.annotations.NaturalId";
+	public static final String TRANSIENT = "jakarta.persistence.Transient";
+	public static final String BASIC = "jakarta.persistence.Basic";
+	public static final String ONE_TO_ONE = "jakarta.persistence.OneToOne";
+	public static final String ONE_TO_MANY = "jakarta.persistence.OneToMany";
+	public static final String MANY_TO_ONE = "jakarta.persistence.ManyToOne";
+	public static final String MANY_TO_MANY = "jakarta.persistence.ManyToMany";
+	public static final String MANY_TO_ANY = "org.hibernate.annotations.ManyToAny";
+	public static final String MAP_KEY_CLASS = "jakarta.persistence.MapKeyClass";
+	public static final String ELEMENT_COLLECTION = "jakarta.persistence.ElementCollection";
+	public static final String ACCESS = "jakarta.persistence.Access";
+	public static final String CONVERT = "jakarta.persistence.Convert";
+	public static final String GENERATED_VALUE = "jakarta.persistence.GeneratedValue";
+	public static final String ORDER_BY = "jakarta.persistence.OrderBy";
+	public static final String ENTITY_LISTENER = "jakarta.persistence.EntityListener";
+	public static final String PRE_INSERT = "jakarta.persistence.PreInsert";
+	public static final String POST_INSERT = "jakarta.persistence.PostInsert";
+	public static final String PRE_UPDATE = "jakarta.persistence.PreUpdate";
+	public static final String POST_UPDATE = "jakarta.persistence.PostUpdate";
+	public static final String PRE_DELETE = "jakarta.persistence.PreDelete";
+	public static final String POST_DELETE = "jakarta.persistence.PostDelete";
+	public static final String PRE_UPSERT = "jakarta.persistence.PreUpsert";
+	public static final String POST_UPSERT = "jakarta.persistence.PostUpsert";
+
+	public static final String NAMED_QUERY = "jakarta.persistence.NamedQuery";
+	public static final String NAMED_QUERIES = "jakarta.persistence.NamedQueries";
+	public static final String NAMED_NATIVE_QUERY = "jakarta.persistence.NamedNativeQuery";
+	public static final String NAMED_NATIVE_QUERIES = "jakarta.persistence.NamedNativeQueries";
+	public static final String NAMED_STATEMENT = "jakarta.persistence.NamedStatement";
+	public static final String NAMED_STATEMENTS = "jakarta.persistence.NamedStatements";
+	public static final String NAMED_NATIVE_STATEMENT = "jakarta.persistence.NamedNativeStatement";
+	public static final String NAMED_NATIVE_STATEMENTS = "jakarta.persistence.NamedNativeStatements";
+	public static final String SQL_RESULT_SET_MAPPING = "jakarta.persistence.SqlResultSetMapping";
+	public static final String SQL_RESULT_SET_MAPPINGS = "jakarta.persistence.SqlResultSetMappings";
+	public static final String ENTITY_RESULT = "jakarta.persistence.EntityResult";
+	public static final String ENTITY_RESULTS = "jakarta.persistence.EntityResult.EntityResults";
+	public static final String CONSTRUCTOR_RESULT = "jakarta.persistence.ConstructorResult";
+	public static final String CONSTRUCTOR_RESULTS = "jakarta.persistence.ConstructorResult.ConstructorResults";
+	public static final String COLUMN_RESULT = "jakarta.persistence.ColumnResult";
+	public static final String COLUMN_RESULTS = "jakarta.persistence.ColumnResult.ColumnResults";
+	public static final String NAMED_ENTITY_GRAPH = "jakarta.persistence.NamedEntityGraph";
+	public static final String NAMED_ENTITY_GRAPHS = "jakarta.persistence.NamedEntityGraphs";
+
+	public static final String TYPED_QUERY_REFERENCE = "jakarta.persistence.TypedQueryReference";
+	public static final String STATEMENT_REFERENCE = "jakarta.persistence.StatementReference";
+	public static final String JAKARTA_QUERY = "jakarta.persistence.query.JakartaQuery";
+	public static final String NATIVE_QUERY = "jakarta.persistence.query.NativeQuery";
+	public static final String QUERY_OPTIONS = "jakarta.persistence.query.QueryOptions";
+	public static final String STATIC_TYPED_QUERY_REFERENCE = "jakarta.persistence.query.StaticTypedQueryReference";
+	public static final String STATIC_STATEMENT_REFERENCE = "jakarta.persistence.query.StaticStatementReference";
+	public static final String ENTITY_GRAPH = "jakarta.persistence.EntityGraph";
+	public static final String RESULT_SET_MAPPING = "jakarta.persistence.sql.ResultSetMapping";
+
+	public static final String HIB_NAMED_QUERY = "org.hibernate.annotations.NamedQuery";
+	public static final String HIB_NAMED_QUERIES = "org.hibernate.annotations.NamedQueries";
+	public static final String HIB_NAMED_NATIVE_QUERY = "org.hibernate.annotations.NamedNativeQuery";
+	public static final String HIB_NAMED_NATIVE_QUERIES = "org.hibernate.annotations.NamedNativeQueries";
+	public static final String HIB_FETCH_PROFILE = "org.hibernate.annotations.FetchProfile";
+	public static final String HIB_FETCH_PROFILES = "org.hibernate.annotations.FetchProfiles";
+	public static final String HIB_FILTER_DEF = "org.hibernate.annotations.FilterDef";
+	public static final String HIB_FILTER_DEFS = "org.hibernate.annotations.FilterDefs";
+
+	public static final String HQL = "org.hibernate.annotations.processing.HQL";
+	public static final String SQL = "org.hibernate.annotations.processing.SQL";
+	public static final String FIND = "org.hibernate.annotations.processing.Find";
+	public static final String PATTERN = "org.hibernate.annotations.processing.Pattern";
+	public static final String EXCLUDE = "org.hibernate.annotations.processing.Exclude";
+
+	public static final String JD_REPOSITORY = "jakarta.data.repository.Repository";
+	public static final String JD_QUERY = "jakarta.data.repository.Query";
+	public static final String JD_FIND = "jakarta.data.repository.Find";
+	public static final String JD_INSERT = "jakarta.data.repository.Insert";
+	public static final String JD_UPDATE = "jakarta.data.repository.Update";
+	public static final String JD_DELETE = "jakarta.data.repository.Delete";
+	public static final String JD_SAVE = "jakarta.data.repository.Save";
+	public static final String JD_SELECT = "jakarta.data.repository.Select";
+	public static final String JD_SELECT_LIST = "jakarta.data.repository.Select.List";
+	public static final String JD_FIRST = "jakarta.data.repository.First";
+	public static final String JD_PERSIST = "jakarta.data.repository.stateful.Persist";
+	public static final String JD_MERGE = "jakarta.data.repository.stateful.Merge";
+	public static final String JD_REFRESH = "jakarta.data.repository.stateful.Refresh";
+	public static final String JD_REMOVE = "jakarta.data.repository.stateful.Remove";
+	public static final String JD_DETACH = "jakarta.data.repository.stateful.Detach";
+	public static final String JD_ASYNCHRONOUS = "jakarta.enterprise.concurrent.Asynchronous";
+	public static final String JD_LIMIT = "jakarta.data.Limit";
+	public static final String JD_SORT = "jakarta.data.Sort";
+	public static final String JD_ORDER = "jakarta.data.Order";
+	public static final String JD_PAGE_REQUEST = "jakarta.data.page.PageRequest";
+	public static final String JD_PAGE = "jakarta.data.page.Page";
+	public static final String JD_CURSORED_PAGE = "jakarta.data.page.CursoredPage";
+	public static final String JD_RESTRICTION = "jakarta.data.restrict.Restriction";
+	public static final String JD_RESTRICT = "jakarta.data.restrict.Restrict";
+	public static final String JD_CONSTRAINT = "jakarta.data.constraint.Constraint";
+	public static final String JD_EQUAL_TO = "jakarta.data.constraint.EqualTo";
+	public static final String JD_NOT_EQUAL_TO = "jakarta.data.constraint.NotEqualTo";
+	public static final String JD_GREATER_THAN = "jakarta.data.constraint.GreaterThan";
+	public static final String JD_AT_LEAST = "jakarta.data.constraint.AtLeast";
+	public static final String JD_LESS_THAN = "jakarta.data.constraint.LessThan";
+	public static final String JD_AT_MOST = "jakarta.data.constraint.AtMost";
+	public static final String JD_LIKE = "jakarta.data.constraint.Like";
+	public static final String JD_NOT_LIKE = "jakarta.data.constraint.NotLike";
+	public static final String JD_IN = "jakarta.data.constraint.In";
+	public static final String JD_NOT_IN = "jakarta.data.constraint.NotIn";
+	public static final String JD_IS = "jakarta.data.repository.Is";
+	public static final String BASIC_REPOSITORY = "jakarta.data.repository.BasicRepository";
+	public static final String CRUD_REPOSITORY = "jakarta.data.repository.CrudRepository";
+	public static final String DATA_REPOSITORY = "jakarta.data.repository.DataRepository";
+	public static final String JD_ORDER_BY = "jakarta.data.repository.OrderBy";
+	public static final String JD_ORDER_BY_LIST = "jakarta.data.repository.OrderBy.List";
+
+	public static final String JD_STATIC_METAMODEL = "jakarta.data.metamodel.StaticMetamodel";
+	public static final String JD_BASIC_ATTRIBUTE = "jakarta.data.metamodel.BasicAttribute";
+	public static final String JD_BOOLEAN_ATTRIBUTE = "jakarta.data.metamodel.BooleanAttribute";
+	public static final String JD_COMPARABLE_ATTRIBUTE = "jakarta.data.metamodel.ComparableAttribute";
+	public static final String JD_NAVIGABLE_ATTRIBUTE = "jakarta.data.metamodel.NavigableAttribute";
+	public static final String JD_NUMERIC_ATTRIBUTE = "jakarta.data.metamodel.NumericAttribute";
+	public static final String JD_SORTABLE_ATTRIBUTE = "jakarta.data.metamodel.SortableAttribute";
+	public static final String JD_TEMPORAL_ATTRIBUTE = "jakarta.data.metamodel.TemporalAttribute";
+	public static final String JD_TEXT_ATTRIBUTE = "jakarta.data.metamodel.TextAttribute";
+
+	public static final String JD_LIFECYCLE_EVENT = "jakarta.data.event.LifecycleEvent";
+
+	public static final String HIB_ORDER = "org.hibernate.query.Order";
+	public static final String HIB_PAGE = "org.hibernate.query.Page";
+	public static final String HIB_KEYED_PAGE = "org.hibernate.query.KeyedPage";
+	public static final String HIB_KEYED_RESULT_LIST = "org.hibernate.query.KeyedResultList";
+	public static final String HIB_SORT_DIRECTION = "org.hibernate.query.SortDirection";
+	public static final String HIB_RESTRICTION = "org.hibernate.query.restriction.Restriction";
+	public static final String HIB_JAKARTA_DATA_RESTRICTION = "org.hibernate.query.restriction.JakartaDataRestriction";
+	public static final String HIB_RANGE = "org.hibernate.query.range.Range";
+
+	public static final String CHECK_HQL = "org.hibernate.annotations.processing.CheckHQL";
+
+	public static final String ENTITY_MANAGER = "jakarta.persistence.EntityManager";
+	public static final String ENTITY_AGENT = "jakarta.persistence.EntityAgent";
+	public static final String ENTITY_MANAGER_FACTORY = "jakarta.persistence.EntityManagerFactory";
+	public static final String QUERY = "jakarta.persistence.Query";
+	public static final String TYPED_QUERY = "jakarta.persistence.TypedQuery";
+	public static final String TIMEOUT = "jakarta.persistence.Timeout";
+	public static final String HIB_QUERY = "org.hibernate.query.Query";
+	public static final String HIB_SELECTION_QUERY = "org.hibernate.query.SelectionQuery";
+	public static final String HIB_SESSION = "org.hibernate.Session";
+	public static final String HIB_SESSION_FACTORY = "org.hibernate.SessionFactory";
+	public static final String HIB_STATELESS_SESSION = "org.hibernate.StatelessSession";
+	public static final String MUTINY_SESSION_FACTORY = "org.hibernate.reactive.mutiny.Mutiny.SessionFactory";
+	public static final String MUTINY_SESSION = "org.hibernate.reactive.mutiny.Mutiny.Session";
+	public static final String MUTINY_STATELESS_SESSION = "org.hibernate.reactive.mutiny.Mutiny.StatelessSession";
+	public static final String HIB_ENABLED_FETCH_PROFILE = "org.hibernate.EnabledFetchProfile";
+
+	public static final String TUPLE = "jakarta.persistence.Tuple";
+
+	public static final String INJECT = "jakarta.inject.Inject";
+	public static final String TYPE_LITERAL = "jakarta.enterprise.util.TypeLiteral";
+	public static final String EVENT = "jakarta.enterprise.event.Event";
+
+	public static final String UNI = "io.smallrye.mutiny.Uni";
+	public static final String UNI_MUTINY_SESSION = UNI + "<" + MUTINY_SESSION + ">";
+	public static final String UNI_MUTINY_STATELESS_SESSION = UNI + "<" + MUTINY_STATELESS_SESSION + ">";
+	public static final String UNI_INTEGER = UNI+"<java.lang.Integer>";
+	public static final String UNI_VOID = UNI+"<java.lang.Void>";
+	public static final String UNI_BOOLEAN = UNI+"<java.lang.Boolean>";
+	public static final String BOXED_VOID = "java.lang.Void";
+
+	public static final String STATIC_METAMODEL = "jakarta.persistence.metamodel.StaticMetamodel";
+	public static final String SINGULAR_ATTRIBUTE = "jakarta.persistence.metamodel.SingularAttribute";
+	public static final String BOOLEAN_ATTRIBUTE = "jakarta.persistence.metamodel.BooleanAttribute";
+	public static final String COMPARABLE_ATTRIBUTE = "jakarta.persistence.metamodel.ComparableAttribute";
+	public static final String NUMERIC_ATTRIBUTE = "jakarta.persistence.metamodel.NumericAttribute";
+	public static final String TEMPORAL_ATTRIBUTE = "jakarta.persistence.metamodel.TemporalAttribute";
+	public static final String TEXT_ATTRIBUTE = "jakarta.persistence.metamodel.TextAttribute";
+	public static final String COLLECTION_ATTRIBUTE = "jakarta.persistence.metamodel.CollectionAttribute";
+	public static final String SET_ATTRIBUTE = "jakarta.persistence.metamodel.SetAttribute";
+	public static final String LIST_ATTRIBUTE = "jakarta.persistence.metamodel.ListAttribute";
+	public static final String MAP_ATTRIBUTE = "jakarta.persistence.metamodel.MapAttribute";
+
+	public static final String PERSISTENCE_UNIT = "jakarta.persistence.PersistenceUnit";
+	public static final String PERSISTENCE_CONTEXT = "jakarta.persistence.PersistenceContext";
+	public static final String PERSISTENCE_AGENT = "jakarta.persistence.PersistenceAgent";
+	public static final String POST_CONSTRUCT = "jakarta.annotation.PostConstruct";
+	public static final String PRE_DESTROY = "jakarta.annotation.PreDestroy";
+
+	public static final String JAVA_OBJECT = "java.lang.Object";
+	public static final String VOID = "java.lang.Void";
+	public static final String STRING = "java.lang.String";
+	public static final String BOOLEAN = "java.lang.Boolean";
+	public static final String OBJECTS = "java.util.Objects";
+	public static final String ITERABLE = "java.lang.Iterable";
+	public static final String COLLECTION = "java.util.Collection";
+	public static final String LIST = "java.util.List";
+	public static final String MAP = "java.util.Map";
+	public static final String SET = "java.util.Set";
+	public static final String OPTIONAL = "java.util.Optional";
+	public static final String COMPLETABLE_FUTURE = "java.util.concurrent.CompletableFuture";
+	public static final String COMPLETION_STAGE = "java.util.concurrent.CompletionStage";
+	public static final String STREAM = "java.util.stream.Stream";
+	public static final String COLLECTORS = "java.util.stream.Collectors";
+
+	public static final String NULLABLE = "jakarta.annotation.Nullable";
+	public static final String NONNULL = "jakarta.annotation.Nonnull";
+	public static final String NOT_NULL = "jakarta.validation.constraints.NotNull";
+	public static final String JETBRAINS_NULLABLE = "org.jetbrains.annotations.Nullable";
+	public static final String JSPECIFY_NULLABLE = "org.jspecify.annotations.Nullable";
+
+
+	public static final String SPRING_OBJECT_PROVIDER = "org.springframework.beans.factory.ObjectProvider";
+	public static final String SPRING_ENTITY_MANAGER_PROVIDER = SPRING_OBJECT_PROVIDER + "<" + ENTITY_MANAGER + ">";
+	public static final String SPRING_ENTITY_AGENT_PROVIDER = SPRING_OBJECT_PROVIDER + "<" + ENTITY_AGENT + ">";
+	public static final String SPRING_SESSION_PROVIDER = SPRING_OBJECT_PROVIDER + "<" + HIB_SESSION + ">";
+	public static final String SPRING_STATELESS_SESSION_PROVIDER = SPRING_OBJECT_PROVIDER + "<" + HIB_STATELESS_SESSION + ">";
+	public static final String SPRING_COMPONENT = "org.springframework.stereotype.Component";
+
+	public static final Map<String, String> COLLECTIONS = Map.of(
+			COLLECTION, COLLECTION_ATTRIBUTE,
+			SET, SET_ATTRIBUTE,
+			LIST, LIST_ATTRIBUTE,
+			MAP, MAP_ATTRIBUTE,
+			// Hibernate also supports the SortedSet and SortedMap interfaces
+			java.util.SortedSet.class.getName(), SET_ATTRIBUTE,
+			java.util.SortedMap.class.getName(), MAP_ATTRIBUTE
+	);
+
+	public static final Set<String> SESSION_TYPES =
+			Set.of(
+					ENTITY_MANAGER,
+					ENTITY_AGENT,
+					HIB_SESSION,
+					HIB_STATELESS_SESSION,
+					MUTINY_SESSION,
+					MUTINY_STATELESS_SESSION,
+					UNI_MUTINY_SESSION,
+					UNI_MUTINY_STATELESS_SESSION,
+					SPRING_ENTITY_MANAGER_PROVIDER,
+					SPRING_ENTITY_AGENT_PROVIDER,
+					SPRING_SESSION_PROVIDER,
+					SPRING_STATELESS_SESSION_PROVIDER
+			);
+
+	public static final List<String> BASIC_ARRAY_TYPES = List.of(
+			Character.class.getName(),
+			Byte.class.getName()
+	);
+
+	private Constants() {
+	}
+}

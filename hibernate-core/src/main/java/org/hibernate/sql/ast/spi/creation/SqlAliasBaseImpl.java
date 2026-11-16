@@ -1,0 +1,33 @@
+package org.hibernate.sql.ast.spi.creation;
+
+
+/**
+ * Standard SqlAliasBase impl
+ *
+ * @author Steve Ebersole
+ */
+public class SqlAliasBaseImpl implements SqlAliasBase {
+	private final String stem;
+	private int aliasCount;
+
+	public SqlAliasBaseImpl(String stem) {
+		this.stem = stem;
+	}
+
+	@Override
+	public String getAliasStem() {
+		return stem;
+	}
+
+	@Override
+	public String generateNewAlias() {
+		final String alias = stem + "_" + ( aliasCount++ );
+//		SqlTreeCreationLogger.LOGGER.tracef( "Created new SQL alias: %s", alias );
+		return alias;
+	}
+
+	@Override
+	public String toString() {
+		return "SqlAliasBase(" + stem + " : " + aliasCount + ")";
+	}
+}

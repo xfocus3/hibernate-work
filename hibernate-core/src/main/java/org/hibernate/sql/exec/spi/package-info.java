@@ -1,0 +1,24 @@
+/**
+ * SPI for execution of SQL statements via JDBC. The statement to execute is
+ * modeled by {@link org.hibernate.sql.exec.spi.JdbcOperation} and is
+ * executed via the corresponding executor -
+ * either {@linkplain org.hibernate.sql.exec.spi.JdbcSelectExecutor}
+ * or {@linkplain org.hibernate.sql.exec.spi.JdbcMutationExecutor}.
+ * Provider-owned SQL AST translators create query operations through
+ * {@link org.hibernate.sql.exec.spi.JdbcOperations}, which keeps the concrete
+ * operation implementations internal to Hibernate.
+ * The operation builders are stable SPI contracts; other execution contracts
+ * retain their individual {@link org.hibernate.Incubating} status.
+ * <p>
+ * For operations that return {@link java.sql.ResultSet}s, be sure to see
+ * {@link org.hibernate.sql.results} which provides support for processing results
+ * starting with {@link org.hibernate.sql.results.jdbc.spi.JdbcValuesMapping}.
+ * <p>
+ * Also provides support for pessimistic locking as part of
+ * {@linkplain org.hibernate.sql.exec.spi.JdbcSelect JDBC select} handling.  For details,
+ * see {@linkplain org.hibernate.sql.exec.internal.JdbcSelectWithActions},
+ * {@linkplain org.hibernate.sql.exec.spi.JdbcSelect#getLoadedValuesCollectorFactory()},
+ * {@linkplain org.hibernate.sql.exec.internal.lock.FollowOnLockingAction}
+ * and friends.
+ */
+package org.hibernate.sql.exec.spi;

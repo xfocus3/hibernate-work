@@ -1,0 +1,72 @@
+package org.hibernate.sql.results.graph.collection.internal;
+
+import org.hibernate.engine.spi.FetchOptions;
+import org.hibernate.metamodel.mapping.PluralAttributeMapping;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.results.graph.AssemblerCreationState;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.InitializerParent;
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.internal.log.LoggingHelper.toLoggableString;
+
+/**
+ * @author Andrea Boriero
+ */
+public class SelectEagerCollectionInitializer
+		extends AbstractNonJoinCollectionInitializer<AbstractCollectionInitializer.CollectionInitializerData> {
+
+	public SelectEagerCollectionInitializer(
+			NavigablePath fetchedPath,
+			PluralAttributeMapping fetchedMapping,
+			InitializerParent<?> parent,
+			@Nullable DomainResult<?> collectionKeyResult,
+			FetchOptions fetchOptions,
+			AssemblerCreationState creationState) {
+		super(
+				fetchedPath,
+				fetchedMapping,
+				parent,
+				collectionKeyResult,
+				false,
+				fetchOptions,
+				creationState
+		);
+	}
+
+	@Override
+	public void resolveInstance(CollectionInitializerData data) {
+		resolveInstance( data, true );
+	}
+
+	@Override
+	public void resolveInstance(@Nullable Object instance, CollectionInitializerData data) {
+		resolveInstance( instance, data, true );
+	}
+
+	@Override
+	public void initializeInstanceFromParent(Object parentInstance, CollectionInitializerData data) {
+		final Object instance = getInitializedPart().getValue( parentInstance );
+		if ( instance == null ) {
+			setMissing( data );
+		}
+		else {
+			final var collection = getCollection( data, instance );
+			data.setState( State.INITIALIZED );
+			data.setCollectionInstance( collection );
+			withFetchOptions(
+					data.getRowProcessingState().getSession(),
+					() -> {
+						collection.forceInitialization();
+						return null;
+					}
+			);
+		}
+	}
+
+	@Override
+	public String toString() {
+		return "SelectEagerCollectionInitializer(" + toLoggableString( getNavigablePath() ) + ")";
+	}
+}

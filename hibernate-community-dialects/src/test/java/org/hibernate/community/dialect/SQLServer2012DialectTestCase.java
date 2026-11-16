@@ -1,0 +1,80 @@
+package org.hibernate.community.dialect;
+
+import org.hibernate.dialect.DatabaseVersion;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.dialect.pagination.spi.PaginationRequest;
+import org.hibernate.query.spi.Limit;
+import org.hibernate.testing.orm.junit.BaseUnitTest;
+import org.hibernate.testing.orm.junit.JiraKey;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import java.util.Locale;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Tests the Limit/Offset handler for SQLServerDialect.
+ *
+ * @author Chris Cranford
+ */
+@BaseUnitTest
+public class SQLServer2012DialectTestCase {
+	private Dialect dialect;
+
+	@BeforeAll
+	public void setup() {
+		dialect = new SQLServerLegacyDialect( DatabaseVersion.make( 11 ) );
+	}
+
+	@AfterAll
+	public void tearDown() {
+		dialect = null;
+	}
+
+	@Test
+	@JiraKey(value = "HHH-8768")
+	public void testGetLimitStringMaxRowsOnly() {
+		final String input = "select distinct f1 as f53245 from table846752 order by f234, f67 desc";
+		assertThat( withLimit( input, toRowSelection( null, 10 ) ).toLowerCase( Locale.ROOT ) )
+				.isEqualTo( input + " offset 0 rows fetch first ? rows only" );
+	}
+
+	@Test
+	@JiraKey(value = "HHH-8768")
+	public void testGetLimitStringWithOffsetAndMaxRows() {
+		final String input = "select distinct f1 as f53245 from table846752 order by f234, f67 desc";
+		assertThat( withLimit( input, toRowSelection( 5, 25 ) ).toLowerCase( Locale.ROOT ) )
+				.isEqualTo( input + " offset ? rows fetch next ? rows only" );
+	}
+
+	@Test
+	@JiraKey(value = "HHH-8768")
+	public void testGetLimitStringMaxRowsOnlyNoOrderBy() {
+		final String input = "select f1 from table";
+		assertThat( withLimit( input, toRowSelection( null, 10 ) ).toLowerCase( Locale.ROOT ) )
+				.isEqualTo( "select f1 from table order by @@version offset 0 rows fetch first ? rows only" );
+	}
+
+	@Test
+	@JiraKey(value = "HHH-8768")
+	public void testGetLimitStringWithOffsetAndMaxRowsNoOrderBy() {
+		final String input = "select f1 from table";
+		assertThat( withLimit( input, toRowSelection( 5, 10 ) ).toLowerCase( Locale.ROOT ) )
+				.isEqualTo( "select f1 from table order by @@version offset ? rows fetch next ? rows only" );
+	}
+
+	private String withLimit(String sql, Limit limit) {
+		return dialect.getLimitHandler().processSql(
+				new PaginationRequest( sql, limit.getFirstRow(), limit.getMaxRows(), -1, null )
+		).sql();
+	}
+
+	private Limit toRowSelection(Integer firstRow, Integer maxRows) {
+		final Limit selection = new Limit();
+		selection.setFirstRow( firstRow );
+		selection.setMaxRows( maxRows );
+		return selection;
+	}
+}

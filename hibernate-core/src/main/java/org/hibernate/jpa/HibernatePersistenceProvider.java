@@ -1,0 +1,442 @@
+package org.hibernate.jpa;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.model.process.internal.EnhancementCandidates;
+import org.hibernate.SPI;
+import org.hibernate.Incubating;
+
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceConfiguration;
+import jakarta.persistence.PersistenceException;
+import jakarta.persistence.spi.ClassTransformer;
+import jakarta.persistence.spi.LoadState;
+import jakarta.persistence.spi.PersistenceProvider;
+import jakarta.persistence.spi.PersistenceUnitInfo;
+import jakarta.persistence.spi.ProviderUtil;
+import jakarta.annotation.Nullable;
+import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+import org.hibernate.bytecode.enhance.spi.EnhancementModel;
+import org.hibernate.bytecode.enhance.spi.EnhancementOptions;
+import org.hibernate.jpa.internal.enhance.PersistenceUnitEnhancementModel;
+import org.hibernate.jpa.internal.enhance.PersistenceUnitEnhancementState;
+import org.hibernate.bytecode.spi.BytecodeProvider;
+import org.hibernate.jpa.boot.internal.EntityManagerFactoryBuilderImpl;
+import org.hibernate.jpa.boot.spi.Bootstrap;
+import org.hibernate.jpa.boot.spi.EntityManagerFactoryBuilder;
+import org.hibernate.jpa.boot.spi.PersistenceConfigurationDescriptor;
+import org.hibernate.jpa.boot.spi.PersistenceUnitDescriptor;
+import org.hibernate.jpa.boot.spi.PersistenceXmlParser;
+import org.hibernate.jpa.internal.TransformerTracker;
+import org.hibernate.jpa.internal.TransformerTracker.TransformerKey;
+import org.hibernate.jpa.internal.enhance.EnhancingClassTransformerImpl;
+import org.hibernate.jpa.internal.enhance.ClientClassTransformer;
+import org.hibernate.jpa.internal.util.PersistenceUtilHelper;
+import org.hibernate.jpa.internal.util.PersistenceUtilHelper.MetadataCache;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.HashMap;
+
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.unmodifiableMap;
+import static org.hibernate.cfg.BytecodeSettings.BYTECODE_PROVIDER_INSTANCE;
+import static org.hibernate.cfg.BytecodeSettings.ENHANCER_ENABLE_ASSOCIATION_MANAGEMENT;
+import static org.hibernate.cfg.BytecodeSettings.ENHANCER_ENABLE_DIRTY_TRACKING;
+import static org.hibernate.cfg.BytecodeSettings.ENHANCER_ENABLE_LAZY_INITIALIZATION;
+import static org.hibernate.internal.log.DeprecationLogger.DEPRECATION_LOGGER;
+import static org.hibernate.jpa.boot.spi.ProviderChecker.isProvider;
+import static org.hibernate.jpa.internal.JpaLogger.JPA_LOGGER;
+
+/**
+ * The best-ever implementation of a JPA {@link PersistenceProvider}.
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ * @author Brett Meyer
+ */
+public class HibernatePersistenceProvider implements PersistenceProvider {
+	private final PersistenceUnitEnhancementState.Registry enhancementStates = new PersistenceUnitEnhancementState.Registry();
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @implSpec The values passed in the {@code map} override values found
+	 *           in {@code persistence.xml} according to the JPA specification.
+	 */
+	@Override
+	public EntityManagerFactory createEntityManagerFactory(String persistenceUnitName, Map<?,?> map) {
+		JPA_LOGGER.startingCreateEntityManagerFactory( persistenceUnitName );
+		final var builder = getEntityManagerFactoryBuilderOrNull( persistenceUnitName, map );
+		if ( builder == null ) {
+			JPA_LOGGER.couldNotObtainEmfBuilder("null");
+			return null;
+		}
+		else {
+			return builder.build();
+		}
+	}
+
+	protected EntityManagerFactoryBuilder getEntityManagerFactoryBuilderOrNull(
+			String persistenceUnitName, Map<?,?> properties) {
+		return getEntityManagerFactoryBuilderOrNull(
+				persistenceUnitName,
+				properties,
+				null,
+				null
+		);
+	}
+
+	private EntityManagerFactoryBuilder getEntityManagerFactoryBuilderOrNull(
+			String persistenceUnitName,
+			Map<?,?> properties,
+			@Nullable ClassLoader providedClassLoader,
+			@Nullable ClassLoaderService providedClassLoaderService) {
+		JPA_LOGGER.attemptingToObtainEmfBuilder( persistenceUnitName );
+		final var integration = wrap( properties );
+		final var units = locatePersistenceUnits( integration, providedClassLoader, providedClassLoaderService );
+		JPA_LOGGER.locatedAndParsedPersistenceUnits( units.size() );
+		if ( persistenceUnitName == null && units.size() > 1 ) {
+			// no persistence-unit name was specified, and we found multiple persistence-units
+			throw new PersistenceException( "No name provided and multiple persistence units found" );
+		}
+
+		for ( var persistenceUnit : units ) {
+			if ( JPA_LOGGER.isTraceEnabled() ) {
+				JPA_LOGGER.checkingPersistenceUnitName(
+						persistenceUnit.getName(),
+						persistenceUnit.getProviderClassName(),
+						persistenceUnitName
+				);
+			}
+
+			final boolean matches =
+					persistenceUnitName == null
+					|| persistenceUnit.getName().equals( persistenceUnitName );
+			if ( matches ) {
+				// See if we (Hibernate) are the persistence provider
+				if ( isProvider( persistenceUnit, properties ) ) {
+					return providedClassLoaderService == null
+							? getEntityManagerFactoryBuilder( persistenceUnit, integration, providedClassLoader )
+							: getEntityManagerFactoryBuilder( persistenceUnit, integration, providedClassLoaderService );
+				}
+				else {
+					JPA_LOGGER.excludingDueToProviderMismatch();
+				}
+
+			}
+			else {
+				JPA_LOGGER.excludingDueToNameMismatch();
+			}
+		}
+
+		JPA_LOGGER.foundNoMatchingPersistenceUnits();
+		return null;
+	}
+
+	protected static Map<?,?> wrap(Map<?,?> properties) {
+		return properties == null ? emptyMap() : unmodifiableMap( properties );
+	}
+
+	// Check before changing: may be overridden in Quarkus
+	protected Collection<PersistenceUnitDescriptor> locatePersistenceUnits(
+			Map<?, ?> integration,
+			ClassLoader providedClassLoader,
+			ClassLoaderService providedClassLoaderService) {
+		try {
+			final var parser =
+					PersistenceXmlParser.create( integration, providedClassLoader, providedClassLoaderService );
+			final var xmlUrls =
+					parser.getClassLoaderService()
+							.locateResources( "META-INF/persistence.xml" );
+			if ( xmlUrls.isEmpty() ) {
+				JPA_LOGGER.unableToFindPersistenceXmlInClasspath();
+				return List.of();
+			}
+			else {
+				return parser.parse( xmlUrls ).values();
+			}
+		}
+		catch (Exception e) {
+			JPA_LOGGER.unableToLocatePersistenceUnits( e );
+			throw new PersistenceException( "Unable to locate persistence units", e );
+		}
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @implSpec The values passed in the {@code map} override values found
+	 *           in {@link PersistenceUnitInfo#getProperties()} according to
+	 *           the JPA specification.
+	 */
+	@Override
+	public EntityManagerFactory createContainerEntityManagerFactory(PersistenceUnitInfo info, Map<?,?> map) {
+		JPA_LOGGER.startingCreateContainerEntityManagerFactory( info.getPersistenceUnitName() );
+		return getEntityManagerFactoryBuilder( info, map ).build();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @implSpec The values passed in the {@code map} override values found
+	 *           in {@link PersistenceUnitInfo#getProperties()} according to
+	 *           the JPA specification.
+	 */
+	@Override
+	public void generateSchema(PersistenceUnitInfo info, Map<?,?> map) {
+		JPA_LOGGER.startingGenerateSchemaForPuiName( info.getPersistenceUnitName() );
+		getEntityManagerFactoryBuilder( info, map ).generateSchema();
+	}
+
+	/**
+	 * {@inheritDoc}
+	 *
+	 * @implSpec The values passed in the {@code map} override values found
+	 *           in {@code persistence.xml} according to the JPA specification.
+	 */
+	@Override
+	public boolean generateSchema(String persistenceUnitName, Map<?,?> map) {
+		JPA_LOGGER.startingGenerateSchema( persistenceUnitName );
+		final var builder = getEntityManagerFactoryBuilderOrNull( persistenceUnitName, map );
+		if ( builder == null ) {
+			JPA_LOGGER.couldNotObtainEmfBuilder("false");
+			return false;
+		}
+		else {
+			builder.generateSchema();
+			return true;
+		}
+	}
+
+	@Override
+	public boolean generateSchema(PersistenceConfiguration persistenceConfiguration) {
+		JPA_LOGGER.startingGenerateSchema( persistenceConfiguration.name() );
+		final var builder = getEntityManagerFactoryBuilder(persistenceConfiguration);
+		builder.generateSchema();
+		return true;
+	}
+
+	private static Map<String, Object> settingsMap(Map<?, ?> integration) {
+		final Map<String, Object> result = new HashMap<>();
+		integration.forEach( (key, value) -> {
+			// ignore non-string keys
+			if (key instanceof String string) {
+				result.put( string, value );
+			}
+		} );
+		return result;
+	}
+
+	protected EntityManagerFactoryBuilder getEntityManagerFactoryBuilder(
+			PersistenceUnitInfo info, Map<?,?> integration) {
+		return Bootstrap.getEntityManagerFactoryBuilder( info, settingsMap( integration ) );
+	}
+
+	protected EntityManagerFactoryBuilder getEntityManagerFactoryBuilder(
+			PersistenceUnitDescriptor persistenceUnitDescriptor,
+			Map<?,?> integration,
+			ClassLoader providedClassLoader) {
+		return Bootstrap.getEntityManagerFactoryBuilder( persistenceUnitDescriptor,
+				settingsMap( integration ), providedClassLoader );
+	}
+
+	protected EntityManagerFactoryBuilder getEntityManagerFactoryBuilder(
+			PersistenceUnitDescriptor persistenceUnitDescriptor,
+			Map<?,?> integration,
+			ClassLoaderService providedClassLoaderService) {
+		return Bootstrap.getEntityManagerFactoryBuilder( persistenceUnitDescriptor,
+				settingsMap( integration ), providedClassLoaderService );
+	}
+
+	@Override
+	public EntityManagerFactory createEntityManagerFactory(PersistenceConfiguration configuration) {
+		return getEntityManagerFactoryBuilder( configuration ).build();
+	}
+
+	private EntityManagerFactoryBuilder getEntityManagerFactoryBuilder(PersistenceConfiguration configuration) {
+		if ( configuration instanceof HibernatePersistenceConfiguration hibernatePersistenceConfiguration ) {
+			return new EntityManagerFactoryBuilderImpl( hibernatePersistenceConfiguration );
+		}
+		else {
+			return getEntityManagerFactoryBuilder(
+					new PersistenceConfigurationDescriptor( configuration ),
+					emptyMap(),
+					HibernatePersistenceProvider.class.getClassLoader()
+			);
+		}
+	}
+
+	@Override
+	public ProviderUtil getProviderUtil() {
+		return ProviderUtilImpl.INSTANCE;
+	}
+
+	@Override
+	@Nonnull
+	public ClassTransformer getClassTransformer(
+			@Nonnull PersistenceUnitInfo persistenceUnit,
+			@Nullable Map<?, ?> integrationSettings) {
+		EnhancementCandidates.forContainer( persistenceUnit );
+		integrationSettings = integrationSettings == null ? Map.of() : integrationSettings;
+		var transformerKey = TransformerKey.from( persistenceUnit );
+		if ( !TransformerTracker.canSupplyTransformer( transformerKey ) ) {
+			if ( JPA_LOGGER.isTraceEnabled() ) {
+				JPA_LOGGER.duplicatedRequestForClassTransformer( transformerKey.puName(), transformerKey.loaderName() );
+			}
+			return null;
+		}
+
+		if ( JPA_LOGGER.isTraceEnabled() ) {
+			JPA_LOGGER.requestForClassTransformer( transformerKey.puName(), transformerKey.loaderName() );
+		}
+
+		//noinspection removal
+		final boolean dirtyTrackingEnabled = resolveEnhancementProperty(
+				ENHANCER_ENABLE_DIRTY_TRACKING,
+				integrationSettings,
+				persistenceUnit,
+				true
+		);
+		//noinspection removal
+		final boolean lazyInitializationEnabled = resolveEnhancementProperty(
+				ENHANCER_ENABLE_LAZY_INITIALIZATION,
+				integrationSettings,
+				persistenceUnit,
+				true
+		);
+		final boolean associationManagementEnabled = resolveEnhancementProperty(
+				ENHANCER_ENABLE_ASSOCIATION_MANAGEMENT,
+				integrationSettings,
+				persistenceUnit,
+				false
+		);
+
+		if ( !lazyInitializationEnabled ) {
+			//noinspection removal
+			DEPRECATION_LOGGER.deprecatedSettingForRemoval( ENHANCER_ENABLE_LAZY_INITIALIZATION, "true" );
+		}
+		if ( !dirtyTrackingEnabled ) {
+			//noinspection removal
+			DEPRECATION_LOGGER.deprecatedSettingForRemoval( ENHANCER_ENABLE_DIRTY_TRACKING, "true" );
+		}
+
+		if ( dirtyTrackingEnabled || lazyInitializationEnabled || associationManagementEnabled ) {
+			final var classLoader = persistenceUnit.getNewTempClassLoader();
+			//noinspection ConstantValue
+			if ( classLoader == null ) {
+				throw new PersistenceException( String.format( Locale.ROOT,
+						"[persistence unit: %s] Enhancement requires a temp class loader, but none was given",
+						persistenceUnit.getPersistenceUnitName()
+				) );
+			}
+
+			final var state = enhancementStates.get(persistenceUnit, () -> createEnhancementModel(persistenceUnit));
+			final var provider = state.resolveProvider(getExplicitBytecodeProvider(integrationSettings, persistenceUnit));
+			state.discoverTemporaryTypes(classLoader, provider);
+			final var classTransformer = new EnhancingClassTransformerImpl(state,
+					EnhancementOptions.of(dirtyTrackingEnabled, lazyInitializationEnabled, associationManagementEnabled),
+					provider);
+
+			return classTransformer;
+		}
+
+		return null;
+	}
+
+	/// Returns an optional client-code transformer for a container to install.
+	/// Targets must already have compatible managed enhancement from tooling, or
+	/// the container must arrange it before defining them. When both transformations
+	/// apply to a class, managed enhancement precedes client enhancement; a client
+	/// may still be transformed before another class scheduled as its target.
+	/// Runtime managed-feature settings do not disable this transformer, since
+	/// tooling may already have enhanced its targets. Requesting this transformer
+	/// does not register or consume the managed-class transformer.
+	///
+	/// @since 8.1
+	@SPI
+	@Incubating(since = "8.1")
+	@Nonnull
+	public ClassTransformer getClientClassTransformer(
+			@Nonnull PersistenceUnitInfo info,
+			@Nullable Map<?, ?> properties) {
+		final var settings = properties == null ? Map.of() : properties;
+		final var temporaryLoader = info.getNewTempClassLoader();
+		//noinspection ConstantValue
+		if ( temporaryLoader == null ) {
+			throw new PersistenceException( "[persistence unit: " + info.getPersistenceUnitName()
+					+ "] Client enhancement requires a temp class loader, but none was given" );
+		}
+		final var state = enhancementStates.get(info, () -> createEnhancementModel(info));
+		final var provider = state.resolveProvider(getExplicitBytecodeProvider(settings, info));
+		state.discoverTemporaryTypes(temporaryLoader, provider);
+		return new ClientClassTransformer(state, provider);
+	}
+
+	private boolean resolveEnhancementProperty(
+			String propertyName,
+			Map<?, ?> integrationSettings,
+			PersistenceUnitInfo persistenceUnitInfo,
+			boolean defaultValue) {
+		// prefer integration settings
+		var integrationSetting = integrationSettings.get( propertyName );
+		if ( integrationSetting != null ) {
+			return Boolean.parseBoolean( integrationSetting.toString() );
+		}
+
+		// check the persistence unit config
+		var unitSetting = persistenceUnitInfo.getProperties().get( propertyName );
+		if ( unitSetting != null ) {
+			return Boolean.parseBoolean( unitSetting.toString() );
+		}
+
+		return defaultValue;
+	}
+
+	@SPI
+	protected EnhancementModel createEnhancementModel(PersistenceUnitInfo unit) {
+		return new PersistenceUnitEnhancementModel(EnhancementCandidates.forContainer(unit));
+	}
+
+	private BytecodeProvider getExplicitBytecodeProvider(
+			Map<?, ?> integrationSettings,
+			PersistenceUnitInfo persistenceUnit) {
+		// again, prefer integration settings
+		var setting = integrationSettings.get( BYTECODE_PROVIDER_INSTANCE );
+		if ( setting == null ) {
+			setting = persistenceUnit.getProperties().get( BYTECODE_PROVIDER_INSTANCE );
+		}
+
+		if ( setting != null && ! (setting instanceof BytecodeProvider) ) {
+			throw new PersistenceException( String.format( Locale.ROOT,
+					"Property %s was set to `%s`, which is not compatible with the expected type %s",
+					BYTECODE_PROVIDER_INSTANCE,
+					setting,
+					BytecodeProvider.class.getName()
+			) );
+		}
+
+		return (BytecodeProvider) setting;
+	}
+
+
+	private static class ProviderUtilImpl implements ProviderUtil {
+		public static final ProviderUtilImpl INSTANCE = new ProviderUtilImpl();
+
+		private final MetadataCache cache = new MetadataCache();
+
+		@Override
+		public LoadState isLoadedWithoutReference(Object proxy, String property) {
+			return PersistenceUtilHelper.isLoadedWithoutReference( proxy, property, cache );
+		}
+		@Override
+		public LoadState isLoadedWithReference(Object proxy, String property) {
+			return PersistenceUtilHelper.isLoadedWithReference( proxy, property, cache );
+		}
+		@Override
+		public LoadState isLoaded(Object object) {
+			return PersistenceUtilHelper.getLoadState( object );
+		}
+	}
+}

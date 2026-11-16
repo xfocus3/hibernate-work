@@ -1,0 +1,282 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.PessimisticLockScope;
+import org.hibernate.Hibernate;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.ObjectDeletedException;
+import org.hibernate.engine.internal.CacheHelper.CacheLock;
+import org.hibernate.engine.spi.EntityEntry;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.engine.spi.SubselectFetch;
+import org.hibernate.event.spi.EventSource;
+import org.hibernate.internal.OptimisticLockHelper;
+import org.hibernate.internal.build.AllowReflection;
+import org.hibernate.metamodel.mapping.BasicValuedModelPart;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingsImpl;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+import org.hibernate.sql.results.internal.RowTransformerStandardImpl;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import java.util.List;
+
+import static java.lang.System.arraycopy;
+import static java.lang.reflect.Array.newInstance;
+import static org.hibernate.engine.internal.CacheHelper.writingToCache;
+import static org.hibernate.loader.LoaderLogging.LOADER_LOGGER;
+import static org.hibernate.pretty.MessageHelper.infoString;
+
+/**
+ * @author Steve Ebersole
+ */
+public class LoaderHelper {
+
+	/**
+	 * Ensure the {@linkplain LockMode} associated with the entity in relation to a
+	 * persistence context is {@linkplain LockMode#greaterThan great or equal} to the
+	 * requested mode. An extended pessimistic scope also requires acquisition when
+	 * the existing mode is equal or stronger, without reducing that mode.
+	 *
+	 * @param object The entity for which to upgrade the lock.
+	 * @param entry The entity's {@link EntityEntry} instance.
+	 * @param lockOptions Contains the requested lock mode.
+	 * @param session The session which is the source of the event being processed.
+	 */
+	public static void upgradeLock(
+			@Nonnull Object object,
+			@Nonnull EntityEntry entry,
+			@Nonnull LockOptions lockOptions,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var requestedLockMode = lockOptions.getLockMode();
+		final boolean modeUpgrade = requestedLockMode.greaterThan( entry.getLockMode() );
+		final boolean scopeAcquisition = requestedLockMode.isPessimistic()
+				&& lockOptions.getLockScope() == PessimisticLockScope.EXTENDED;
+		if ( modeUpgrade || scopeAcquisition ) {
+			// Repeating force increment for scope alone must not increment the version again.
+			final var acquisitionOptions = !modeUpgrade && requestedLockMode == LockMode.PESSIMISTIC_FORCE_INCREMENT
+					? lockOptions.makeCopy().setLockMode( LockMode.PESSIMISTIC_WRITE )
+					: lockOptions;
+			final var persister = entry.getPersister();
+
+			if ( entry.getStatus().isDeletedOrGone()) {
+				throw new ObjectDeletedException(
+						"attempted to lock a deleted instance",
+						entry.getId(),
+						persister.getEntityName()
+				);
+			}
+
+			if ( LOADER_LOGGER.isTraceEnabled() ) {
+				LOADER_LOGGER.tracef(
+						"Locking %s with id '%s' in mode %s",
+						persister.getEntityName(),
+						entry.getId(),
+						acquisitionOptions.getLockMode()
+				);
+			}
+
+			CacheLock cacheLock = null;
+			try {
+				final EntityEntry entryToLock = entry;
+				cacheLock = writingToCache( persister, cache -> {
+					final Object cacheKey =
+							cache.generateCacheKey( entryToLock.getId(), persister,
+									session.getFactory(), session.getTenantIdentifier() );
+					final var lock = cache.lockItem( session, cacheKey, entryToLock.getVersion() );
+					return new CacheLock( cache, cacheKey, lock );
+				}, null );
+
+				if ( persister.isVersioned() && entry.getVersion() == null ) {
+					// This should be an empty entry created for an uninitialized bytecode proxy
+					if ( !Hibernate.isPropertyInitialized( object, persister.getVersionMapping().getPartName() ) ) {
+						Hibernate.initialize( object );
+						entry = session.getPersistenceContextInternal().getEntry( object );
+						assert entry.getVersion() != null;
+					}
+					else {
+						throw new IllegalStateException( String.format(
+								"Trying to lock versioned entity %s but found null version",
+								infoString( persister, entry.getId() )
+						) );
+					}
+				}
+
+				if ( modeUpgrade && persister.isVersioned() && requestedLockMode == LockMode.PESSIMISTIC_FORCE_INCREMENT ) {
+					if ( scopeAcquisition && entry.isExistsInDatabase() ) {
+						// Complete scope acquisition before changing any version state.
+						acquireLock( object, entry, lockOptions.makeCopy().setLockMode( LockMode.PESSIMISTIC_WRITE ), session );
+					}
+					OptimisticLockHelper.forceVersionIncrement( object, entry, session );
+				}
+				else if ( entry.isExistsInDatabase() ) {
+					acquireLock( object, entry, acquisitionOptions, session );
+				}
+				else {
+					// should only be possible for a stateful session
+					if ( session instanceof EventSource eventSource ) {
+						eventSource.forceFlush( entry );
+					}
+				}
+				if ( modeUpgrade ) {
+					entry.setLockMode( requestedLockMode );
+				}
+			}
+			finally {
+				// the database now holds a lock + the object is flushed from the cache,
+				// so release the soft lock
+				if ( cacheLock != null ) {
+					cacheLock.cache().unlockItem( session, cacheLock.cacheKey(), cacheLock.lock() );
+				}
+			}
+		}
+	}
+
+	private static void acquireLock(
+			Object object,
+			EntityEntry entry,
+			LockOptions lockOptions,
+			SharedSessionContractImplementor session) {
+		final var persister = entry.getPersister();
+		final var eventMonitor = session.getEventMonitor();
+		final var entityLockEvent = eventMonitor.beginEntityLockEvent();
+		boolean success = false;
+		try {
+			persister.lock( entry.getId(), entry.getVersion(), object, lockOptions, session );
+			success = true;
+		}
+		finally {
+			eventMonitor.completeEntityLockEvent( entityLockEvent, entry.getId(),
+					persister.getEntityName(), lockOptions.getLockMode(), success, session );
+		}
+	}
+
+	/**
+	 * Determine if the influencers associated with the given Session indicate read-only
+	 */
+	@Nullable
+	public static Boolean getReadOnlyFromLoadQueryInfluencers(@Nonnull SharedSessionContractImplementor session) {
+		return getReadOnlyFromLoadQueryInfluencers( session.getLoadQueryInfluencers() );
+	}
+
+	/**
+	 * Determine if given influencers indicate read-only
+	 */
+	@Nullable
+	public static Boolean getReadOnlyFromLoadQueryInfluencers(@Nullable LoadQueryInfluencers influencers) {
+		return influencers == null ? null : influencers.getReadOnly();
+	}
+
+	/**
+	 * Normalize an array of keys (primary, foreign or natural).
+	 * <p>
+	 * If the array is already typed as the key type, {@code keys} is simply returned.
+	 * <p>
+	 * Otherwise, a new typed array is created and the contents copied from {@code keys} to this new array.  If
+	 * key {@linkplain org.hibernate.cfg.AvailableSettings#JPA_LOAD_BY_ID_COMPLIANCE coercion} is enabled, the
+	 * values will be coerced to the key type.
+	 *
+	 * @param <K> The key type
+	 * @param keys The keys to normalize
+	 * @param keyPart The ModelPart describing the key
+	 */
+	@Nonnull
+	public static <K> K[] normalizeKeys(
+			@Nonnull K[] keys,
+			@Nonnull BasicValuedModelPart keyPart,
+			@Nonnull SessionFactoryImplementor sessionFactory) {
+		assert keys.getClass().isArray();
+
+		//noinspection unchecked
+		final var keyJavaType = (JavaType<K>) keyPart.getJavaType();
+		final var keyClass = keyJavaType.getJavaTypeClass();
+
+		if ( keys.getClass().getComponentType().equals( keyClass ) ) {
+			return keys;
+		}
+
+		final K[] typedArray = createTypedArray( keyClass, keys.length );
+		final boolean coerce =
+				!sessionFactory.getSessionFactoryOptions().getJpaCompliance()
+						.isLoadByIdComplianceEnabled();
+		if ( !coerce ) {
+			arraycopy( keys, 0, typedArray, 0, keys.length );
+		}
+		else {
+			for ( int i = 0; i < keys.length; i++ ) {
+				typedArray[i] = keyJavaType.cast( keyJavaType.coerce( keys[i] ) );
+			}
+		}
+		return typedArray;
+	}
+
+	/**
+	 * Creates a typed array, as opposed to a generic {@code Object[]} that holds the typed values
+	 *
+	 * @param elementClass The type of the array elements.  See {@link Class#getComponentType()}
+	 * @param length The length to which the array should be created.  This is usually zero for Hibernate uses
+	 */
+	@Nonnull
+	@AllowReflection
+	public static <X> X[] createTypedArray(@Nonnull Class<X> elementClass, @SuppressWarnings("SameParameterValue") int length) {
+		//noinspection unchecked
+		return (X[]) newInstance( elementClass, length );
+	}
+
+	/**
+	 * Load one or more instances of a model part (an entity or collection)
+	 * based on a SQL ARRAY parameter to specify the keys (as opposed to the
+	 * more traditional SQL IN predicate approach).
+	 *
+	 * @param <R> The type of the model part to load
+	 * @param <K> The type of the keys
+	 */
+	@Nonnull
+	public static <R,K> List<R> loadByArrayParameter(
+			@Nonnull K[] idsToInitialize,
+			@Nonnull SelectStatement sqlAst,
+			@Nonnull JdbcSelect jdbcOperation,
+			@Nonnull JdbcParameter jdbcParameter,
+			@Nonnull JdbcMapping arrayJdbcMapping,
+			@Nullable Object entityId,
+			@Nullable Object entityInstance,
+			@Nullable EntityMappingType rootEntityDescriptor,
+			@Nonnull LockOptions lockOptions,
+			@Nullable Boolean readOnly,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var bindings = new JdbcParameterBindingsImpl( 1);
+		bindings.addBinding( jdbcParameter, new JdbcParameterBindingImpl( arrayJdbcMapping, idsToInitialize ) );
+		return session.getJdbcServices().getJdbcSelectExecutor().list(
+				jdbcOperation,
+				bindings,
+				new SingleIdExecutionContext(
+						entityId,
+						entityInstance,
+						rootEntityDescriptor,
+						readOnly,
+						lockOptions,
+						SubselectFetch.createRegistrationHandler(
+								session.getPersistenceContext().getBatchFetchQueue(),
+								sqlAst,
+								JdbcParametersList.singleton( jdbcParameter ),
+								bindings
+						),
+						session
+				),
+				RowTransformerStandardImpl.instance(),
+				null,
+				ListResultsConsumer.UniqueSemantic.FILTER,
+				idsToInitialize.length
+		);
+	}
+}

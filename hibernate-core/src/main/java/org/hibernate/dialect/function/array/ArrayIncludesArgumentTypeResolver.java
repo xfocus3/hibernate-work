@@ -1,0 +1,37 @@
+package org.hibernate.dialect.function.array;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.sqm.produce.function.FunctionArgumentTypeResolver;
+import org.hibernate.query.sqm.produce.function.internal.AbstractFunctionArgumentTypeResolver;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.query.sqm.tree.spi.expression.SqmExpression;
+
+import java.util.List;
+
+/**
+ * A {@link FunctionArgumentTypeResolver} that resolves the argument types for the {@code array_includes} function.
+ */
+public class ArrayIncludesArgumentTypeResolver implements AbstractFunctionArgumentTypeResolver {
+
+	public static final FunctionArgumentTypeResolver INSTANCE = new ArrayIncludesArgumentTypeResolver();
+
+	@Override
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	public @Nullable MappingModelExpressible<?> resolveFunctionArgumentType(List<? extends SqmTypedNode<?>> arguments, int argumentIndex, SqmToSqlAstConverter converter) {
+		if ( argumentIndex == 0 ) {
+			final SqmTypedNode<?> node = arguments.get( 1 );
+			if ( node instanceof SqmExpression<?> sqmExpression ) {
+				return converter.determineValueMapping( sqmExpression );
+			}
+		}
+		else if ( argumentIndex == 1 ) {
+			final SqmTypedNode<?> node = arguments.get( 0 );
+			if ( node instanceof SqmExpression<?> sqmExpression ) {
+				return converter.determineValueMapping( sqmExpression );
+			}
+		}
+		return null;
+	}
+}

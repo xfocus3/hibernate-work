@@ -1,0 +1,23 @@
+package org.hibernate.dialect;
+
+
+
+import org.hibernate.engine.jdbc.dialect.spi.DialectResolutionInfo;
+
+/**
+ * A {@linkplain Dialect SQL dialect} for Azure SQL Server.
+ *
+ * @deprecated Use {@link SQLServerDialect} instead.
+ */
+@Deprecated(forRemoval = true, since = "7.2")
+public class AzureSQLServerDialect extends SQLServerDialect {
+
+	public AzureSQLServerDialect() {
+		// Azure SQL Server always is the latest version, so default to a high number
+		super( DatabaseVersion.make( Integer.MAX_VALUE ) );
+	}
+
+	public AzureSQLServerDialect(DialectResolutionInfo info) {
+		this();
+	}
+}

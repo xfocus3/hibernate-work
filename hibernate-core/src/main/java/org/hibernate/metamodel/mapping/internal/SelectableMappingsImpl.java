@@ -1,0 +1,112 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.mapping.Value;
+import org.hibernate.metamodel.mapping.EmbeddableMappingType;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SelectableMappings;
+import org.hibernate.metamodel.mapping.SelectablePath;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.Type;
+import org.hibernate.type.MappingContext;
+
+import static org.hibernate.internal.util.collections.CollectionHelper.arrayList;
+
+/**
+ * @author Christian Beikov
+ */
+public class SelectableMappingsImpl implements SelectableMappings {
+
+	private final SelectableMapping[] selectableMappings;
+
+	public SelectableMappingsImpl(SelectableMapping[] selectableMappings) {
+		this.selectableMappings = selectableMappings;
+	}
+
+	private static void resolveJdbcMappings(List<JdbcMapping> jdbcMappings, MappingContext mapping, Type valueType) {
+		final var keyType =
+				valueType instanceof EntityType entityType
+						? entityType.getIdentifierOrUniqueKeyType( mapping )
+						: valueType;
+		if ( keyType instanceof CompositeType compositeType ) {
+			for ( var subtype : compositeType.getSubtypes() ) {
+				resolveJdbcMappings( jdbcMappings, mapping, subtype );
+			}
+		}
+		else {
+			jdbcMappings.add( (JdbcMapping) keyType );
+		}
+	}
+
+	public static SelectableMappings from(
+			String containingTableExpression,
+			Value value,
+			int[] propertyOrder,
+			@Nullable String propertyPath,
+			@Nullable SelectablePath parentSelectablePath,
+			boolean[] insertable,
+			boolean[] updateable,
+			RuntimeModelCreationContext creationContext) {
+		final List<JdbcMapping> jdbcMappings = new ArrayList<>();
+		resolveJdbcMappings( jdbcMappings, creationContext.getMetadata(), value.getType() );
+
+		final var selectables = value.getVirtualSelectables();
+		final var selectableMappings = new SelectableMapping[jdbcMappings.size()];
+		for ( int i = 0; i < selectables.size(); i++ ) {
+			selectableMappings[propertyOrder[i]] = SelectableMappingImpl.from(
+					containingTableExpression,
+					selectables.get( i ),
+					selectables.get( i ).isFormula() ? (propertyPath + "_" + i) : null,
+					parentSelectablePath,
+					jdbcMappings.get( propertyOrder[i] ),
+					i < insertable.length && insertable[i],
+					i < updateable.length && updateable[i],
+					false,
+					false,
+					creationContext
+			);
+		}
+
+		return new SelectableMappingsImpl( selectableMappings );
+	}
+
+	public static SelectableMappings from(EmbeddableMappingType embeddableMappingType) {
+		final int propertySpan = embeddableMappingType.getNumberOfAttributeMappings();
+		final List<SelectableMapping> selectableMappings = arrayList( propertySpan );
+		embeddableMappingType.forEachAttributeMapping(
+				(index, attributeMapping) -> attributeMapping.forEachSelectable(
+						(columnIndex, selection) -> selectableMappings.add( selection )
+				)
+		);
+		return new SelectableMappingsImpl( selectableMappings.toArray( new SelectableMapping[0] ) );
+	}
+
+	@Nonnull
+	@Override
+	public SelectableMapping getSelectable(int columnIndex) {
+		return selectableMappings[columnIndex];
+	}
+
+	@Override
+	public int getJdbcTypeCount() {
+		return selectableMappings.length;
+	}
+
+	@Override
+	public int forEachSelectable(final int offset, @Nonnull final SelectableConsumer consumer) {
+		for ( int i = 0; i < selectableMappings.length; i++ ) {
+			consumer.accept( offset + i, selectableMappings[i] );
+		}
+		return selectableMappings.length;
+	}
+
+}

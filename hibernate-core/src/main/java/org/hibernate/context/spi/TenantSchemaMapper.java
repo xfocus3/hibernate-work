@@ -1,0 +1,34 @@
+package org.hibernate.context.spi;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.Incubating;
+
+/**
+ * Supplies the name of a database schema for a given tenant identifier when
+ * {@linkplain org.hibernate.cfg.MultiTenancySettings#MULTI_TENANT_SCHEMA_MAPPER
+ * schema-based multitenancy} is enabled.
+ *
+ * @param <T> The type of the tenant id
+ *
+ * @see org.hibernate.cfg.MultiTenancySettings#MULTI_TENANT_SCHEMA_MAPPER
+ *
+ * @since 7.1
+ *
+ * @author Gavin King
+ */
+@Incubating(since = "7.1")
+public interface TenantSchemaMapper<T> {
+	/**
+	 * The name of the database schema for data belonging to the tenant with the
+	 * given identifier.
+	 * <p>
+	 * Called when {@value org.hibernate.cfg.MultiTenancySettings#MULTI_TENANT_SCHEMA_MAPPER}
+	 * is enabled.
+	 *
+	 * @param tenantIdentifier The tenant identifier
+	 * @return The name of the database schema belonging to that tenant
+	 *
+	 * @see org.hibernate.cfg.MultiTenancySettings#MULTI_TENANT_SCHEMA_MAPPER
+	 */
+	@Nonnull String schemaName(@Nonnull T tenantIdentifier);
+}

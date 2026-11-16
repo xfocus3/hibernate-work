@@ -1,0 +1,23 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.QueryException;
+
+/**
+ * Occurs when a named query is requested, and there is no known
+ * HQL or native SQL query registered under the given name.
+ *
+ * @author Steve Ebersole
+ *
+ * @see org.hibernate.query.named.spi.NamedObjectRepository
+ * @see jakarta.persistence.NamedQuery
+ * @see jakarta.persistence.NamedNativeQuery
+ * @see org.hibernate.annotations.NamedQuery
+ * @see org.hibernate.annotations.NamedNativeQuery
+ */
+public class UnknownNamedQueryException extends QueryException {
+	public UnknownNamedQueryException(@Nonnull String queryName) {
+		super( "No query named '" + queryName + "'", (String) null );
+	}
+}

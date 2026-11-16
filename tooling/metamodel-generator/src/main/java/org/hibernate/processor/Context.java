@@ -1,0 +1,697 @@
+package org.hibernate.processor;
+
+import java.lang.reflect.InvocationTargetException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+
+import org.hibernate.dialect.DatabaseVersion;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.engine.jdbc.dialect.spi.DialectResolutionInfo;
+import org.hibernate.internal.util.StringHelper;
+import org.hibernate.processor.spi.HibernateProcessorExtension;
+
+import javax.annotation.processing.ProcessingEnvironment;
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.element.AnnotationValue;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.util.Elements;
+import javax.lang.model.util.Types;
+import javax.tools.Diagnostic;
+
+import org.hibernate.processor.model.Metamodel;
+import org.hibernate.processor.util.AccessTypeInformation;
+
+import jakarta.persistence.AccessType;
+import jakarta.annotation.Nullable;
+
+import static java.lang.Boolean.parseBoolean;
+import static java.util.Collections.emptyList;
+import static org.hibernate.internal.util.collections.ArrayHelper.EMPTY_STRING_ARRAY;
+import static org.hibernate.processor.ClassWriter.getFullyQualifiedClassName;
+
+/**
+ * @author Max Andersen
+ * @author Hardy Ferentschik
+ * @author Emmanuel Bernard
+ */
+public final class Context {
+	private static final String DEFAULT_PERSISTENCE_XML_LOCATION = "/META-INF/persistence.xml";
+
+	/**
+	 * Used for keeping track of parsed entities and mapped super classes (XML + annotations).
+	 */
+	private final Map<String, Metamodel> metaEntities = new HashMap<>();
+
+	/**
+	 * Used for keeping track of parsed embeddable entities. These entities have to be kept separate since
+	 * they are lazily initialized.
+	 */
+	private final Map<String, Metamodel> metaEmbeddables = new HashMap<>();
+
+	/**
+	 * Used for keeping track of parsed entities and mapped super classes (XML + annotations).
+	 */
+	private final Map<String, Metamodel> dataMetaEntities = new HashMap<>();
+
+	/**
+	 * Used for keeping track of parsed embeddable entities. These entities have to be kept separate since
+	 * they are lazily initialized.
+	 */
+	private final Map<String, Metamodel> dataMetaEmbeddables = new HashMap<>();
+
+	private final Map<String, Metamodel> metaAuxiliaries = new HashMap<>();
+
+	private final Map<String, AccessTypeInformation> accessTypeInformation = new HashMap<>();
+
+	private final Set<CharSequence> elementsToRedo = new HashSet<>();
+
+	private final ProcessingEnvironment processingEnvironment;
+	private final boolean logDebug;
+	private final boolean lazyXmlParsing;
+	private final boolean allowDtdAndExternalEntities;
+	private final String persistenceXmlLocation;
+	private final List<String> ormXmlFiles;
+	private final @Nullable Dialect defaultDialect;
+
+	/**
+	 * Whether all mapping files are xml-mapping-metadata-complete. In this case no annotation processing will take
+	 * place.
+	 */
+	private @Nullable Boolean fullyXmlConfigured;
+	private boolean addInjectAnnotation = false;
+	private boolean cdiAvailable = false;
+	private boolean addComponentAnnotation = false;
+	private boolean addNonnullAnnotation = false;
+	private boolean addGeneratedAnnotation = true;
+	private boolean addGenerationDate;
+	private @Nullable String[] suppressedWarnings;
+	private boolean addTransactionScopedAnnotation;
+	private @Nullable AccessType persistenceUnitDefaultAccessType;
+	private boolean generateJakartaDataStaticMetamodel;
+	private boolean jakartaDataSortCompliance;
+	private boolean propagateSecurityAnnotations = true;
+	private boolean springInjection;
+	private boolean dataEventPackageAvailable;
+
+	// keep track of all classes for which model have been generated
+	private final Set<String> generatedClassNames = new HashSet<>();
+
+	// keep track of which named queries have been checked
+	private final Set<String> checkedNamedQueries = new HashSet<>();
+
+	private HibernateProcessorExtension extension;
+
+	private String[] includes = {"*"};
+	private String[] excludes = {};
+
+	private boolean indexing = true;
+
+	private final Map<String, String> entityNameMappings = new HashMap<>();
+	private final Map<String, Set<String>> enumTypesByValue = new HashMap<>();
+
+	public Context(ProcessingEnvironment processingEnvironment) {
+		this.processingEnvironment = processingEnvironment;
+
+		final var options = processingEnvironment.getOptions();
+
+		var persistenceXmlOption = options.get( HibernateProcessor.PERSISTENCE_XML_OPTION );
+		if ( persistenceXmlOption != null ) {
+			if ( !persistenceXmlOption.startsWith("/") ) {
+				persistenceXmlOption = "/" + persistenceXmlOption;
+			}
+			persistenceXmlLocation = persistenceXmlOption;
+		}
+		else {
+			persistenceXmlLocation = DEFAULT_PERSISTENCE_XML_LOCATION;
+		}
+
+		var ormXmlOption = options.get( HibernateProcessor.ORM_XML_OPTION );
+		if ( ormXmlOption != null ) {
+			ormXmlFiles = new ArrayList<>();
+			for ( var ormFile : ormXmlOption.split( ",\\s*" ) ) {
+				if ( !ormFile.startsWith("/") ) {
+					ormFile = "/" + ormFile;
+				}
+				ormXmlFiles.add( ormFile );
+			}
+		}
+		else {
+			ormXmlFiles = emptyList();
+		}
+
+		final String dialectClassName = options.get( HibernateProcessor.DIALECT_OPTION );
+		if ( dialectClassName != null ) {
+			final String databaseVersion = options.get( HibernateProcessor.DIALECT_DATABASE_VERSION_OPTION );
+			defaultDialect = constructDialect( dialectClassName, databaseVersion );
+		}
+		else {
+			defaultDialect = null;
+		}
+
+		lazyXmlParsing = parseBoolean( options.get( HibernateProcessor.LAZY_XML_PARSING ) );
+		logDebug = parseBoolean( options.get( HibernateProcessor.DEBUG_OPTION ) );
+		allowDtdAndExternalEntities = parseBoolean( options.get( HibernateProcessor.ALLOW_DTD_AND_EXTERNAL_ENTITIES ) );
+	}
+
+	public ProcessingEnvironment getProcessingEnvironment() {
+		return processingEnvironment;
+	}
+
+	public boolean generateJakartaDataStaticMetamodel() {
+		return generateJakartaDataStaticMetamodel;
+	}
+
+	public void setGenerateJakartaDataStaticMetamodel(boolean generateJakartaDataStaticMetamodel) {
+		this.generateJakartaDataStaticMetamodel = generateJakartaDataStaticMetamodel;
+	}
+
+	public boolean getJakartaDataSortCompliance() {
+		return jakartaDataSortCompliance;
+	}
+
+	public void setJakartaDataSortCompliance(boolean jakartaDataSortCompliance) {
+		this.jakartaDataSortCompliance = jakartaDataSortCompliance;
+	}
+
+	public boolean propagateSecurityAnnotations() {
+		return propagateSecurityAnnotations;
+	}
+
+	public void setPropagateSecurityAnnotations(boolean propagateSecurityAnnotations) {
+		this.propagateSecurityAnnotations = propagateSecurityAnnotations;
+	}
+
+	public boolean addInjectAnnotation() {
+		return addInjectAnnotation;
+	}
+
+	public void setAddInjectAnnotation(boolean addInjectAnnotation) {
+		this.addInjectAnnotation = addInjectAnnotation;
+	}
+
+	public boolean isCdiAvailable() {
+		return cdiAvailable;
+	}
+
+	public void setCdiAvailable(boolean cdiAvailable) {
+		this.cdiAvailable = cdiAvailable;
+	}
+
+	public boolean addComponentAnnotation() {
+		return addComponentAnnotation;
+	}
+
+	public void setAddComponentAnnotation(boolean addComponentAnnotation) {
+		this.addComponentAnnotation = addComponentAnnotation;
+	}
+
+	public boolean addNonnullAnnotation() {
+		return addNonnullAnnotation;
+	}
+
+	public void setAddNonnullAnnotation(boolean addNonnullAnnotation) {
+		this.addNonnullAnnotation = addNonnullAnnotation;
+	}
+
+	public boolean addGeneratedAnnotation() {
+		return addGeneratedAnnotation;
+	}
+
+	public void setAddGeneratedAnnotation(boolean addGeneratedAnnotation) {
+		this.addGeneratedAnnotation = addGeneratedAnnotation;
+	}
+
+	public boolean addGeneratedDate() {
+		return addGenerationDate;
+	}
+
+	public void setAddGenerationDate(boolean addGenerationDate) {
+		this.addGenerationDate = addGenerationDate;
+	}
+
+	public @Nullable String[] getSuppressedWarnings() {
+		return suppressedWarnings;
+	}
+
+	public void setSuppressedWarnings(String[] suppressedWarnings) {
+		this.suppressedWarnings = suppressedWarnings;
+	}
+
+	public boolean addTransactionScopedAnnotation() {
+		return addTransactionScopedAnnotation;
+	}
+
+	public void setAddTransactionScopedAnnotation(boolean addTransactionScopedAnnotation) {
+		this.addTransactionScopedAnnotation = addTransactionScopedAnnotation;
+	}
+
+	public boolean isSpringInjection() {
+		return springInjection;
+	}
+
+	public void setSpringInjection(boolean springInjection) {
+		this.springInjection = springInjection;
+	}
+
+	public boolean isDataEventPackageAvailable() {
+		return dataEventPackageAvailable;
+	}
+
+	public void setDataEventPackageAvailable(boolean dataEventPackageAvailable) {
+		this.dataEventPackageAvailable = dataEventPackageAvailable;
+	}
+
+	public Elements getElementUtils() {
+		return processingEnvironment.getElementUtils();
+	}
+
+	public Types getTypeUtils() {
+		return processingEnvironment.getTypeUtils();
+	}
+
+	public String getPersistenceXmlLocation() {
+		return persistenceXmlLocation;
+	}
+
+	public List<String> getOrmXmlFiles() {
+		return ormXmlFiles;
+	}
+
+	public boolean containsMetaEntity(String qualifiedName) {
+		return metaEntities.containsKey( qualifiedName );
+	}
+
+	public @Nullable Metamodel getMetaEntity(String qualifiedName) {
+		return metaEntities.get( qualifiedName );
+	}
+
+	public Collection<Metamodel> getMetaEntities() {
+		return metaEntities.values();
+	}
+
+	public void addMetaEntity(String qualifiedName, Metamodel metaEntity) {
+		metaEntities.put( qualifiedName, metaEntity );
+	}
+
+	public boolean containsMetaEmbeddable(String qualifiedName) {
+		return metaEmbeddables.containsKey( qualifiedName );
+	}
+
+	public @Nullable Metamodel getMetaEmbeddable(String qualifiedName) {
+		return metaEmbeddables.get( qualifiedName );
+	}
+
+	public void addMetaEmbeddable(String qualifiedName, Metamodel metaEntity) {
+		metaEmbeddables.put( qualifiedName, metaEntity );
+	}
+
+	public Collection<Metamodel> getMetaEmbeddables() {
+		return metaEmbeddables.values();
+	}
+
+	public boolean containsDataMetaEntity(String qualifiedName) {
+		return dataMetaEntities.containsKey( qualifiedName );
+	}
+
+	public @Nullable Metamodel getDataMetaEntity(String qualifiedName) {
+		return dataMetaEntities.get( qualifiedName );
+	}
+
+	public Collection<Metamodel> getDataMetaEntities() {
+		return dataMetaEntities.values();
+	}
+
+	public void addDataMetaEntity(String qualifiedName, Metamodel metaEntity) {
+		dataMetaEntities.put( qualifiedName, metaEntity );
+	}
+
+	public boolean containsDataMetaEmbeddable(String qualifiedName) {
+		return dataMetaEmbeddables.containsKey( qualifiedName );
+	}
+
+	public @Nullable Metamodel getDataMetaEmbeddable(String qualifiedName) {
+		return dataMetaEmbeddables.get( qualifiedName );
+	}
+
+	public void addDataMetaEmbeddable(String qualifiedName, Metamodel metaEntity) {
+		dataMetaEmbeddables.put( qualifiedName, metaEntity );
+	}
+
+	public Collection<Metamodel> getDataMetaEmbeddables() {
+		return dataMetaEmbeddables.values();
+	}
+
+	public @Nullable Metamodel getMetamodel(String qualifiedName) {
+		if ( metaEntities.containsKey( qualifiedName ) ) {
+			return metaEntities.get( qualifiedName );
+		}
+		else {
+			return metaEmbeddables.get( qualifiedName );
+		}
+	}
+
+	public @Nullable Metamodel getMetaAuxiliary(String qualifiedName) {
+		return metaAuxiliaries.get( qualifiedName );
+	}
+
+	public Collection<Metamodel> getMetaAuxiliaries() {
+		return metaAuxiliaries.values();
+	}
+
+	public void addMetaAuxiliary(String qualifiedName, Metamodel metamodel) {
+		final var generatedClassName = getFullyQualifiedClassName( metamodel );
+		final var existing = metaAuxiliaries.get( generatedClassName );
+		if ( existing == null || isMoreSpecific( metamodel, existing ) || !isMoreSpecific( existing, metamodel ) ) {
+			metaAuxiliaries.put( generatedClassName, metamodel );
+		}
+	}
+
+	private boolean isMoreSpecific(Metamodel metamodel, Metamodel other) {
+		if ( metamodel.getElement() instanceof TypeElement typeElement
+				&& other.getElement() instanceof TypeElement otherTypeElement ) {
+			final var types = getTypeUtils();
+			final var type = types.erasure( typeElement.asType() );
+			final var otherType = types.erasure( otherTypeElement.asType() );
+			return types.isSubtype( type, otherType )
+				&& !types.isSameType( type, otherType );
+		}
+		else {
+			return false;
+		}
+	}
+
+	public void addAccessTypeInformation(String qualifiedName, AccessTypeInformation info) {
+		accessTypeInformation.put( qualifiedName, info );
+	}
+
+	public @Nullable AccessTypeInformation getAccessTypeInfo(String qualifiedName) {
+		return accessTypeInformation.get( qualifiedName );
+	}
+
+	public TypeElement getTypeElementForFullyQualifiedName(String qualifiedName) {
+		return processingEnvironment.getElementUtils().getTypeElement( qualifiedName );
+	}
+
+	void markGenerated(Metamodel metamodel) {
+		generatedClassNames.add( getFullyQualifiedClassName( metamodel ) );
+	}
+
+	boolean isAlreadyGenerated(Metamodel metamodel) {
+		return generatedClassNames.contains( getFullyQualifiedClassName( metamodel ) );
+	}
+
+	public Set<CharSequence> getElementsToRedo() {
+		return elementsToRedo;
+	}
+
+	public void addElementToRedo(CharSequence qualifiedName) {
+		elementsToRedo.add( qualifiedName );
+	}
+
+	public void removeElementToRedo(CharSequence qualifiedName) {
+		elementsToRedo.remove( qualifiedName );
+	}
+
+	public void logMessage(Diagnostic.Kind type, String message) {
+		if ( logDebug || type != Diagnostic.Kind.OTHER ) {
+			processingEnvironment.getMessager().printMessage( type, message );
+		}
+	}
+
+	public boolean isFullyXmlConfigured() {
+		return fullyXmlConfigured != null && fullyXmlConfigured;
+	}
+
+	public void mappingDocumentFullyXmlConfigured(boolean fullyXmlConfigured) {
+		this.fullyXmlConfigured = this.fullyXmlConfigured == null
+				? fullyXmlConfigured
+				: this.fullyXmlConfigured && fullyXmlConfigured;
+	}
+
+	public @Nullable AccessType getPersistenceUnitDefaultAccessType() {
+		return persistenceUnitDefaultAccessType;
+	}
+
+	public void setPersistenceUnitDefaultAccessType(@Nullable AccessType persistenceUnitDefaultAccessType) {
+		this.persistenceUnitDefaultAccessType = persistenceUnitDefaultAccessType;
+	}
+
+	public boolean doLazyXmlParsing() {
+		return lazyXmlParsing;
+	}
+
+	public boolean allowDtdAndExternalEntities() {
+		return allowDtdAndExternalEntities;
+	}
+
+	public void message(Element method, String message, Diagnostic.Kind severity) {
+		getProcessingEnvironment().getMessager()
+				.printMessage( severity, message, method );
+	}
+
+	public void message(Element method, AnnotationMirror mirror, AnnotationValue value, String message, Diagnostic.Kind severity) {
+		getProcessingEnvironment().getMessager()
+				.printMessage( severity, message, method, mirror, value );
+	}
+
+	public void message(Element method, AnnotationMirror mirror, String message, Diagnostic.Kind severity) {
+		getProcessingEnvironment().getMessager()
+				.printMessage( severity, message, method, mirror );
+	}
+
+	@Override
+	public String toString() {
+		final var sb = new StringBuilder();
+		sb.append( "Context" );
+		sb.append( "{accessTypeInformation=" ).append( accessTypeInformation );
+		sb.append( ", logDebug=" ).append( logDebug );
+		sb.append( ", lazyXmlParsing=" ).append( lazyXmlParsing );
+		sb.append( ", fullyXmlConfigured=" ).append( fullyXmlConfigured );
+		sb.append( ", ormXmlFiles=" ).append( ormXmlFiles );
+		sb.append( ", persistenceXmlLocation='" ).append( persistenceXmlLocation ).append( '\'' );
+		sb.append( '}' );
+		return sb.toString();
+	}
+
+	public boolean checkNamedQuery(String name) {
+		return checkedNamedQueries.add(name);
+	}
+
+	public void setExtension(HibernateProcessorExtension extension) {
+		this.extension = extension;
+	}
+
+	public HibernateProcessorExtension getExtension() {
+		return extension;
+	}
+
+	public void setInclude(String include) {
+		includes = include.split(",\\s*");
+	}
+
+	public void setExclude(String exclude) {
+		excludes = exclude.isBlank()
+				? EMPTY_STRING_ARRAY
+				: exclude.split(",\\s*");
+	}
+
+	public boolean isIncluded(String typeName) {
+		for (String include : includes) {
+			if ( matches(typeName, include) ) {
+				for (String exclude : excludes) {
+					if ( matches(typeName, exclude) ) {
+						return false;
+					}
+				}
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean matches(String name, String pattern) {
+		return "*".equals(pattern)
+			|| name.equals( pattern )
+			|| pattern.endsWith("*") && name.startsWith( pattern.substring(0, pattern.length()-1) )
+			|| pattern.startsWith("*") && name.endsWith( pattern.substring(1) )
+			|| pattern.startsWith("*") && pattern.endsWith("*") && name.contains( pattern.substring(1, pattern.length()-1) );
+	}
+
+	public List<Element> getAllMembers(TypeElement type) {
+		final var elements = type.getEnclosedElements();
+		final var list = new ArrayList<Element>(elements);
+		final var superclass = type.getSuperclass();
+		if ( superclass.getKind() == TypeKind.DECLARED ) {
+			final var declaredType = (DeclaredType) superclass;
+			final var typeElement = (TypeElement) declaredType.asElement();
+			for ( var inherited : getAllMembers(typeElement) ) {
+				if ( notOverridden(type, inherited, elements) ) {
+					list.add( inherited );
+				}
+			}
+		}
+		for (TypeMirror supertype : type.getInterfaces()) {
+			final var declaredType = (DeclaredType) supertype;
+			final var typeElement = (TypeElement) declaredType.asElement();
+			for ( var inherited : getAllMembers(typeElement) ) {
+				if ( notOverridden(type, inherited, elements) ) {
+					list.add( inherited );
+				}
+			}
+		}
+		return list;
+	}
+
+	private boolean notOverridden(TypeElement type, Element inherited, List<? extends Element> elements) {
+		return !(inherited instanceof ExecutableElement)
+			|| elements.stream().noneMatch(member -> member instanceof ExecutableElement
+				&& getElementUtils().overrides((ExecutableElement) member, (ExecutableElement) inherited, type));
+	}
+
+	public Map<String, String> getEntityNameMappings() {
+		return entityNameMappings;
+	}
+
+	public void addEntityNameMapping(String entityName, String qualifiedName) {
+		entityNameMappings.put( entityName, qualifiedName );
+	}
+
+	public @Nullable String qualifiedNameForEntityName(String entityName) {
+		return entityNameMappings.get(entityName);
+	}
+
+	public Map<String,Set<String>> getEnumTypesByValue() {
+		return enumTypesByValue;
+	}
+
+	public void addEnumValue(
+			String qualifiedTypeName, String shortTypeName,
+			@Nullable String outerTypeQualifiedName, @Nullable String outerShortTypeName,
+			String value) {
+		addEnumValue( qualifiedTypeName, value );
+		addEnumValue( qualifiedTypeName, qualifiedTypeName + '.' + value );
+		addEnumValue( qualifiedTypeName, shortTypeName + '.' + value );
+		if ( outerShortTypeName != null ) {
+			addEnumValue( qualifiedTypeName, outerShortTypeName + '.' + shortTypeName + '.' + value );
+			addEnumValue( qualifiedTypeName, outerShortTypeName + '$' + shortTypeName + '.' + value );
+			addEnumValue( qualifiedTypeName, outerTypeQualifiedName + '$' + shortTypeName + '.' + value );
+		}
+	}
+
+	private void addEnumValue(String qualifiedTypeName, String value) {
+		enumTypesByValue.computeIfAbsent( value, s -> new TreeSet<>() ).add( qualifiedTypeName );
+	}
+
+	public void setIndexing(boolean index) {
+		this.indexing = index;
+	}
+
+	public boolean isIndexing() {
+		return indexing;
+	}
+
+	public boolean isGeneratedClass(String qualifiedName) {
+		return generatedClassNames.contains( qualifiedName );
+	}
+
+	public @Nullable Dialect determineDialect(Element method) {
+		return defaultDialect;
+	}
+
+	public Dialect constructDialect(String dialectClassName, @Nullable String databaseVersion) {
+		final Class<? extends Dialect> dialectClass;
+		try {
+			//noinspection unchecked
+			dialectClass = (Class<? extends Dialect>) Class.forName( dialectClassName );
+		}
+		catch (ClassNotFoundException e) {
+			throw new RuntimeException( "Couldn't load dialect class: " + dialectClassName, e );
+		}
+		if ( databaseVersion != null ) {
+			final String[] versionParts = StringHelper.split( ".-", databaseVersion );
+			final String majorPart = versionParts[0];
+			final String minorPart = versionParts.length > 1 ? versionParts[1] : null;
+			final int majorVersion = parseIntOrDefault( majorPart, DatabaseVersion.NO_VERSION );
+			final int minorVersion = parseIntOrDefault( minorPart, DatabaseVersion.NO_VERSION );
+			try {
+				return dialectClass.getConstructor( DialectResolutionInfo.class ).newInstance( new DialectResolutionInfo() {
+					@Override
+					public String getDatabaseName() {
+						return null;
+					}
+
+					@Override
+					public String getDatabaseVersion() {
+						return databaseVersion;
+					}
+
+					@Override
+					public String getDriverName() {
+						return null;
+					}
+
+					@Override
+					public int getDriverMajorVersion() {
+						return 0;
+					}
+
+					@Override
+					public int getDriverMinorVersion() {
+						return 0;
+					}
+
+					@Override
+					public int getDatabaseMajorVersion() {
+						return majorVersion;
+					}
+
+					@Override
+					public int getDatabaseMinorVersion() {
+						return minorVersion;
+					}
+				} );
+			}
+			catch (NoSuchMethodException e) {
+				throw new RuntimeException( e );
+			}
+			catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+				throw new RuntimeException( "Couldn't instantiate dialect class: " + dialectClassName, e );
+			}
+		}
+		else {
+			try {
+				return dialectClass.getConstructor().newInstance();
+			}
+			catch (NoSuchMethodException e) {
+				throw new RuntimeException( "Couldn't find empty constructor for dialect class: " + dialectClassName,
+						e );
+			}
+			catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+				throw new RuntimeException( "Couldn't instantiate dialect class: " + dialectClassName, e );
+			}
+		}
+	}
+
+	private static int parseIntOrDefault(@Nullable String string, int defaultValue) {
+		if (  string == null ) {
+			return defaultValue;
+		}
+		try {
+			return Integer.parseInt( string );
+		}
+		catch (NumberFormatException e) {
+			return defaultValue;
+		}
+	}
+}

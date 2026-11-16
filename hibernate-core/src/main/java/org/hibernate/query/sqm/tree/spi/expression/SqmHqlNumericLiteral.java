@@ -1,0 +1,179 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.Locale;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.HibernateException;
+import org.hibernate.metamodel.model.domain.BasicDomainType;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmExpressible;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+/**
+ * Used to model numeric literals found in HQL queries.
+ * <p>
+ * Used instead of {@link SqmLiteral} which would require parsing the
+ * literal value to the specified number type to avoid loss of precision
+ * due to Float and Double being non-exact types.
+ *
+ * @apiNote Only used for HQL literals because we do not have this problem
+ * with criteria queries where the value given us by user would already be
+ * typed.
+ *
+ * @author Steve Ebersole
+ */
+public class SqmHqlNumericLiteral<N extends Number> extends SqmLiteral<N> {
+	private final String literalValue;
+	private final NumericTypeCategory typeCategory;
+	private BasicDomainType<N> type;
+
+	public SqmHqlNumericLiteral(
+			@Nonnull String literalValue,
+			@Nonnull BasicDomainType<N> type,
+			@Nonnull NodeBuilder criteriaBuilder) {
+		this( literalValue,
+				interpretCategory( literalValue, castNonNull( criteriaBuilder.resolveExpressible( type ) ) ),
+				type, criteriaBuilder );
+		this.type = type;
+	}
+
+	public SqmHqlNumericLiteral(
+			@Nonnull String literalValue,
+			@Nonnull NumericTypeCategory typeCategory,
+			@Nonnull BasicDomainType<N> type,
+			@Nonnull NodeBuilder criteriaBuilder) {
+		super( criteriaBuilder.resolveExpressible( type ), criteriaBuilder );
+		this.literalValue = literalValue;
+		this.typeCategory = typeCategory;
+		this.type = type;
+	}
+
+	@Nonnull
+	public String getUnparsedLiteralValue() {
+		return literalValue;
+	}
+
+	@Override
+	public @Nonnull N getLiteralValue() {
+		return typeCategory.parseLiteralValue( literalValue );
+	}
+
+	@Nonnull
+	public NumericTypeCategory getTypeCategory() {
+		return typeCategory;
+	}
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return walker.visitHqlNumericLiteral( this );
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		hql.append( literalValue )
+			.append( switch ( typeCategory ) {
+				case BIG_DECIMAL -> "bd";
+				case FLOAT -> "f";
+				case BIG_INTEGER -> "bi";
+				case LONG -> "l";
+				case INTEGER, DOUBLE -> "";
+			} );
+	}
+
+	@Override
+	public boolean equals(@Nullable Object object) {
+		return object instanceof SqmHqlNumericLiteral<?> that
+			&& literalValue.equals( that.literalValue )
+			&& typeCategory.equals( that.typeCategory );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = literalValue.hashCode();
+		result = 31 * result + typeCategory.hashCode();
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return equals( object );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		return hashCode();
+	}
+
+	@Nonnull
+	@Override
+	public String asLoggableText() {
+		final StringBuilder stringBuilder = new StringBuilder();
+		appendHqlString( stringBuilder, SqmRenderContext.simpleContext() );
+		return stringBuilder.toString();
+	}
+
+	@Nonnull
+	@Override
+	public SqmHqlNumericLiteral<N> copy(@Nonnull SqmCopyContext context) {
+		return new SqmHqlNumericLiteral<>( literalValue, typeCategory, type, nodeBuilder() );
+	}
+
+	@Nonnull
+	private static <N extends Number> NumericTypeCategory interpretCategory(@Nonnull String literalValue, @Nonnull SqmExpressible<N> type) {
+		assert type != null;
+
+		final JavaType<N> javaTypeDescriptor = type.getExpressibleJavaType();
+		assert javaTypeDescriptor != null;
+
+		final Class<N> javaTypeClass = javaTypeDescriptor.getJavaTypeClass();
+
+		if ( BigDecimal.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.BIG_DECIMAL;
+		}
+
+		if ( Double.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.DOUBLE;
+		}
+
+		if ( Float.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.FLOAT;
+		}
+
+		if ( BigInteger.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.BIG_INTEGER;
+		}
+
+		if ( Long.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.LONG;
+		}
+
+		if ( Short.class.equals( javaTypeClass )
+				|| Integer.class.equals( javaTypeClass ) ) {
+			return NumericTypeCategory.INTEGER;
+		}
+
+		throw new TypeException( literalValue, javaTypeClass );
+	}
+
+	public static class TypeException extends HibernateException {
+		public TypeException(String literalValue, Class<?> javaType) {
+			super(
+					String.format(
+							Locale.ROOT,
+							"Unexpected Java type [%s] for numeric literal - %s",
+							javaType.getTypeName(),
+							literalValue
+					)
+			);
+		}
+	}
+}

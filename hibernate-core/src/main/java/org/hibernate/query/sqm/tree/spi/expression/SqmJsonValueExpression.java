@@ -1,0 +1,333 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+import org.hibernate.Incubating;
+import org.hibernate.metamodel.model.domain.ReturnableType;
+import org.hibernate.query.criteria.JpaExpression;
+import org.hibernate.query.criteria.JpaJsonValueExpression;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.function.FunctionRenderer;
+import org.hibernate.query.sqm.function.SelfRenderingFunctionSqlAstExpression;
+import org.hibernate.query.sqm.function.SqmFunctionDescriptor;
+import org.hibernate.query.sqm.produce.function.ArgumentsValidator;
+import org.hibernate.query.sqm.produce.function.FunctionReturnTypeResolver;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmCacheable;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.sql.ast.spi.SqlAstNode;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.JsonPathPassingClause;
+import org.hibernate.sql.ast.spi.query.expression.JsonValueEmptyBehavior;
+import org.hibernate.sql.ast.spi.query.expression.JsonValueErrorBehavior;
+
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+/**
+ * Special expression for the json_value function that also captures special syntax elements like error and empty behavior.
+ *
+ * @since 7.0
+ */
+@Incubating(since = "6.2")
+public class SqmJsonValueExpression<T> extends AbstractSqmJsonPathExpression<T> implements JpaJsonValueExpression<T> {
+	private ErrorBehavior errorBehavior = ErrorBehavior.UNSPECIFIED;
+	private @Nullable SqmExpression<T> errorDefaultExpression;
+	private EmptyBehavior emptyBehavior = EmptyBehavior.UNSPECIFIED;
+	private @Nullable SqmExpression<T> emptyDefaultExpression;
+
+	public SqmJsonValueExpression(
+			@Nonnull SqmFunctionDescriptor descriptor,
+			@Nonnull FunctionRenderer renderer,
+			@Nonnull List<? extends SqmTypedNode<?>> arguments,
+			@Nullable ReturnableType<T> impliedResultType,
+			@Nullable ArgumentsValidator argumentsValidator,
+			@Nonnull FunctionReturnTypeResolver returnTypeResolver,
+			@Nonnull NodeBuilder nodeBuilder,
+			@Nonnull String name) {
+		super(
+				descriptor,
+				renderer,
+				arguments,
+				impliedResultType,
+				argumentsValidator,
+				returnTypeResolver,
+				nodeBuilder,
+				name
+		);
+	}
+
+	private SqmJsonValueExpression(
+			@Nonnull SqmFunctionDescriptor descriptor,
+			@Nonnull FunctionRenderer renderer,
+			@Nonnull List<? extends SqmTypedNode<?>> arguments,
+			@Nullable ReturnableType<T> impliedResultType,
+			@Nullable ArgumentsValidator argumentsValidator,
+			@Nonnull FunctionReturnTypeResolver returnTypeResolver,
+			@Nonnull NodeBuilder nodeBuilder,
+			@Nonnull String name,
+			@Nullable Map<String, SqmExpression<?>> passingExpressions,
+			@Nonnull ErrorBehavior errorBehavior,
+			@Nullable SqmExpression<T> errorDefaultExpression,
+			@Nonnull EmptyBehavior emptyBehavior,
+			@Nullable SqmExpression<T> emptyDefaultExpression) {
+		super(
+				descriptor,
+				renderer,
+				arguments,
+				impliedResultType,
+				argumentsValidator,
+				returnTypeResolver,
+				nodeBuilder,
+				name,
+				passingExpressions
+		);
+		this.errorBehavior = errorBehavior;
+		this.errorDefaultExpression = errorDefaultExpression;
+		this.emptyBehavior = emptyBehavior;
+		this.emptyDefaultExpression = emptyDefaultExpression;
+	}
+
+	@Nonnull
+	public SqmJsonValueExpression<T> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		final List<SqmTypedNode<?>> arguments = new ArrayList<>( getArguments().size() );
+		for ( SqmTypedNode<?> argument : getArguments() ) {
+			arguments.add( argument.copy( context ) );
+		}
+		return context.registerCopy(
+				this,
+				new SqmJsonValueExpression<>(
+						getFunctionDescriptor(),
+						getFunctionRenderer(),
+						arguments,
+						getImpliedResultType(),
+						getArgumentsValidator(),
+						getReturnTypeResolver(),
+						nodeBuilder(),
+						getFunctionName(),
+						copyPassingExpressions( context ),
+						errorBehavior,
+						errorDefaultExpression == null ? null : errorDefaultExpression.copy( context ),
+						emptyBehavior,
+						emptyDefaultExpression == null ? null : emptyDefaultExpression.copy( context )
+				)
+		);
+	}
+
+	@Nonnull
+	@Override
+	public ErrorBehavior getErrorBehavior() {
+		return errorBehavior;
+	}
+
+	@Nonnull
+	@Override
+	public EmptyBehavior getEmptyBehavior() {
+		return emptyBehavior;
+	}
+
+	@Override
+	public @Nullable JpaExpression<T> getErrorDefault() {
+		return errorDefaultExpression;
+	}
+
+	@Override
+	public @Nullable JpaExpression<T> getEmptyDefault() {
+		return emptyDefaultExpression;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> unspecifiedOnError() {
+		this.errorBehavior = ErrorBehavior.UNSPECIFIED;
+		this.errorDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> errorOnError() {
+		this.errorBehavior = ErrorBehavior.ERROR;
+		this.errorDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> nullOnError() {
+		this.errorBehavior = ErrorBehavior.NULL;
+		this.errorDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> defaultOnError(@Nonnull jakarta.persistence.criteria.Expression<?> expression) {
+		this.errorBehavior = ErrorBehavior.DEFAULT;
+		//noinspection unchecked
+		this.errorDefaultExpression = (SqmExpression<T>) expression;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> unspecifiedOnEmpty() {
+		this.errorBehavior = ErrorBehavior.UNSPECIFIED;
+		this.errorDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> errorOnEmpty() {
+		this.emptyBehavior = EmptyBehavior.ERROR;
+		this.emptyDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> nullOnEmpty() {
+		this.emptyBehavior = EmptyBehavior.NULL;
+		this.emptyDefaultExpression = null;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> defaultOnEmpty(@Nonnull jakarta.persistence.criteria.Expression<?> expression) {
+		this.emptyBehavior = EmptyBehavior.DEFAULT;
+		//noinspection unchecked
+		this.emptyDefaultExpression = (SqmExpression<T>) expression;
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public SqmJsonValueExpression<T> passing(
+			@Nonnull String parameterName,
+			@Nonnull jakarta.persistence.criteria.Expression<?> expression) {
+		addPassingExpression( parameterName, (SqmExpression<?>) expression );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public Expression convertToSqlAst(@Nonnull SqmToSqlAstConverter walker) {
+		final @Nullable ReturnableType<?> resultType = resolveResultType( walker );
+		final List<SqlAstNode> arguments = resolveSqlAstArguments( getArguments(), walker );
+		final ArgumentsValidator validator = getArgumentsValidator();
+		if ( validator != null ) {
+			validator.validateSqlTypes( arguments, getFunctionName() );
+		}
+		final JsonPathPassingClause jsonPathPassingClause = createJsonPathPassingClause( walker );
+		if ( jsonPathPassingClause != null ) {
+			arguments.add( jsonPathPassingClause );
+		}
+		switch ( errorBehavior ) {
+			case NULL -> arguments.add( JsonValueErrorBehavior.NULL );
+			case ERROR -> arguments.add( JsonValueErrorBehavior.ERROR );
+			case DEFAULT -> arguments.add( JsonValueErrorBehavior.defaultOnError(
+					(Expression) walker.visitWithRequiredResult( castNonNull( errorDefaultExpression ) )
+			) );
+		}
+		switch ( emptyBehavior ) {
+			case NULL -> arguments.add( JsonValueEmptyBehavior.NULL );
+			case ERROR -> arguments.add( JsonValueEmptyBehavior.ERROR );
+			case DEFAULT -> arguments.add( JsonValueEmptyBehavior.defaultOnEmpty(
+					(Expression) walker.visitWithRequiredResult( castNonNull( emptyDefaultExpression ) )
+			) );
+		}
+		return new SelfRenderingFunctionSqlAstExpression(
+				getFunctionName(),
+				getFunctionRenderer(),
+				arguments,
+				resultType,
+				resultType == null ? null : getMappingModelExpressible( walker, resultType, arguments )
+		);
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		hql.append( "json_value(" );
+		getArguments().get( 0 ).appendHqlString( hql, context );
+		hql.append( ',' );
+		getArguments().get( 1 ).appendHqlString( hql, context );
+
+		appendPassingExpressionHqlString( hql, context );
+		if ( getArguments().size() > 2 ) {
+			hql.append( " returning " );
+			getArguments().get( 2 ).appendHqlString( hql, context );
+		}
+		switch ( errorBehavior ) {
+			case NULL -> hql.append( " null on error" );
+			case ERROR -> hql.append( " error on error" );
+			case DEFAULT -> {
+				hql.append( " default " );
+				castNonNull( errorDefaultExpression ).appendHqlString( hql, context );
+				hql.append( " on error" );
+			}
+		}
+		switch ( emptyBehavior ) {
+			case NULL -> hql.append( " null on empty" );
+			case ERROR -> hql.append( " error on empty" );
+			case DEFAULT -> {
+				hql.append( " default " );
+				castNonNull( emptyDefaultExpression ).appendHqlString( hql, context );
+				hql.append( " on empty" );
+			}
+		}
+		hql.append( ')' );
+	}
+
+	@Override
+	public boolean equals(@Nullable Object other) {
+		return super.equals( other )
+			&& other instanceof SqmJsonValueExpression<?> that
+			&& errorBehavior == that.errorBehavior
+			&& Objects.equals( errorDefaultExpression, that.errorDefaultExpression )
+			&& emptyBehavior == that.emptyBehavior
+			&& Objects.equals( emptyDefaultExpression, that.emptyDefaultExpression );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = super.hashCode();
+		result = 31 * result + errorBehavior.hashCode();
+		result = 31 * result + Objects.hashCode( errorDefaultExpression );
+		result = 31 * result + emptyBehavior.hashCode();
+		result = 31 * result + Objects.hashCode( emptyDefaultExpression );
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object other) {
+		return super.isCompatible( other )
+			&& other instanceof SqmJsonValueExpression<?> that
+			&& errorBehavior == that.errorBehavior
+			&& SqmCacheable.areCompatible( errorDefaultExpression, that.errorDefaultExpression )
+			&& emptyBehavior == that.emptyBehavior
+			&& SqmCacheable.areCompatible( emptyDefaultExpression, that.emptyDefaultExpression );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		int result = super.cacheHashCode();
+		result = 31 * result + errorBehavior.hashCode();
+		result = 31 * result + SqmCacheable.cacheHashCode( errorDefaultExpression );
+		result = 31 * result + emptyBehavior.hashCode();
+		result = 31 * result + SqmCacheable.cacheHashCode( emptyDefaultExpression );
+		return result;
+	}
+}

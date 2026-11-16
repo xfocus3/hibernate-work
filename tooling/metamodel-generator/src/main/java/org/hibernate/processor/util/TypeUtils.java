@@ -1,0 +1,950 @@
+package org.hibernate.processor.util;
+
+import jakarta.persistence.AccessType;
+import jakarta.annotation.Nullable;
+import org.hibernate.processor.Context;
+import org.hibernate.processor.MetaModelGenerationException;
+import org.hibernate.processor.model.Metamodel;
+
+import javax.lang.model.element.AnnotationMirror;
+import javax.lang.model.element.AnnotationValue;
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.PackageElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.ArrayType;
+import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.ExecutableType;
+import javax.lang.model.type.PrimitiveType;
+import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
+import javax.lang.model.type.TypeVariable;
+import javax.lang.model.type.WildcardType;
+import javax.lang.model.util.ElementFilter;
+import javax.lang.model.util.Elements;
+import javax.lang.model.util.SimpleTypeVisitor8;
+import javax.tools.Diagnostic;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Stream;
+
+import static org.hibernate.processor.util.Constants.MANY_TO_ANY;
+import static org.hibernate.processor.util.Constants.TRANSIENT;
+import static org.hibernate.processor.util.StringUtil.decapitalize;
+import static java.util.stream.Stream.concat;
+import static org.hibernate.internal.util.StringHelper.split;
+import static org.hibernate.processor.util.AccessTypeInformation.DEFAULT_ACCESS_TYPE;
+import static org.hibernate.processor.util.Constants.ACCESS;
+import static org.hibernate.processor.util.Constants.ELEMENT_COLLECTION;
+import static org.hibernate.processor.util.Constants.EMBEDDABLE;
+import static org.hibernate.processor.util.Constants.EMBEDDED_ID;
+import static org.hibernate.processor.util.Constants.ENTITY;
+import static org.hibernate.processor.util.Constants.ID;
+import static org.hibernate.processor.util.Constants.JAVA_OBJECT;
+import static org.hibernate.processor.util.Constants.MANY_TO_MANY;
+import static org.hibernate.processor.util.Constants.MANY_TO_ONE;
+import static org.hibernate.processor.util.Constants.MAP;
+import static org.hibernate.processor.util.Constants.MAPPED_SUPERCLASS;
+import static org.hibernate.processor.util.Constants.ONE_TO_MANY;
+import static org.hibernate.processor.util.Constants.ONE_TO_ONE;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.processor.util.StringUtil.isProperty;
+import static org.hibernate.processor.util.StringUtil.removeDollar;
+
+/**
+ * Utility class.
+ *
+ * @author Max Andersen
+ * @author Hardy Ferentschik
+ * @author Emmanuel Bernard
+ */
+public final class TypeUtils {
+
+	public static final String DEFAULT_ANNOTATION_PARAMETER_NAME = "value";
+	private static final Map<TypeKind, String> PRIMITIVE_WRAPPERS = new HashMap<>();
+	private static final Map<TypeKind, String> PRIMITIVES = new HashMap<>();
+
+	static {
+		PRIMITIVE_WRAPPERS.put( TypeKind.CHAR, "Character" );
+
+		PRIMITIVE_WRAPPERS.put( TypeKind.BYTE, "Byte" );
+		PRIMITIVE_WRAPPERS.put( TypeKind.SHORT, "Short" );
+		PRIMITIVE_WRAPPERS.put( TypeKind.INT, "Integer" );
+		PRIMITIVE_WRAPPERS.put( TypeKind.LONG, "Long" );
+
+		PRIMITIVE_WRAPPERS.put( TypeKind.BOOLEAN, "Boolean" );
+
+		PRIMITIVE_WRAPPERS.put( TypeKind.FLOAT, "Float" );
+		PRIMITIVE_WRAPPERS.put( TypeKind.DOUBLE, "Double" );
+
+		PRIMITIVES.put( TypeKind.CHAR, "char" );
+		PRIMITIVES.put( TypeKind.BYTE, "byte" );
+		PRIMITIVES.put( TypeKind.SHORT, "short" );
+		PRIMITIVES.put( TypeKind.INT, "int" );
+		PRIMITIVES.put( TypeKind.LONG, "long" );
+		PRIMITIVES.put( TypeKind.BOOLEAN, "boolean" );
+		PRIMITIVES.put( TypeKind.FLOAT, "float" );
+		PRIMITIVES.put( TypeKind.DOUBLE, "double" );
+	}
+
+	private TypeUtils() {
+	}
+
+	public static String toTypeString(TypeMirror type) {
+		return type.getKind().isPrimitive()
+				? castNonNull( PRIMITIVE_WRAPPERS.get( type.getKind() ) )
+				: TypeRenderingVisitor.toString( type );
+	}
+
+	public static String toPrimitiveTypeString(PrimitiveType primitiveType) {
+		var type = PRIMITIVES.get( primitiveType.getKind() );
+		if ( type != null ) {
+			return type;
+		}
+		return primitiveType.getKind().toString().toLowerCase( Locale.ROOT );
+	}
+
+	public static String toArrayTypeString(ArrayType type, Context context) {
+		final var componentType = type.getComponentType();
+		if ( componentType.getKind().isPrimitive() ) {
+			return PRIMITIVES.get( componentType.getKind() ) + "[]";
+		}
+		else {
+			// When an ArrayType is annotated with an annotation which uses TYPE_USE targets,
+			// we cannot simply take the TypeMirror returned by #getComponentType because it
+			// itself is an AnnotatedType.
+			//
+			// The simplest approach here to get the TypeMirror for both ArrayType use cases
+			// is to use the visitor to retrieve the underlying TypeMirror.
+			final var component = componentType.accept(
+					new SimpleTypeVisitor8<TypeMirror, Void>() {
+						@Override
+						protected TypeMirror defaultAction(TypeMirror e, Void aVoid) {
+							return e;
+						}
+					},
+					null
+			);
+			return extractClosestRealTypeAsString( component, context ) + "[]";
+		}
+	}
+
+	public static @Nullable TypeElement getSuperclassTypeElement(TypeElement element) {
+		final var superclass = element.getSuperclass();
+		//superclass of Object is of NoType which returns some other kind
+		if ( superclass.getKind() == TypeKind.DECLARED ) {
+			final var declaredType = (DeclaredType) superclass;
+			return (TypeElement) declaredType.asElement();
+		}
+		else {
+			return null;
+		}
+	}
+
+	public static String extractClosestRealTypeAsString(TypeMirror type, Context context) {
+		final var mirror = extractClosestRealType( type, context, new HashSet<>() );
+		return mirror == null ? "?" : mirror.toString();
+	}
+
+	private static @Nullable TypeMirror lowerBound(@Nullable TypeMirror bound) {
+		return bound == null || bound.getKind() == TypeKind.NULL ? null : bound;
+	}
+
+	private static @Nullable TypeMirror upperBound(@Nullable TypeMirror bound) {
+		if ( bound !=null && bound.getKind() == TypeKind.DECLARED ) {
+			final var type = (DeclaredType) bound;
+			return type.asElement().getSimpleName().contentEquals(JAVA_OBJECT) ? null : bound;
+		}
+		else {
+			return null;
+		}
+	}
+
+	public static @Nullable TypeMirror extractClosestRealType(@Nullable TypeMirror type, Context context, Set<TypeVariable> beingVisited) {
+		if ( type == null ) {
+			return null;
+		}
+		switch ( type.getKind() ) {
+			case TYPEVAR:
+				final var typeVariable = (TypeVariable) type;
+				if ( !beingVisited.add( typeVariable ) ) {
+					// A self-referential type variable has to be represented as plain wildcard `?`
+					return context.getTypeUtils().getWildcardType( null, null );
+				}
+				else {
+					final var wildcardType = context.getTypeUtils().getWildcardType(
+							upperBound( extractClosestRealType( typeVariable.getUpperBound(), context, beingVisited ) ),
+							lowerBound( extractClosestRealType( typeVariable.getLowerBound(), context, beingVisited ) )
+					);
+					beingVisited.remove( typeVariable );
+					return wildcardType;
+				}
+			case WILDCARD:
+				final var wildcardType = (WildcardType) type;
+				return context.getTypeUtils().getWildcardType(
+						upperBound( extractClosestRealType( wildcardType.getExtendsBound(), context, beingVisited ) ),
+						lowerBound( extractClosestRealType( wildcardType.getSuperBound(), context, beingVisited ) )
+				);
+			case DECLARED:
+				final var declaredType = (DeclaredType) type;
+				final var typeElement = (TypeElement) declaredType.asElement();
+				return context.getTypeUtils().getDeclaredType(
+						typeElement,
+						declaredType.getTypeArguments().stream()
+								.map( arg -> extractClosestRealType( arg, context, beingVisited ) )
+								.toArray( TypeMirror[]::new )
+				);
+			default:
+				return context.getTypeUtils().erasure( type );
+		}
+	}
+
+	public static boolean containsAnnotation(Element element, String... annotations) {
+		assert element != null;
+		assert annotations != null;
+		final var annotationClassNames = Set.of(annotations);
+		for ( var mirror : element.getAnnotationMirrors() ) {
+			if ( annotationClassNames.contains( mirror.getAnnotationType().toString() ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Returns {@code true} if the provided annotation type is of the same type as the provided class, {@code false} otherwise.
+	 * This method uses the string class names for comparison. See also
+	 * <a href="http://www.retep.org/2009/02/getting-class-values-from-annotations.html">getting-class-values-from-annotations</a>.
+	 *
+	 * @param annotationMirror The annotation mirror
+	 * @param qualifiedName the fully qualified class name to check against
+	 *
+	 * @return {@code true} if the provided annotation type is of the same type as the provided class, {@code false} otherwise.
+	 */
+	public static boolean isAnnotationMirrorOfType(AnnotationMirror annotationMirror, String qualifiedName) {
+		assert annotationMirror != null;
+		assert qualifiedName != null;
+		final var element = annotationMirror.getAnnotationType().asElement();
+		final var typeElement = (TypeElement) element;
+		return typeElement.getQualifiedName().contentEquals( qualifiedName );
+	}
+
+	/**
+	 * Checks whether the {@code Element} hosts the annotation with the given fully qualified class name.
+	 *
+	 * @param element the element to check for the hosted annotation
+	 * @param qualifiedName the fully qualified class name of the annotation to check for
+	 *
+	 * @return the annotation mirror for the specified annotation class from the {@code Element} or {@code null} in case
+	 *         the {@code TypeElement} does not host the specified annotation.
+	 */
+	public static @Nullable AnnotationMirror getAnnotationMirror(Element element, String qualifiedName) {
+		assert element != null;
+		assert qualifiedName != null;
+		for ( var mirror : element.getAnnotationMirrors() ) {
+			if ( isAnnotationMirrorOfType( mirror, qualifiedName ) ) {
+				return mirror;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Checks whether the {@code Element} hosts the annotation (directly or inherited) with the given fully qualified class name.
+	 *
+	 * @param element the element to check for the hosted annotation
+	 * @param qualifiedName the fully qualified class name of the annotation to check for
+	 *
+	 * @return the annotation mirror for the specified annotation class from the {@code Element} or {@code null} in case
+	 *         the {@code TypeElement} does not host the specified annotation (directly or inherited).
+	 */
+	public static @Nullable AnnotationMirror getInheritedAnnotationMirror(Elements elements, Element element, String qualifiedName) {
+		assert element != null;
+		assert qualifiedName != null;
+		for ( var mirror : elements.getAllAnnotationMirrors(element) ) {
+			if ( isAnnotationMirrorOfType( mirror, qualifiedName ) ) {
+				return mirror;
+			}
+		}
+		return null;
+	}
+
+	public static boolean hasAnnotation(Element element, String qualifiedName) {
+		return getAnnotationMirror( element, qualifiedName ) != null;
+	}
+
+	private static final Set<String> SECURITY_ANNOTATIONS = Set.of(
+		"jakarta.annotation.security.DeclareRoles",
+		"jakarta.annotation.security.DenyAll",
+		"jakarta.annotation.security.PermitAll",
+		"jakarta.annotation.security.RolesAllowed",
+		"jakarta.annotation.security.RunAs"
+	);
+
+	public static boolean isInheritedAnnotation(AnnotationMirror annotationMirror, Context context) {
+		final Element annotationType = annotationMirror.getAnnotationType().asElement();
+		// Interceptor bindings (e.g. @Transactional) let the generated repository implementation
+		// participate in interception. They only make sense when CDI is on the build path — without
+		// a container there is nothing to honor them — so guard on CDI availability.
+		return isInterceptorBinding( annotationType ) && context.isCdiAvailable()
+			// Security annotations (@RolesAllowed, @PermitAll, ...) are a Hibernate ORM specific
+			// extension for repository interfaces, copied unless explicitly suppressed. They do not
+			// depend on CDI.
+			|| isSecurityAnnotation( annotationType ) && context.propagateSecurityAnnotations();
+	}
+
+	private static boolean isInterceptorBinding(Element annotationType) {
+		return hasAnnotation( annotationType, "jakarta.interceptor.InterceptorBinding" );
+	}
+
+	private static boolean isSecurityAnnotation(Element annotationType) {
+		return annotationType instanceof TypeElement typeElement
+			&& SECURITY_ANNOTATIONS.contains( typeElement.getQualifiedName().toString() );
+	}
+
+	public static boolean hasAnnotation(Element element, String... qualifiedNames) {
+		for ( var qualifiedName : qualifiedNames ) {
+			if ( hasAnnotation( element, qualifiedName ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public static @Nullable AnnotationValue getAnnotationValue(AnnotationMirror annotationMirror) {
+		return getAnnotationValue( annotationMirror, DEFAULT_ANNOTATION_PARAMETER_NAME );
+	}
+
+	public static @Nullable AnnotationValue getAnnotationValue(AnnotationMirror annotationMirror, String member) {
+		assert annotationMirror != null;
+		assert member != null;
+		for ( Map.Entry<? extends ExecutableElement, ? extends AnnotationValue> entry
+				: annotationMirror.getElementValues().entrySet() ) {
+			if ( entry.getKey().getSimpleName().contentEquals(member) ) {
+				return entry.getValue();
+			}
+		}
+		return null;
+	}
+
+	public static void determineAccessTypeForHierarchy(TypeElement searchedElement, Context context) {
+		final var qualifiedName = searchedElement.getQualifiedName().toString();
+		context.logMessage( Diagnostic.Kind.OTHER, "Determining access type for " + qualifiedName );
+		final var accessTypeInfo = context.getAccessTypeInfo( qualifiedName );
+		if ( accessTypeInfo != null && accessTypeInfo.isAccessTypeResolved() ) {
+			context.logMessage(
+					Diagnostic.Kind.OTHER,
+					"AccessType for " + searchedElement + " found in cache: " + accessTypeInfo
+			);
+		}
+		else {
+			// check for explicit access type
+			final var forcedAccessType = determineAnnotationSpecifiedAccessType( searchedElement );
+
+			final var defaultAccessType = determineDefaultAccessType( searchedElement, context );
+
+			if ( forcedAccessType != null ) {
+				context.logMessage(
+						Diagnostic.Kind.OTHER,
+						"Explicit access type on " + searchedElement + ":" + forcedAccessType
+				);
+			}
+
+			final var newAccessTypeInfo =
+					new AccessTypeInformation( qualifiedName, forcedAccessType, defaultAccessType );
+			context.addAccessTypeInformation( qualifiedName, newAccessTypeInfo );
+			updateEmbeddableAccessType( searchedElement, context, newAccessTypeInfo.getAccessType() );
+			setDefaultAccessTypeForMappedSuperclassesInHierarchy( searchedElement, defaultAccessType, context );
+		}
+	}
+
+	public static TypeMirror getCollectionElementType(
+			DeclaredType type, String returnTypeName, @Nullable String explicitTargetEntityName, Context context) {
+		if ( explicitTargetEntityName != null ) {
+			return context.getElementUtils().getTypeElement( explicitTargetEntityName ).asType();
+		}
+		else {
+			final var typeArguments = type.getTypeArguments();
+			if ( typeArguments.isEmpty() ) {
+				throw new MetaModelGenerationException( "Unable to determine collection type" );
+			}
+			else if ( MAP.equals( returnTypeName ) ) {
+				return typeArguments.get( 1 );
+			}
+			else {
+				return typeArguments.get( 0 );
+			}
+		}
+	}
+
+	private static void updateEmbeddableAccessType(TypeElement element, Context context, AccessType defaultAccessType) {
+		for ( var field : ElementFilter.fieldsIn( element.getEnclosedElements() ) ) {
+			updateEmbeddableAccessTypeForMember( context, defaultAccessType, field );
+		}
+
+		for ( var method : ElementFilter.methodsIn( element.getEnclosedElements() ) ) {
+			updateEmbeddableAccessTypeForMember( context, defaultAccessType, method );
+		}
+	}
+
+	private static void updateEmbeddableAccessTypeForMember(Context context, AccessType defaultAccessType, Element member) {
+		final @Nullable var embedded = member.asType().accept( new EmbeddedAttributeVisitor( context ), member );
+		if ( embedded != null ) {
+			updateEmbeddableAccessType( context, defaultAccessType, embedded );
+		}
+	}
+
+	private static void updateEmbeddableAccessType(Context context, AccessType defaultAccessType, TypeElement embedded) {
+		final var embeddedClassName = embedded.getQualifiedName().toString();
+		final var forcedAccessType = determineAnnotationSpecifiedAccessType( embedded );
+		final var accessTypeInfo =
+				forcedAccessType != null
+						? new AccessTypeInformation( embeddedClassName, null, forcedAccessType )
+						: context.getAccessTypeInfo( embeddedClassName );
+
+		if ( accessTypeInfo == null ) {
+			final var newAccessTypeInfo =
+					new AccessTypeInformation( embeddedClassName, null, defaultAccessType );
+			context.addAccessTypeInformation( embeddedClassName, newAccessTypeInfo );
+			updateEmbeddableAccessType( embedded, context, defaultAccessType );
+			final var superclass = embedded.getSuperclass();
+			if ( superclass.getKind() == TypeKind.DECLARED ) {
+				final var declaredType = (DeclaredType) superclass;
+				final var element = (TypeElement) declaredType.asElement();
+				updateEmbeddableAccessType( context, defaultAccessType, element );
+			}
+		}
+		else {
+			accessTypeInfo.setDefaultAccessType(defaultAccessType);
+		}
+	}
+
+	private static @Nullable AccessType getDefaultAccessForHierarchy(TypeElement element, Context context) {
+		AccessType defaultAccessType = null;
+		var superClass = element;
+		do {
+			superClass = getSuperclassTypeElement( superClass );
+			if ( superClass != null ) {
+				if ( containsAnnotation( superClass, ENTITY, MAPPED_SUPERCLASS ) ) {
+					final var qualifiedName = superClass.getQualifiedName().toString();
+					final var accessTypeInfo = context.getAccessTypeInfo( qualifiedName );
+					if ( accessTypeInfo != null && accessTypeInfo.getDefaultAccessType() != null ) {
+						return accessTypeInfo.getDefaultAccessType();
+					}
+					defaultAccessType = getAccessTypeInCaseElementIsRoot( superClass, context );
+					if ( defaultAccessType != null ) {
+						final var newAccessTypeInfo
+								= new AccessTypeInformation( qualifiedName, null, defaultAccessType );
+						context.addAccessTypeInformation( qualifiedName, newAccessTypeInfo );
+
+						// we found an id within the class hierarchy and determined a default access type
+						// there cannot be any super entity classes (otherwise it would be a configuration error)
+						// but there might be mapped super classes
+						// Also note, that if two different class hierarchies with different access types have a common
+						// mapped super class, the access type of the mapped super class will be the one of the last
+						// hierarchy processed. The result is not determined which is odd with the spec
+						setDefaultAccessTypeForMappedSuperclassesInHierarchy( superClass, defaultAccessType, context );
+
+						// we found a default access type, no need to look further
+						break;
+					}
+					else {
+						defaultAccessType = getDefaultAccessForHierarchy( superClass, context );
+					}
+				}
+			}
+		}
+		while ( superClass != null );
+		return defaultAccessType;
+	}
+
+	private static void setDefaultAccessTypeForMappedSuperclassesInHierarchy(TypeElement element, AccessType defaultAccessType, Context context) {
+		var superClass = element;
+		do {
+			superClass = getSuperclassTypeElement( superClass );
+			if ( superClass != null ) {
+				final var qualifiedName = superClass.getQualifiedName().toString();
+				if ( containsAnnotation( superClass, MAPPED_SUPERCLASS ) ) {
+					final var forcedAccessType = determineAnnotationSpecifiedAccessType( superClass );
+					final var accessTypeInfo =
+							forcedAccessType != null
+									? new AccessTypeInformation( qualifiedName, null, forcedAccessType )
+									: new AccessTypeInformation( qualifiedName, null, defaultAccessType );
+					context.addAccessTypeInformation( qualifiedName, accessTypeInfo );
+				}
+			}
+		}
+		while ( superClass != null );
+	}
+
+	private static AccessType determineDefaultAccessType(TypeElement searchedElement, Context context) {
+
+		// do not check for `@Access` to determine the default access type of the hierarchy
+
+		final var idAccessType = determineAccessTypeFromId( searchedElement, context );
+		if ( idAccessType != null ) {
+			return idAccessType;
+		}
+
+		// next consider the current class
+
+		final var memberAccessType = determineAccessTypeFromMembers( searchedElement );
+		if ( memberAccessType != null ) {
+			return memberAccessType;
+		}
+
+		// next consider the root class of the hierarchy
+
+		final var rootEntity = getRootEntity( searchedElement );
+		if ( rootEntity != null ) {
+			final var rootMemberAccessType = determineAccessTypeFromMembers( rootEntity );
+			if ( rootMemberAccessType != null ) {
+				return rootMemberAccessType;
+			}
+		}
+
+		// as an absolute last resort, fall back to looking at mapped superclasses
+
+		for ( var candidate = getSuperclassTypeElement( searchedElement );
+			candidate != null;
+			candidate = getSuperclassTypeElement( candidate ) ) {
+			if ( containsAnnotation( candidate, MAPPED_SUPERCLASS ) ) {
+				final var accessType = determineAccessTypeFromMembers( candidate );
+				if ( accessType != null ) {
+					return accessType;
+				}
+			}
+		}
+
+		return DEFAULT_ACCESS_TYPE;
+	}
+
+	private static @Nullable AccessType determineAccessTypeFromId(TypeElement searchedElement, Context context) {
+		final var idAccessType = getAccessTypeInCaseElementIsRoot( searchedElement, context );
+		if ( idAccessType != null ) {
+			return idAccessType;
+		}
+		return getDefaultAccessForHierarchy( searchedElement, context );
+	}
+
+	private static @Nullable TypeElement getRootEntity(TypeElement element) {
+		TypeElement rootEntity = null;
+		for ( var candidate = element; candidate != null; candidate = getSuperclassTypeElement( candidate ) ) {
+			if ( containsAnnotation( candidate, ENTITY ) ) {
+				rootEntity = candidate;
+			}
+		}
+		return rootEntity;
+	}
+
+	/**
+	 * Infers the access type from the placement of {@code @Id} or {@code @EmbeddedId}.
+	 * Returns {@code null} if the class itself has an explicit {@code @Access}, or if
+	 * no member qualifies (members with their own {@code @Access} or {@code @Transient}
+	 * are skipped).
+	 *
+	 * @param searchedElement the type to inspect
+	 * @param context the global execution context
+	 *
+	 * @return the inferred {@link jakarta.persistence.AccessType}, or {@code null}
+	 */
+	private static @Nullable AccessType getAccessTypeInCaseElementIsRoot(TypeElement searchedElement, Context context) {
+		if ( !hasAnnotation( searchedElement, ACCESS ) ) {
+			for ( var subElement : searchedElement.getEnclosedElements() ) {
+				if ( !canBeUsedToInferAccessType( subElement ) ) continue;
+				for ( var entityAnnotation :
+						context.getElementUtils().getAllAnnotationMirrors( subElement ) ) {
+					if ( isIdAnnotation( entityAnnotation ) ) {
+						return getAccessTypeOfIdAnnotation( subElement );
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	private static @Nullable AccessType getAccessTypeOfIdAnnotation(Element element) {
+		return switch ( element.getKind() ) {
+			case FIELD -> AccessType.FIELD;
+			case METHOD -> AccessType.PROPERTY;
+			default -> null;
+		};
+	}
+
+	private static boolean isIdAnnotation(AnnotationMirror annotationMirror) {
+		return isAnnotationMirrorOfType( annotationMirror, ID )
+			|| isAnnotationMirrorOfType( annotationMirror, EMBEDDED_ID );
+	}
+
+	private static @Nullable AccessType determineAccessTypeFromMembers(TypeElement element) {
+		for ( var field : ElementFilter.fieldsIn( element.getEnclosedElements() ) ) {
+			if ( canBeUsedToInferAccessType( field )
+				&& hasMappingAnnotation( field ) ) {
+				return AccessType.FIELD;
+			}
+		}
+		for ( var method : ElementFilter.methodsIn( element.getEnclosedElements() ) ) {
+			if ( isPropertyGetter( (ExecutableType) method.asType(), method )
+				&& canBeUsedToInferAccessType( method )
+				&& hasMappingAnnotation( method ) ) {
+				return AccessType.PROPERTY;
+			}
+		}
+		return null;
+	}
+
+	private static boolean canBeUsedToInferAccessType(Element element) {
+		return !hasAnnotation( element, ACCESS, TRANSIENT );
+	}
+
+	private static boolean hasMappingAnnotation(Element element) {
+		for ( var mirror : element.getAnnotationMirrors() ) {
+			final var qualifiedName = ((TypeElement) mirror.getAnnotationType().asElement())
+					.getQualifiedName().toString();
+			if ( qualifiedName.startsWith( "jakarta.persistence." )
+				&& !IGNORED_PERSISTENCE_ANNOTATIONS.contains( qualifiedName ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static final Set<String> IGNORED_PERSISTENCE_ANNOTATIONS = Set.of(
+			"jakarta.persistence.PostLoad",
+			"jakarta.persistence.PostPersist",
+			"jakarta.persistence.PostRemove",
+			"jakarta.persistence.PostUpdate",
+			"jakarta.persistence.PrePersist",
+			"jakarta.persistence.PreRemove",
+			"jakarta.persistence.PreUpdate",
+			"jakarta.persistence.Transient",
+			"jakarta.persistence.Access"
+	);
+
+	public static @Nullable AccessType determineAnnotationSpecifiedAccessType(Element element) {
+		final var mirror = getAnnotationMirror( element, ACCESS );
+		if ( mirror != null ) {
+			final var accessType = getAnnotationValue( mirror );
+			if ( accessType != null ) {
+				final var enumValue = (VariableElement) accessType.getValue();
+				final var enumValueName = enumValue.getSimpleName();
+				if ( enumValueName.contentEquals(AccessType.PROPERTY.name()) ) {
+					return AccessType.PROPERTY;
+				}
+				else if ( enumValueName.contentEquals(AccessType.FIELD.name()) ) {
+					return AccessType.FIELD;
+				}
+			}
+		}
+		return null;
+	}
+
+	public static ElementKind getElementKindForAccessType(AccessType accessType) {
+		return accessType == AccessType.FIELD ? ElementKind.FIELD : ElementKind.METHOD;
+	}
+
+	public static String getKeyType(DeclaredType type, Context context) {
+		final var typeArguments = type.getTypeArguments();
+		if ( typeArguments.isEmpty() ) {
+			context.logMessage( Diagnostic.Kind.ERROR, "Unable to determine type argument for " + type );
+			return JAVA_OBJECT;
+		}
+		else {
+			return extractClosestRealTypeAsString( typeArguments.get( 0 ), context );
+		}
+	}
+
+	public static boolean isClassOrRecordType(Element element) {
+		final var kind = element.getKind();
+		// we want to accept classes and records but not enums,
+		// and we want to avoid depending on ElementKind.RECORD
+		return kind.isClass() && kind != ElementKind.ENUM;
+	}
+
+	public static boolean isClassRecordOrInterfaceType(Element element) {
+		final var kind = element.getKind();
+		// we want to accept classes and records but not enums,
+		// and we want to avoid depending on ElementKind.RECORD
+		return kind.isClass() && kind != ElementKind.ENUM
+			|| kind.isInterface() && kind != ElementKind.ANNOTATION_TYPE;
+	}
+
+	public static boolean primitiveClassMatchesKind(Class<?> itemType, TypeKind kind) {
+		return switch ( kind ) {
+			case SHORT -> itemType.equals( Short.class );
+			case INT -> itemType.equals( Integer.class );
+			case LONG -> itemType.equals( Long.class );
+			case BOOLEAN -> itemType.equals( Boolean.class );
+			case FLOAT -> itemType.equals( Float.class );
+			case DOUBLE -> itemType.equals( Double.class );
+			case CHAR -> itemType.equals( Character.class );
+			case BYTE -> itemType.equals( Byte.class );
+			default -> false;
+		};
+	}
+
+	public static boolean isPropertyGetter(ExecutableType executable, Element element) {
+		return element.getKind() == ElementKind.METHOD
+			&& isProperty( element.getSimpleName().toString(),
+				toTypeString( executable.getReturnType() ) );
+	}
+
+	public static boolean isPluralAttribute(Element element) {
+		return hasAnnotation( element, MANY_TO_MANY, ONE_TO_MANY, ELEMENT_COLLECTION, MANY_TO_ANY );
+	}
+
+	public static @Nullable String getFullyQualifiedClassNameOfTargetEntity(
+			AnnotationMirror mirror, String member) {
+		final var value = getAnnotationValue( mirror, member);
+		if ( value != null ) {
+			final var parameterType = (TypeMirror) value.getValue();
+			if ( parameterType.getKind() != TypeKind.VOID ) {
+				return parameterType.toString();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * @param annotations list of annotation mirrors.
+	 *
+	 * @return target entity class name as string or {@code null} if no targetEntity is here or if equals to void
+	 */
+	public static @Nullable String getTargetEntity(List<? extends AnnotationMirror> annotations) {
+		for ( var mirror : annotations ) {
+			if ( isAnnotationMirrorOfType( mirror, ELEMENT_COLLECTION ) ) {
+				return getFullyQualifiedClassNameOfTargetEntity( mirror, "targetClass" );
+			}
+			else if ( isAnnotationMirrorOfType( mirror, ONE_TO_MANY )
+					|| isAnnotationMirrorOfType( mirror, MANY_TO_MANY )
+					|| isAnnotationMirrorOfType( mirror, MANY_TO_ONE )
+					|| isAnnotationMirrorOfType( mirror, ONE_TO_ONE ) ) {
+				return getFullyQualifiedClassNameOfTargetEntity( mirror, "targetEntity" );
+			}
+			else if ( isAnnotationMirrorOfType( mirror, "org.hibernate.annotations.TargetEmbeddable") ) {
+				return getFullyQualifiedClassNameOfTargetEntity( mirror, "value" );
+			}
+		}
+		return null;
+	}
+
+	public static String propertyName(Element element) {
+		switch ( element.getKind() ) {
+			case FIELD:
+				return element.getSimpleName().toString();
+			case METHOD:
+				final var name = element.getSimpleName();
+				if ( name.length() > 3 && name.subSequence( 0, 3 ).equals( "get" ) ) {
+					return decapitalize( name.subSequence( 3, name.length() ).toString() );
+				}
+				else if ( name.length() > 2 && name.subSequence( 0, 2 ).equals( "is" ) ) {
+					return decapitalize( name.subSequence( 2, name.length() ).toString() );
+				}
+				else {
+					return decapitalize( name.toString() );
+				}
+			default:
+				return element.getSimpleName() + "/* " + element.getKind() + " */";
+		}
+	}
+
+	public static @Nullable Element findMappedSuperElement(Metamodel entity, Context context) {
+		final var element = entity.getElement();
+		if ( element instanceof TypeElement typeElement ) {
+			var superClass = typeElement.getSuperclass();
+			//superclass of Object is of NoType which returns some other kind
+			while ( superClass.getKind() == TypeKind.DECLARED ) {
+				final var declaredType = (DeclaredType) superClass;
+				final var superClassElement = (TypeElement) declaredType.asElement();
+				if ( extendsSuperMetaModel( superClassElement, entity.isMetaComplete(), context ) ) {
+					return superClassElement;
+				}
+				superClass = superClassElement.getSuperclass();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Checks whether this metamodel class needs to extend another metamodel class.
+	 * This method checks whether the processor has generated a metamodel class for the super class, but it also
+	 * allows for the possibility that the metamodel class was generated in a previous compilation. (It could be
+	 * part of a separate jar. See also METAGEN-35.)
+	 *
+	 * @param superClassElement the super class element
+	 * @param entityMetaComplete flag indicating if the entity for which the metamodel should be generated is
+	 * metamodel complete. If so we cannot use reflection to decide whether we have to add the extends clause
+	 * @param context the execution context
+	 *
+	 * @return {@code true} in case there is super class metamodel to extend from {@code false} otherwise.
+	 */
+	private static boolean extendsSuperMetaModel(Element superClassElement, boolean entityMetaComplete, Context context) {
+		// if we processed the superclass in the same run we definitely need to extend
+		final var typeElement = (TypeElement) superClassElement;
+		final var superClassName = typeElement.getQualifiedName().toString();
+		return context.containsMetaEntity( superClassName )
+			|| context.containsMetaEmbeddable( superClassName )
+			// to allow for the case that the metamodel class for the super entity is for example contained in another
+			// jar file we use reflection. However, we need to consider the fact that there is xml configuration
+			// and annotations should be ignored
+			|| !entityMetaComplete && containsAnnotation( superClassElement, ENTITY, MAPPED_SUPERCLASS );
+	}
+
+	public static boolean implementsInterface(TypeElement type, String interfaceName) {
+		for ( var iface : type.getInterfaces() ) {
+			if ( iface.getKind() == TypeKind.DECLARED ) {
+				final var declaredType = (DeclaredType) iface;
+				final var typeElement = (TypeElement) declaredType.asElement();
+				if ( typeElement.getQualifiedName().contentEquals( interfaceName )
+						|| implementsInterface( typeElement, interfaceName ) ) {
+					return true;
+				}
+			}
+		}
+		var superclass = type.getSuperclass();
+		if ( superclass != null && superclass.getKind() == TypeKind.DECLARED  ) {
+			final var declaredType = (DeclaredType) superclass;
+			final var typeElement = (TypeElement) declaredType.asElement();
+			if ( implementsInterface( typeElement, interfaceName) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public static boolean extendsClass(TypeElement type, String className) {
+		var superclass = type.getSuperclass();
+		while ( superclass != null && superclass.getKind() == TypeKind.DECLARED  ) {
+			final var declaredType = (DeclaredType) superclass;
+			final var typeElement = (TypeElement) declaredType.asElement();
+			if ( typeElement.getQualifiedName().contentEquals( className ) ) {
+				return true;
+			}
+			superclass = typeElement.getSuperclass();
+		}
+		return false;
+	}
+
+	public static boolean isMemberType(Element element) {
+		return element.getEnclosingElement() instanceof TypeElement;
+	}
+
+	public static String getGeneratedClassFullyQualifiedName(TypeElement typeElement, boolean jakartaDataStyle) {
+		final var simpleName = typeElement.getSimpleName().toString();
+		final var enclosingElement = typeElement.getEnclosingElement();
+		return qualifiedName( enclosingElement, jakartaDataStyle )
+				+ "." + (jakartaDataStyle ? '_' + simpleName : simpleName + '_');
+	}
+
+	private static String qualifiedName(@Nullable Element enclosingElement, boolean jakartaDataStyle) {
+		if ( enclosingElement instanceof TypeElement typeElement ) {
+			return getGeneratedClassFullyQualifiedName( typeElement, jakartaDataStyle );
+		}
+		else if ( enclosingElement instanceof PackageElement packageElement ) {
+			return packageElement.getQualifiedName().toString();
+		}
+		else {
+			throw new MetaModelGenerationException( "Unexpected enclosing element: " + enclosingElement );
+		}
+	}
+
+
+	public static String getGeneratedClassFullyQualifiedName(TypeElement element, String packageName, boolean jakartaDataStyle) {
+		final var builder = new StringBuilder( packageName );
+		final var qualifiedName = element.getQualifiedName();
+		final var tail = qualifiedName.subSequence( builder.length(), qualifiedName.length() ).toString();
+		for ( var bit : split( ".", tail ) ) {
+			final var part = removeDollar( bit );
+			if ( !builder.isEmpty() ) {
+				builder.append( "." );
+			}
+			builder.append( jakartaDataStyle ? '_' + part : part + '_' );
+		}
+		return builder.toString();
+	}
+
+	static class EmbeddedAttributeVisitor extends SimpleTypeVisitor8<TypeElement, Element> {
+		private final Context context;
+
+		EmbeddedAttributeVisitor(Context context) {
+			this.context = context;
+		}
+
+		@Override
+		public @Nullable TypeElement visitDeclared(DeclaredType declaredType, Element element) {
+			final var returnedElement = (TypeElement)
+					context.getTypeUtils().asElement( declaredType );
+			return containsAnnotation( castNonNull( returnedElement ), EMBEDDABLE ) ? returnedElement : null;
+		}
+
+		@Override
+		public @Nullable TypeElement visitExecutable(ExecutableType executable, Element element) {
+			if ( element.getKind().equals( ElementKind.METHOD ) ) {
+				final var string = element.getSimpleName().toString();
+				return isProperty( string, toTypeString( executable.getReturnType() ) )
+						? executable.getReturnType().accept(this, element)
+						: null;
+			}
+			else {
+				return null;
+			}
+		}
+	}
+
+	public static boolean isPrimitive(String paramType) {
+		return PRIMITIVE_TYPES.contains( paramType );
+	}
+
+	public static final Set<String> PRIMITIVE_TYPES =
+			Set.of("boolean", "char", "long", "int", "short", "byte", "double", "float");
+
+	public static String resolveTypeName(TypeElement typeElement, Element element, String name) {
+		final var mirror = resolveTypeMirror( typeElement, element, name );
+		return mirror == null ? name : mirror.toString();
+	}
+
+	public static @Nullable TypeMirror resolveTypeMirror(TypeElement typeElement, Element element, String name) {
+		final var mirrorMap = resolveTypeParameters( typeElement.asType(), element, Map.of(), new HashSet<>() );
+		return mirrorMap == null ? null : mirrorMap.get( name );
+	}
+
+	private static @Nullable Map<String, TypeMirror> resolveTypeParameters(TypeMirror type, Element element, Map<String, TypeMirror> parametersMap, Collection<Element> visited) {
+		if ( !(type instanceof DeclaredType declaredType
+			&& declaredType.asElement() instanceof TypeElement typeElement) ) {
+			return null;
+		}
+		if ( !visited.add( typeElement ) ) {
+			return null;
+		}
+		final var generic = typeElement.getTypeParameters();
+		final var map = new HashMap<String, TypeMirror>();
+		var typeArguments = declaredType.getTypeArguments();
+		if ( !(typeArguments.isEmpty() || generic.size() == typeArguments.size()) ) {
+			return null;
+		}
+		for ( var n = 0; n < generic.size(); ++n ) {
+			final var mirror = typeArguments.isEmpty()
+					? generic.get( 0 ).getBounds().get( 0 )
+					: typeArguments.get( n );
+			final var value = mirror.toString();
+			map.put( generic.get( n ).asType().toString(), parametersMap.getOrDefault( value, mirror ) );
+		}
+		if ( typeElement.equals( element ) ) {
+			return map;
+		}
+		return concat(
+				Stream.of( typeElement.getSuperclass() ),
+				typeElement.getInterfaces().stream()
+		).map( tm -> resolveTypeParameters( tm, element, map, visited ) )
+				.filter( Objects::nonNull )
+				.findFirst().orElse( null );
+	}
+}

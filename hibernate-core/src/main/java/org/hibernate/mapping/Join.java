@@ -1,0 +1,255 @@
+package org.hibernate.mapping;
+
+import org.hibernate.MappingException;
+import org.hibernate.jdbc.Expectation;
+import org.hibernate.sql.Alias;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Supplier;
+
+/**
+ * A mapping model object representing some sort of auxiliary table, for
+ * example, an {@linkplain jakarta.persistence.JoinTable association table},
+ * a {@linkplain jakarta.persistence.SecondaryTable secondary table}, or a
+ * table belonging to a {@linkplain jakarta.persistence.InheritanceType#JOINED
+ * joined subclass}.
+ *
+ * @author Gavin King
+ */
+public class Join implements AttributeContainer, AuxiliaryTableHolder, Serializable {
+
+	private static final Alias PK_ALIAS = new Alias(15, "PK");
+
+	private final ArrayList<Property> properties = new ArrayList<>();
+	private final ArrayList<Property> declaredProperties = new ArrayList<>();
+	private Table table;
+	private Table auxiliaryTable;
+	private Map<String, Column> auxiliaryColumns;
+	private KeyValue key;
+	private PersistentClass persistentClass;
+	private boolean inverse;
+	private boolean optional;
+	private String sqlRestriction;
+	private boolean disableForeignKeyCreation;
+
+	// Custom SQL
+	private String customSQLInsert;
+	private boolean customInsertCallable;
+	private String customSQLUpdate;
+	private boolean customUpdateCallable;
+	private String customSQLDelete;
+	private boolean customDeleteCallable;
+
+	private Supplier<? extends Expectation> insertExpectation;
+	private Supplier<? extends Expectation> updateExpectation;
+	private Supplier<? extends Expectation> deleteExpectation;
+
+	@Override
+	public void addProperty(Property property) {
+		properties.add( property );
+		declaredProperties.add( property );
+		property.setPersistentClass( persistentClass );
+	}
+
+	@Override
+	public boolean contains(Property property) {
+		return properties.contains( property );
+	}
+
+	@Override
+	public Property getProperty(String propertyName) throws MappingException {
+		throw new UnsupportedOperationException(); //TODO
+	}
+
+	public void addMappedSuperclassProperty(Property property ) {
+		properties.add( property );
+		property.setPersistentClass( persistentClass );
+	}
+
+	public List<Property> getDeclaredProperties() {
+		return declaredProperties;
+	}
+
+	public List<Property> getProperties() {
+		return properties;
+	}
+
+	public boolean containsProperty(Property property) {
+		return properties.contains( property );
+	}
+
+	@Override
+	public Table getTable() {
+		return table;
+	}
+
+	public void setTable(Table table) {
+		this.table = table;
+	}
+
+	@Override
+	public Table getAuxiliaryTable() {
+		return auxiliaryTable;
+	}
+
+	@Override
+	public void setAuxiliaryTable(Table auxiliaryTable) {
+		this.auxiliaryTable = auxiliaryTable;
+	}
+
+	@Override
+	public Column getAuxiliaryColumn(String name) {
+		return auxiliaryColumns == null ? null : auxiliaryColumns.get( name );
+	}
+
+	@Override
+	public void addAuxiliaryColumn(String name, Column column) {
+		if ( auxiliaryColumns == null ) {
+			auxiliaryColumns = new HashMap<>();
+		}
+		auxiliaryColumns.put( name, column );
+	}
+
+	public String getSqlRestriction() {
+		return sqlRestriction;
+	}
+
+	public void setSqlRestriction(String sqlRestriction) {
+		this.sqlRestriction = sqlRestriction;
+	}
+
+	public KeyValue getKey() {
+		return key;
+	}
+
+	public void setKey(KeyValue key) {
+		this.key = key;
+	}
+
+	public PersistentClass getPersistentClass() {
+		return persistentClass;
+	}
+
+	public void setPersistentClass(PersistentClass persistentClass) {
+		this.persistentClass = persistentClass;
+	}
+
+	public void disableForeignKeyCreation() {
+		disableForeignKeyCreation = true;
+	}
+
+	public void createForeignKey() {
+		final var foreignKey = getKey().createForeignKeyOfEntity( persistentClass.getEntityName() );
+		if ( foreignKey != null && disableForeignKeyCreation ) {
+			foreignKey.disableCreation();
+		}
+	}
+
+	public void createPrimaryKey() {
+		//Primary key constraint
+		final var primaryKey = new PrimaryKey( table );
+		primaryKey.setName( PK_ALIAS.toAliasString( table.getName() ) );
+		table.setPrimaryKey(primaryKey);
+		primaryKey.addColumns( getKey() );
+	}
+
+	public int getPropertySpan() {
+		return properties.size();
+	}
+
+	public void setCustomSQLInsert(String customSQLInsert, boolean callable) {
+		this.customSQLInsert = customSQLInsert;
+		this.customInsertCallable = callable;
+	}
+
+	public String getCustomSQLInsert() {
+		return customSQLInsert;
+	}
+
+	public boolean isCustomInsertCallable() {
+		return customInsertCallable;
+	}
+
+	public void setCustomSQLUpdate(String customSQLUpdate, boolean callable) {
+		this.customSQLUpdate = customSQLUpdate;
+		this.customUpdateCallable = callable;
+	}
+
+	public String getCustomSQLUpdate() {
+		return customSQLUpdate;
+	}
+
+	public boolean isCustomUpdateCallable() {
+		return customUpdateCallable;
+	}
+
+	public void setCustomSQLDelete(String customSQLDelete, boolean callable) {
+		this.customSQLDelete = customSQLDelete;
+		this.customDeleteCallable = callable;
+	}
+
+	public String getCustomSQLDelete() {
+		return customSQLDelete;
+	}
+
+	public boolean isCustomDeleteCallable() {
+		return customDeleteCallable;
+	}
+
+	public boolean isInverse() {
+		return inverse;
+	}
+
+	public void setInverse(boolean leftJoin) {
+		this.inverse = leftJoin;
+	}
+
+	public String toString() {
+		return getClass().getSimpleName() + '(' + table.getName() + ')';
+	}
+
+	public boolean isLazy() {
+		for ( Property property : properties ) {
+			if ( !property.isLazy() ) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	public boolean isOptional() {
+		return optional;
+	}
+
+	public void setOptional(boolean nullable) {
+		this.optional = nullable;
+	}
+
+	public Supplier<? extends Expectation> getInsertExpectation() {
+		return insertExpectation;
+	}
+
+	public void setInsertExpectation(Supplier<? extends Expectation> insertExpectation) {
+		this.insertExpectation = insertExpectation;
+	}
+
+	public Supplier<? extends Expectation> getUpdateExpectation() {
+		return updateExpectation;
+	}
+
+	public void setUpdateExpectation(Supplier<? extends Expectation> updateExpectation) {
+		this.updateExpectation = updateExpectation;
+	}
+
+	public Supplier<? extends Expectation> getDeleteExpectation() {
+		return deleteExpectation;
+	}
+
+	public void setDeleteExpectation(Supplier<? extends Expectation> deleteExpectation) {
+		this.deleteExpectation = deleteExpectation;
+	}
+}

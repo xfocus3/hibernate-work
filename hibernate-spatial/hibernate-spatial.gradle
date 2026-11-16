@@ -1,0 +1,48 @@
+plugins {
+	id "local.publishing-java-module"
+	id "local.publishing-group-relocation"
+}
+
+description = 'Integrate support for Spatial/GIS data into Hibernate O/RM'
+
+dependencies {
+	api project( ':hibernate-core' )
+	api libs.geolatte
+
+	compileOnly libs.jdbc.postgresql
+
+	testImplementation project( ':hibernate-testing' )
+	testImplementation project( ':hibernate-ant' )
+	testImplementation project( path: ':hibernate-core', configuration: 'tests' )
+
+	testImplementation libs.jakarta.validation
+	testImplementation libs.jandex
+	testImplementation libs.test.validator
+
+	testImplementation libs.jdbc.postgresql
+	testImplementation libs.jdbc.h2gis
+
+	testRuntimeOnly libs.byteBuddy
+}
+
+sourceSets.test.resources {
+	setSrcDirs( ['src/test/resources'] )
+}
+
+tasks.test {
+
+	enabled = ['h2',
+			   'postgis',
+			   'cockroachdb',
+			   'mariadb',
+			   'mariadb',
+			   'mysql',
+			   'mysql',
+			   'oracle',
+			   'oracle',
+			   'oracle_test_pilot_database',
+			   'oracle_xe',
+			   'mssql',
+			   'mssql'
+	].contains( project.db )
+}

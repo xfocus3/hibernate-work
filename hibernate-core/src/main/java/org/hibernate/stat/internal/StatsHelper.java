@@ -1,0 +1,24 @@
+package org.hibernate.stat.internal;
+
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.persister.entity.EntityPersister;
+
+/**
+ * Utilities useful when dealing with stats.
+ *
+ * @author Steve Ebersole
+ */
+public class StatsHelper {
+
+	public static NavigableRole getRootEntityRole(EntityPersister entityDescriptor) {
+		final String rootEntityName = entityDescriptor.getRootEntityName();
+		return entityDescriptor.getEntityName().equals( rootEntityName )
+				? entityDescriptor.getNavigableRole()
+				: entityDescriptor.getFactory().getMappingMetamodel()
+						.getEntityDescriptor( rootEntityName )
+						.getNavigableRole();
+	}
+
+	private StatsHelper() {
+	}
+}

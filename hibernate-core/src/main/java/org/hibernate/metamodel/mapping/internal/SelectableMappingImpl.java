@@ -1,0 +1,254 @@
+package org.hibernate.metamodel.mapping.internal;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.Locale;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.mapping.Column;
+import org.hibernate.mapping.Selectable;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.metamodel.mapping.SelectablePath;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+/**
+ * @author Christian Beikov
+ */
+public class SelectableMappingImpl extends SqlTypedMappingImpl implements SelectableMapping {
+
+	private final String containingTableExpression;
+	private final String selectionExpression;
+	private final SelectablePath selectablePath;
+	private final @Nullable String customReadExpression;
+	private final @Nullable String customWriteExpression;
+	private final boolean isLob;
+	private final boolean nullable;
+	private final boolean insertable;
+	private final boolean updateable;
+	private final boolean partitioned;
+	private final boolean isFormula;
+
+	public SelectableMappingImpl(
+			String containingTableExpression,
+			String selectionExpression,
+			@Nullable SelectablePath selectablePath,
+			@Nullable String customReadExpression,
+			@Nullable String customWriteExpression,
+			@Nullable Long length,
+			@Nullable Integer precision,
+			@Nullable Integer scale,
+			@Nullable Integer temporalPrecision,
+			boolean isLob,
+			boolean nullable,
+			boolean insertable,
+			boolean updateable,
+			boolean partitioned,
+			boolean isFormula,
+			JdbcMapping jdbcMapping) {
+		this(
+				containingTableExpression,
+				selectionExpression,
+				selectablePath,
+				customReadExpression,
+				customWriteExpression,
+				length,
+				null,
+				precision,
+				scale,
+				temporalPrecision,
+				isLob,
+				nullable,
+				insertable,
+				updateable,
+				partitioned,
+				isFormula,
+				jdbcMapping
+		);
+	}
+
+	public SelectableMappingImpl(
+			String containingTableExpression,
+			String selectionExpression,
+			@Nullable SelectablePath selectablePath,
+			@Nullable String customReadExpression,
+			@Nullable String customWriteExpression,
+			@Nullable Long length,
+			@Nullable Integer arrayLength,
+			@Nullable Integer precision,
+			@Nullable Integer scale,
+			@Nullable Integer temporalPrecision,
+			boolean isLob,
+			boolean nullable,
+			boolean insertable,
+			boolean updateable,
+			boolean partitioned,
+			boolean isFormula,
+			JdbcMapping jdbcMapping) {
+		super( length, arrayLength, precision, scale, temporalPrecision, jdbcMapping );
+		assert selectionExpression != null;
+		// Save memory by using interned strings. Probability is high that we have multiple duplicate strings
+		this.containingTableExpression = containingTableExpression.intern();
+		this.selectionExpression = selectionExpression.intern();
+		this.selectablePath = selectablePath == null ? new SelectablePath( selectionExpression ) : selectablePath;
+		this.customReadExpression = customReadExpression == null ? null : customReadExpression.intern();
+		this.customWriteExpression = customWriteExpression == null || isFormula ? null : customWriteExpression.intern();
+		this.isLob = isLob;
+		this.nullable = nullable;
+		this.insertable = insertable;
+		this.updateable = updateable;
+		this.partitioned = partitioned;
+		this.isFormula = isFormula;
+	}
+
+	public static SelectableMapping from(
+			final String containingTableExpression,
+			final Selectable selectable,
+			// The path to the property for this selectable mapping, which is used as selectable name
+			// if the selectable is a formula. If it's a formula, the value should be non-null
+			@Nullable final String propertyPath,
+			@Nullable final SelectablePath parentPath,
+			final JdbcMapping jdbcMapping,
+			boolean insertable,
+			boolean updateable,
+			boolean partitioned,
+			boolean forceNotNullable,
+			RuntimeModelCreationContext creationContext) {
+		final var dialect = creationContext.getDialect();
+		final String columnExpression;
+		final Long length;
+		final Integer arrayLength;
+		final Integer precision;
+		final Integer scale;
+		final Integer temporalPrecision;
+		final SelectablePath selectablePath;
+		final boolean isLob;
+		final boolean isNullable;
+		if ( selectable.isFormula() ) {
+			columnExpression =
+					selectable.getTemplate( dialect,
+							creationContext.getTypeConfiguration() );
+			length = null;
+			arrayLength = null;
+			precision = null;
+			scale = null;
+			temporalPrecision = null;
+			isNullable = true;
+			isLob = false;
+			assert propertyPath != null : "Property path must be non-null for formulas";
+			selectablePath = new SelectablePath( castNonNull( propertyPath ) );
+		}
+		else {
+			var column = (Column) selectable;
+			final var size = column.getColumnSize( creationContext.getDialect(), creationContext.getMetadata() );
+			columnExpression = selectable.getText( dialect );
+			length = size.getLength();
+			arrayLength = size.getArrayLength();
+			precision = size.getPrecision();
+			scale = size.getScale();
+			temporalPrecision = column.getTemporalPrecision();
+
+			isNullable = !forceNotNullable && column.isNullable();
+			isLob = column.isSqlTypeLob( creationContext.getMetadata() );
+			selectablePath = parentPath == null
+					? null
+					: parentPath.append( column.getQuotedName( dialect ) );
+		}
+		return new SelectableMappingImpl(
+				containingTableExpression,
+				columnExpression,
+				selectablePath,
+				selectable.getCustomReadExpression(),
+				selectable.getWriteExpr( jdbcMapping, dialect,
+						creationContext.getBootModel() ),
+				length,
+				arrayLength,
+				precision,
+				scale,
+				temporalPrecision,
+				isLob,
+				isNullable,
+				insertable,
+				updateable,
+				partitioned,
+				selectable.isFormula(),
+				jdbcMapping
+		);
+	}
+
+	@Override
+	public String toString() {
+		return String.format(
+				Locale.ROOT,
+				"SelectableMapping(`%s`.`%s`)",
+				containingTableExpression,
+				selectionExpression
+		);
+	}
+
+	@Nonnull
+	@Override
+	public String getContainingTableExpression() {
+		return containingTableExpression;
+	}
+
+	@Nonnull
+	@Override
+	public String getSelectionExpression() {
+		return selectionExpression;
+	}
+
+	@Nonnull
+	@Override
+	public String getSelectableName() {
+		return selectablePath.getSelectableName();
+	}
+
+	@Nonnull
+	@Override
+	public SelectablePath getSelectablePath() {
+		return selectablePath;
+	}
+
+	@Override
+	public @Nullable String getCustomReadExpression() {
+		return customReadExpression;
+	}
+
+	@Override
+	public @Nullable String getCustomWriteExpression() {
+		return customWriteExpression;
+	}
+
+	@Override
+	public boolean isLob() {
+		return isLob;
+	}
+
+	@Override
+	public boolean isFormula() {
+		return isFormula;
+	}
+
+	@Override
+	public boolean isNullable() {
+		return nullable;
+	}
+
+	@Override
+	public boolean isInsertable() {
+		return insertable;
+	}
+
+	@Override
+	public boolean isUpdateable() {
+		return updateable;
+	}
+
+	@Override
+	public boolean isPartitioned() {
+		return partitioned;
+	}
+}

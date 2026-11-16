@@ -1,0 +1,36 @@
+package org.hibernate.persister.collection.mutation;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+
+/**
+ * Removes the collection:<ul>
+ *     <li>
+ *         For collections with a collection-table, this will execute a DELETE based
+ *         on the {@linkplain org.hibernate.engine.spi.CollectionKey collection-key}
+ *     </li>
+ *     <li>
+ *         For one-to-many collections, this executes an UPDATE to unset the collection-key
+ *         on the association table
+ *     </li>
+ * </ul>
+ *
+ * @see org.hibernate.persister.collection.CollectionPersister#remove
+ *
+ * @author Steve Ebersole
+ */
+public interface RemoveCoordinator extends CollectionOperationCoordinator {
+	/**
+	 * The SQL used to perform the removal, or {@code null} if this is a no-op
+	 * or a more complex operation requiring multiple SQL strings.
+	 */
+	@Nullable String getSqlString();
+
+	/**
+	 * Delete all rows based on the collection-key
+	 */
+	void deleteAllRows(@Nonnull Object key, @Nonnull SharedSessionContractImplementor session);
+
+}

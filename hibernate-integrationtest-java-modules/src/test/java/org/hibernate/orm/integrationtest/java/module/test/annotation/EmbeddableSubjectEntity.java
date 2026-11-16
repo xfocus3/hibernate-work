@@ -1,0 +1,14 @@
+package org.hibernate.orm.integrationtest.java.module.test.annotation;
+
+import jakarta.persistence.Embedded;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+
+@Entity(name = "EmbeddableSubjectEntity")
+public class EmbeddableSubjectEntity {
+	@Id
+	public Long id;
+
+	@Embedded
+	public StubEmbeddable embeddable;
+}

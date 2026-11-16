@@ -1,0 +1,93 @@
+package org.hibernate.query.results.internal.dynamic;
+
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+import org.hibernate.internal.util.collections.ArrayHelper;
+import org.hibernate.query.results.spi.FetchBuilder;
+import org.hibernate.sql.results.graph.Fetchable;
+
+/**
+ * @author Steve Ebersole
+ */
+public abstract class AbstractFetchBuilderContainer<T extends AbstractFetchBuilderContainer<T>>
+		implements DynamicFetchBuilderContainer {
+	Map<Fetchable, FetchBuilder> fetchBuilderMap;
+
+	protected AbstractFetchBuilderContainer() {
+	}
+
+	protected AbstractFetchBuilderContainer(AbstractFetchBuilderContainer<T> original) {
+		if ( original.fetchBuilderMap != null ) {
+			fetchBuilderMap = new HashMap<>( original.fetchBuilderMap.size() );
+			for ( var entry : original.fetchBuilderMap.entrySet() ) {
+				final var fetchBuilder =
+						entry.getValue() instanceof DynamicFetchBuilderStandard dynamicFetchBuilderStandard
+								? dynamicFetchBuilderStandard.cacheKeyInstance()
+								: entry.getValue().cacheKeyInstance();
+				fetchBuilderMap.put( entry.getKey(), fetchBuilder );
+			}
+		}
+	}
+
+	protected abstract String getPropertyBase();
+
+	@Override
+	public FetchBuilder findFetchBuilder(Fetchable fetchable) {
+		return fetchBuilderMap == null ? null : fetchBuilderMap.get( fetchable );
+	}
+
+	@Override
+	public T addProperty(Fetchable fetchable, String columnAlias) {
+		final var fetchBuilder = addProperty( fetchable );
+		fetchBuilder.addColumnAlias( columnAlias );
+		return (T) this;
+	}
+
+	@Override
+	public T addProperty(Fetchable fetchable, String... columnAliases) {
+		final var fetchBuilder = addProperty( fetchable );
+		ArrayHelper.forEach( columnAliases, fetchBuilder::addColumnAlias );
+		return (T) this;
+	}
+
+	@Override
+	public DynamicFetchBuilder addProperty(Fetchable fetchable) {
+		if ( fetchBuilderMap == null ) {
+			fetchBuilderMap = new HashMap<>();
+		}
+		else {
+			final var existing = fetchBuilderMap.get( fetchable );
+			if ( existing != null ) {
+				throw new IllegalArgumentException(
+						String.format(
+								Locale.ROOT,
+								"Fetch was already defined for %s.%s : %s",
+								getPropertyBase(),
+								fetchable,
+								existing
+						)
+				);
+			}
+		}
+
+		final var fetchBuilder = new DynamicFetchBuilderStandard( fetchable	);
+		fetchBuilderMap.put( fetchable, fetchBuilder );
+		return fetchBuilder;
+	}
+
+	@Override
+	public void addFetchBuilder(Fetchable fetchable, FetchBuilder fetchBuilder) {
+		if ( fetchBuilderMap == null ) {
+			fetchBuilderMap = new HashMap<>();
+		}
+		fetchBuilderMap.put( fetchable, fetchBuilder );
+	}
+
+	@Override
+	public abstract boolean equals(Object object);
+
+	@Override
+	public abstract int hashCode();
+}

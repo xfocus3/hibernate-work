@@ -1,0 +1,443 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import org.hibernate.dialect.sql.ast.spi.SqlAstTranslationRequest;
+
+import jakarta.persistence.PessimisticLockScope;
+import org.hibernate.HibernateException;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.Locking;
+import org.hibernate.Timeouts;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.loader.ast.spi.NaturalIdLoadOptions;
+import org.hibernate.loader.ast.spi.NaturalIdLoader;
+import org.hibernate.metamodel.mapping.EntityIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.NaturalIdMapping;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.query.internal.SimpleQueryOptions;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.query.sqm.ComparisonOperator;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.creation.SimpleFromClauseAccessImpl;
+import org.hibernate.sql.ast.spi.creation.SqlAliasBaseManager;
+import org.hibernate.sql.ast.spi.creation.SqlExpressionResolver;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.JdbcParameter;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.predicate.ComparisonPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.NullnessPredicate;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.ast.spi.query.select.SelectStatement;
+import org.hibernate.sql.exec.internal.BaseExecutionContext;
+import org.hibernate.sql.exec.internal.CallbackImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingImpl;
+import org.hibernate.sql.exec.internal.JdbcParameterBindingsImpl;
+import org.hibernate.sql.exec.internal.SqlTypedMappingJdbcParameter;
+import org.hibernate.sql.exec.spi.Callback;
+import org.hibernate.sql.exec.spi.JdbcParameterBinding;
+import org.hibernate.sql.exec.spi.JdbcParameterBindings;
+import org.hibernate.sql.exec.spi.JdbcParametersList;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+import org.hibernate.sql.results.graph.internal.ImmutableFetchList;
+import org.hibernate.sql.results.internal.RowTransformerSingularReturnImpl;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
+
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singletonList;
+import static org.hibernate.engine.internal.NaturalIdLogging.NATURAL_ID_LOGGER;
+
+/**
+ * Base support for {@link NaturalIdLoader} implementations
+ */
+public abstract class AbstractNaturalIdLoader<T> implements NaturalIdLoader<T> {
+
+	// todo (6.0) : account for nullable attributes that are part of the natural-id (is-null-or-equals)
+	// todo (6.0) : cache the SQL AST and JdbcParameter list
+
+	private final NaturalIdMapping naturalIdMapping;
+	private final EntityMappingType entityDescriptor;
+
+	public AbstractNaturalIdLoader(
+			@Nonnull NaturalIdMapping naturalIdMapping,
+			@Nonnull EntityMappingType entityDescriptor) {
+		this.naturalIdMapping = naturalIdMapping;
+		this.entityDescriptor = entityDescriptor;
+	}
+
+	@Nonnull
+	protected EntityMappingType entityDescriptor() {
+		return entityDescriptor;
+	}
+
+	@Nonnull
+	protected NaturalIdMapping naturalIdMapping() {
+		return naturalIdMapping;
+	}
+
+	@Nonnull
+	@Override
+	public EntityMappingType getLoadable() {
+		return entityDescriptor();
+	}
+
+	@Nullable
+	@Override
+	public T load(@Nullable Object naturalIdToLoad, @Nonnull Options options, @Nonnull SharedSessionContractImplementor session) {
+		final var lockOptions = makeLockOptions( options );
+		return load( naturalIdToLoad, lockOptions, session );
+	}
+
+	@Nonnull
+	private LockOptions makeLockOptions(@Nonnull Options options) {
+		if ( options.getLockMode() == null || options.getLockMode() == LockMode.NONE ) {
+			return LockOptions.NONE;
+		}
+		if ( options.getLockMode() == LockMode.READ ) {
+			return LockOptions.READ;
+		}
+
+		final var lockOptions = new LockOptions( options.getLockMode() );
+		lockOptions.setScope( options.getLockScope() != null ? options.getLockScope() : PessimisticLockScope.NORMAL );
+		lockOptions.setTimeout( options.getLockTimeout() != null ? options.getLockTimeout() : Timeouts.WAIT_FOREVER );
+		lockOptions.setFollowOnStrategy( options.getLockFollowOn() != null ? options.getLockFollowOn() : Locking.FollowOn.ALLOW );
+		return lockOptions;
+	}
+
+	@Nullable
+	private T load(@Nullable Object naturalIdValue, @Nonnull LockOptions lockOptions, @Nonnull SharedSessionContractImplementor session) {
+		final var factory = session.getFactory();
+
+		final var sqlSelect = LoaderSelectBuilder.createSelect(
+				getLoadable(),
+				null,  // null here means to select everything
+				true,
+				emptyList(),  // we're going to add the restrictions ourselves
+				null,
+				1,
+				session.getLoadQueryInfluencers(),
+				lockOptions,
+				JdbcParametersList.newBuilder()::add,
+				new SqlAliasBaseManager(),
+				factory
+		);
+
+		final var querySpec = sqlSelect.getQuerySpec();
+		return executeNaturalIdQuery(
+				naturalIdValue,
+				lockOptions,
+				sqlSelect,
+				querySpec.getFromClause().getRoots().get(0),
+				querySpec::applyPredicate,
+				new LoaderSqlAstCreationState(
+						querySpec,
+						new SqlAliasBaseManager(),
+						new SimpleFromClauseAccessImpl(),
+						lockOptions,
+						(fetchParent, creationState) -> ImmutableFetchList.EMPTY,
+						true,
+						new LoadQueryInfluencers( factory ),
+						factory.getSqlTranslationEngine()
+				),
+				session
+		);
+	}
+
+	@Nullable
+	@Override
+	public T load(@Nullable Object naturalIdValue, @Nonnull NaturalIdLoadOptions options, @Nonnull SharedSessionContractImplementor session) {
+		final var lockOptions = options.getLockOptions() == null
+				? new LockOptions()
+				: options.getLockOptions();
+		return load( naturalIdValue, lockOptions, session );
+	}
+
+	/**
+	 * Apply restriction necessary to match the given natural-id value.
+	 * Should also apply any predicates to the predicate consumer and
+	 * any parameter / binding pairs.
+	 */
+	protected abstract void applyNaturalIdRestriction(
+			@Nullable Object bindValue,
+			@Nonnull TableGroup rootTableGroup,
+			@Nonnull Consumer<Predicate> predicateConsumer,
+			@Nonnull BiConsumer<JdbcParameter, JdbcParameterBinding> jdbcParameterConsumer,
+			@Nonnull LoaderSqlAstCreationState sqlAstCreationState,
+			@Nonnull SharedSessionContractImplementor session);
+
+	/**
+	 * Helper to resolve ColumnReferences
+	 */
+	@Nonnull
+	protected Expression resolveColumnReference(
+			@Nonnull TableGroup rootTableGroup,
+			@Nonnull SelectableMapping selectableMapping,
+			@Nonnull SqlExpressionResolver sqlExpressionResolver) {
+		final var tableReference = rootTableGroup.getTableReference(
+				rootTableGroup.getNavigablePath(),
+				selectableMapping.getContainingTableExpression()
+		);
+		if ( tableReference == null ) {
+			throw new IllegalStateException(
+					String.format(
+							Locale.ROOT,
+							"Unable to locate TableReference for '%s' : %s",
+							selectableMapping.getContainingTableExpression(),
+							rootTableGroup
+					)
+			);
+		}
+		return sqlExpressionResolver.resolveSqlExpression( tableReference, selectableMapping );
+	}
+
+	@Nullable
+	@Override
+	public Object resolveNaturalIdToId(@Nullable Object naturalIdValue, @Nonnull SharedSessionContractImplementor session) {
+		if ( NATURAL_ID_LOGGER.isTraceEnabled() ) {
+			NATURAL_ID_LOGGER.retrievingIdForNaturalId(
+					entityDescriptor.getEntityName(),
+					naturalIdValue instanceof Object[] array
+							? Arrays.toString( array )
+							: naturalIdValue
+			);
+		}
+
+		final var factory = session.getFactory();
+		final var entityPath = new NavigablePath( entityDescriptor.getRootPathName() );
+		final var rootQuerySpec = new QuerySpec( true );
+		final var influencers = session.getLoadQueryInfluencers();
+
+		final var sqlAstCreationState = new LoaderSqlAstCreationState(
+				rootQuerySpec,
+				new SqlAliasBaseManager(),
+				new SimpleFromClauseAccessImpl(),
+				LockOptions.NONE,
+				(fetchParent, creationState) -> ImmutableFetchList.EMPTY,
+				true,
+				influencers,
+				factory.getSqlTranslationEngine()
+		);
+
+		final var rootTableGroup = entityDescriptor.createRootTableGroup(
+				true,
+				entityPath,
+				null,
+				null,
+				() -> rootQuerySpec::applyPredicate,
+				sqlAstCreationState
+		);
+
+		rootQuerySpec.getFromClause().addRoot( rootTableGroup );
+		sqlAstCreationState.getFromClauseAccess().registerTableGroup( entityPath, rootTableGroup );
+		entityDescriptor.applyBaseRestrictions(
+				rootQuerySpec::applyPredicate,
+				rootTableGroup,
+				true,
+				influencers.getEnabledFilters(),
+				true,
+				null,
+				sqlAstCreationState
+		);
+
+		final var domainResult =
+				entityDescriptor.getIdentifierMapping().createDomainResult(
+						rootTableGroup.getNavigablePath()
+								.append( EntityIdentifierMapping.ID_ROLE_NAME ),
+						rootTableGroup,
+						null,
+						sqlAstCreationState
+				);
+
+		return executeNaturalIdQuery(
+				naturalIdValue,
+				LockOptions.NONE,
+				new SelectStatement( rootQuerySpec, singletonList( domainResult ) ),
+				rootTableGroup,
+				rootQuerySpec::applyPredicate,
+				sqlAstCreationState,
+				session
+		);
+	}
+
+	@Nullable
+	protected <R> R executeNaturalIdQuery(
+			@Nullable Object naturalIdValue,
+			@Nonnull LockOptions lockOptions,
+			@Nonnull SelectStatement sqlSelect,
+			@Nonnull TableGroup rootTableGroup,
+			@Nonnull Consumer<Predicate> predicateConsumer,
+			@Nonnull LoaderSqlAstCreationState sqlAstCreationState,
+			@Nonnull SharedSessionContractImplementor session) {
+		assert naturalIdMapping.isNormalized( naturalIdValue );
+
+		final var factory = session.getFactory();
+
+		final var bindings = new JdbcParameterBindingsImpl( naturalIdMapping.getJdbcTypeCount() );
+		applyNaturalIdRestriction(
+				naturalIdValue,
+				rootTableGroup,
+				predicateConsumer,
+				bindings::addBinding,
+				sqlAstCreationState,
+				session
+		);
+
+		final var queryOptions = new SimpleQueryOptions( lockOptions, false );
+		final var jdbcSelect = createJdbcOperationQuerySelect( sqlSelect, factory, bindings, queryOptions );
+
+		final var statistics = factory.getStatistics();
+		final boolean statisticsEnabled = statistics.isStatisticsEnabled();
+		final long startTime = statisticsEnabled ? System.nanoTime() : -1L;
+
+		final List<R> results =
+				factory.getJdbcServices().getJdbcSelectExecutor()
+						.list(
+								jdbcSelect,
+								bindings,
+								new NaturalIdLoaderWithOptionsExecutionContext( session, queryOptions ),
+								RowTransformerSingularReturnImpl.instance(),
+								null,
+								ListResultsConsumer.UniqueSemantic.FILTER,
+								1
+						);
+
+		if ( statisticsEnabled ) {
+			statistics.naturalIdQueryExecuted(
+					entityDescriptor().getEntityPersister().getRootEntityName(),
+					System.nanoTime() - startTime
+			);
+		}
+
+		return switch ( results.size() ) {
+			case 0 -> null;
+			case 1 -> results.get( 0 );
+			default -> throw new HibernateException(
+					String.format(
+							"Query by natural id returned more that one row: %s",
+							entityDescriptor.getEntityName()
+					)
+			);
+		};
+	}
+
+	@Nonnull
+	private static JdbcSelect createJdbcOperationQuerySelect(
+			@Nonnull SelectStatement sqlSelect,
+			@Nonnull SessionFactoryImplementor factory,
+			@Nonnull JdbcParameterBindings bindings,
+			@Nonnull QueryOptions queryOptions) {
+		return factory.getJdbcServices().getJdbcEnvironment()
+				.getSqlAstTranslatorFactory()
+				.buildTranslator( new SqlAstTranslationRequest.Select( factory, sqlSelect ) )
+				.translate( bindings, queryOptions );
+	}
+
+	@Nullable
+	@Override
+	public Object resolveIdToNaturalId(@Nonnull Object id, @Nonnull SharedSessionContractImplementor session) {
+		final var factory = session.getFactory();
+		final var identifierMapping = entityDescriptor().getIdentifierMapping();
+
+		final var builder = JdbcParametersList.newBuilder();
+		final var sqlSelect = LoaderSelectBuilder.createSelect(
+				entityDescriptor(),
+				singletonList( naturalIdMapping() ),
+				identifierMapping,
+				null,
+				1,
+				session.getLoadQueryInfluencers(),
+				new LockOptions(),
+				builder::add,
+				new SqlAliasBaseManager(),
+				factory
+		);
+		final var jdbcParameters = builder.build();
+		final var bindings = new JdbcParameterBindingsImpl( jdbcParameters.size() );
+		final int offset = bindings.registerParametersForEachJdbcValue( id, identifierMapping, jdbcParameters, session );
+		assert offset == jdbcParameters.size();
+
+		final List<?> results =
+				factory.getJdbcServices().getJdbcSelectExecutor()
+						.list(
+								createJdbcOperationQuerySelect( sqlSelect, factory, bindings, QueryOptions.NONE ),
+								bindings,
+								new NoCallbackExecutionContext( session ),
+								// because we select the natural id,
+								// we want to "reduce" the result
+								RowTransformerSingularReturnImpl.instance(),
+								null,
+								ListResultsConsumer.UniqueSemantic.FILTER,
+								1
+						);
+
+		return switch ( results.size() ) {
+			case 0 -> null;
+			case 1 -> results.get( 0 );
+			default -> throw new HibernateException(
+					String.format(
+							"Resolving id to natural id returned more that one row: %s #%s",
+							entityDescriptor().getEntityName(),
+							id
+					)
+			);
+		};
+	}
+
+	void applyRestriction(
+			@Nonnull TableGroup rootTableGroup,
+			@Nonnull Consumer<Predicate> predicateConsumer,
+			@Nonnull BiConsumer<JdbcParameter, JdbcParameterBinding> jdbcParameterConsumer,
+			@Nullable Object jdbcValue,
+			@Nonnull SelectableMapping jdbcValueMapping,
+			@Nonnull SqlExpressionResolver expressionResolver) {
+		final var columnReference =
+				resolveColumnReference( rootTableGroup, jdbcValueMapping, expressionResolver );
+		if ( jdbcValue == null ) {
+			predicateConsumer.accept( new NullnessPredicate( columnReference ) );
+		}
+		else {
+			final var jdbcParameter = new SqlTypedMappingJdbcParameter( jdbcValueMapping );
+			final var predicate =
+					new ComparisonPredicate( columnReference, ComparisonOperator.EQUAL, jdbcParameter );
+			predicateConsumer.accept( predicate );
+			jdbcParameterConsumer.accept( jdbcParameter,
+					new JdbcParameterBindingImpl( jdbcValueMapping.getJdbcMapping(), jdbcValue ) );
+		}
+	}
+
+
+	private static class NaturalIdLoaderWithOptionsExecutionContext extends BaseExecutionContext {
+		private final Callback callback;
+		private final QueryOptions queryOptions;
+
+		public NaturalIdLoaderWithOptionsExecutionContext(@Nonnull SharedSessionContractImplementor session, @Nonnull QueryOptions queryOptions) {
+			super( session );
+			this.queryOptions = queryOptions;
+			callback = new CallbackImpl();
+		}
+
+		@Nonnull
+		@Override
+		public QueryOptions getQueryOptions() {
+			return queryOptions;
+		}
+
+		@Nonnull
+		@Override
+		public Callback getCallback() {
+			return callback;
+		}
+	}
+}

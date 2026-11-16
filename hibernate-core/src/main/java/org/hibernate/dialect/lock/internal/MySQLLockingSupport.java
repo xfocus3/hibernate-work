@@ -1,0 +1,202 @@
+package org.hibernate.dialect.lock.internal;
+
+
+import org.hibernate.LockMode;
+import org.hibernate.dialect.lock.spi.TransactionConcurrencyResolver;
+
+import jakarta.persistence.Timeout;
+import org.hibernate.HibernateException;
+import org.hibernate.Timeouts;
+import org.hibernate.dialect.DatabaseVersion;
+import org.hibernate.dialect.lock.spi.ConnectionLockTimeoutStrategy;
+import org.hibernate.dialect.lock.spi.LockTimeoutType;
+import org.hibernate.dialect.lock.spi.LockingClauseRenderer;
+import org.hibernate.dialect.lock.spi.LockingClauseRequest;
+import org.hibernate.dialect.lock.spi.LockingSupport;
+import org.hibernate.dialect.lock.spi.OuterJoinLockingType;
+import org.hibernate.dialect.lock.spi.PessimisticLockKind;
+import org.hibernate.dialect.lock.spi.RowLockStrategy;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+
+import java.sql.Connection;
+
+import static org.hibernate.Timeouts.NO_WAIT_MILLI;
+import static org.hibernate.Timeouts.SKIP_LOCKED_MILLI;
+import static org.hibernate.Timeouts.WAIT_FOREVER_MILLI;
+import static org.hibernate.dialect.lock.spi.LockTimeoutType.NONE;
+import static org.hibernate.dialect.lock.spi.LockTimeoutType.QUERY;
+
+/**
+ * LockingSupport for MySQLDialect
+ *
+ * @author Steve Ebersole
+ */
+public class MySQLLockingSupport implements LockingSupport, LockingSupport.Metadata, LockingClauseRenderer {
+	public static final ConnectionLockTimeoutStrategy MYSQL_CONN_LOCK_TIMEOUT_STRATEGY = new ConnectionLockTimeoutStrategyImpl();
+	public static final LockingSupport MYSQL_LOCKING_SUPPORT = new MySQLLockingSupport();
+
+	private final boolean laterThanVersion8;
+
+	public MySQLLockingSupport() {
+		laterThanVersion8 = true;
+	}
+
+	public MySQLLockingSupport(DatabaseVersion version) {
+		laterThanVersion8 = version.isSameOrAfter( 8 );
+	}
+
+	@Override
+	public boolean canUsePlainReadForRefresh(LockMode currentLockMode, LockMode requestedLockMode) {
+		// Even force increment is insufficient proof: a timestamp version can
+		// repeat, and a same-value UPDATE need not create an own-write row version.
+		// An ordinary read may therefore still consult the earlier snapshot.
+		return false;
+	}
+
+	@Override
+	public TransactionConcurrencyResolver getTransactionConcurrencyResolver() {
+		return MySQLTransactionConcurrencyResolver.INSTANCE;
+	}
+
+	@Override
+	public Metadata getMetadata() {
+		return this;
+	}
+
+	@Override
+	public boolean readsWaitForUncommittedWrites() {
+		// InnoDB uses multiversion concurrency control: a plain read returns the last committed state of a row
+		// without waiting for the outcome of a concurrent uncommitted write
+		return false;
+	}
+
+	@Override
+	public LockingClauseRenderer getLockingClauseRenderer() {
+		return this;
+	}
+
+	@Override
+	public String render(LockingClauseRequest request) {
+		final boolean share = request.lockKind() == PessimisticLockKind.SHARE;
+		final StringBuilder fragment = new StringBuilder(
+				share
+						? laterThanVersion8 ? " for share" : " lock in share mode"
+						: " for update"
+		);
+		if ( laterThanVersion8 && !request.targets().isEmpty() ) {
+			fragment.append( " of " );
+			LockingClauseRendererSupport.appendTargets( fragment, request.targets() );
+		}
+
+		if ( laterThanVersion8 ) {
+			switch ( request.timeout().milliseconds() ) {
+				case NO_WAIT_MILLI -> fragment.append( " nowait" );
+				case SKIP_LOCKED_MILLI -> fragment.append( " skip locked" );
+			}
+		}
+		return fragment.toString();
+	}
+
+	@Override
+	public LockTimeoutType getLockTimeoutType(Timeout timeout) {
+		return switch ( timeout.milliseconds() ) {
+			case SKIP_LOCKED_MILLI, NO_WAIT_MILLI -> laterThanVersion8 ? QUERY : NONE;
+			case WAIT_FOREVER_MILLI -> NONE;
+			// For MySQL real lock timeouts need to be applied on the Connection
+			//default -> CONNECTION;
+			// todo (db-locking) : however, I have not yet integrated that stuff - so report NONE
+			default -> NONE;
+		};
+	}
+
+	@Override
+	public boolean supportsWait() {
+		return false;
+	}
+
+	@Override
+	public boolean supportsNoWait() {
+		return laterThanVersion8;
+	}
+
+	@Override
+	public boolean supportsSkipLocked() {
+		return laterThanVersion8;
+	}
+
+	@Override
+	public RowLockStrategy getWriteRowLockStrategy() {
+		return RowLockStrategy.TABLE;
+	}
+
+	@Override
+	public OuterJoinLockingType getOuterJoinLockingType() {
+		return OuterJoinLockingType.IDENTIFIED;
+	}
+
+	@Override
+	public ConnectionLockTimeoutStrategy getConnectionLockTimeoutStrategy() {
+		return MYSQL_CONN_LOCK_TIMEOUT_STRATEGY;
+	}
+
+	public static class ConnectionLockTimeoutStrategyImpl implements ConnectionLockTimeoutStrategy {
+		// Making this configurable so TiDBDialect can re-use this, but with a lower value
+		// TiDB v8.5.5 limits innodb_lock_wait_timeout to 3600s
+		private final int foreverValue;
+
+		public ConnectionLockTimeoutStrategyImpl() {
+			// see https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout
+			// unit: seconds, allowed values: [1, 1073741824]
+			this( 100_000 );
+		}
+
+		public ConnectionLockTimeoutStrategyImpl(int foreverValue) {
+			this.foreverValue = foreverValue;
+		}
+
+		@Override
+		public Level getSupportedLevel() {
+			return Level.SUPPORTED;
+		}
+
+		@Override
+		public Timeout getLockTimeout(Connection connection, SessionFactoryImplementor factory) {
+			return Helper.getLockTimeout(
+					"SELECT @@SESSION.innodb_lock_wait_timeout",
+					(resultSet) -> {
+						// see https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout
+						// unit: seconds, allowed values: [1, 1073741824]
+						final int seconds = resultSet.getInt( 1 );
+						return seconds == foreverValue ? Timeouts.WAIT_FOREVER : Timeout.seconds( seconds );
+					},
+					connection,
+					factory
+			);
+		}
+
+		@Override
+		public void setLockTimeout(Timeout timeout, Connection connection, SessionFactoryImplementor factory) {
+			Helper.setLockTimeout(
+					timeout,
+					(t) -> {
+						// see https://dev.mysql.com/doc/refman/8.4/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout
+						// unit: seconds, allowed values: [1, 1073741824]
+						final int milliseconds = timeout.milliseconds();
+						if ( milliseconds == SKIP_LOCKED_MILLI ) {
+							throw new HibernateException( "Connection lock-timeout does not accept skip-locked" );
+						}
+						if ( milliseconds == NO_WAIT_MILLI ) {
+							throw new HibernateException( "Connection lock-timeout does not accept no-wait" );
+						}
+						if ( milliseconds == WAIT_FOREVER_MILLI ) {
+							return foreverValue;
+						}
+						return (int) Math.ceil( (double) milliseconds / 1000);
+					},
+					"SET @@SESSION.innodb_lock_wait_timeout = %s",
+					connection,
+					factory
+			);
+		}
+	}
+}

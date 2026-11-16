@@ -1,0 +1,20 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.Incubating;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.sql.ast.spi.model.builder.MutationGroupBuilder;
+
+/// Optional legacy mutation support for an [AuxiliaryMapping].
+///
+/// This contract isolates auxiliary mapping participation in legacy mutation
+/// group construction from the mapping/query-facing [AuxiliaryMapping] surface.
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "5.4")
+public interface LegacyAuxiliaryMutationSupport {
+	/// Adds auxiliary columns to the legacy entity insert mutation group.
+	void addToInsertGroup(@Nonnull MutationGroupBuilder insertGroupBuilder, @Nonnull EntityPersister persister);
+}

@@ -1,0 +1,35 @@
+package org.hibernate.query.sqm.tree.spi;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.spi.SqmExpressible;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import jakarta.annotation.Nullable;
+
+/**
+ * Optional contract for {@link SqmNode} implementations which are typed.
+ *
+ * @author Steve Ebersole
+ */
+public interface SqmTypedNode<T> extends SqmNode, SqmExpressibleAccessor<T>, SqmVisitableNode {
+	/**
+	 * The Java type descriptor for this node.
+	 */
+	default @Nullable JavaType<T> getNodeJavaType() {
+		final SqmExpressible<T> nodeType = getNodeType();
+		return nodeType == null ? null : nodeType.getExpressibleJavaType();
+	}
+
+	@Override
+	default @Nullable SqmBindableType<T> getExpressible() {
+		return getNodeType();
+	}
+
+	@Nullable SqmBindableType<T> getNodeType();
+
+	@Nonnull
+	@Override
+	SqmTypedNode<T> copy(@Nonnull SqmCopyContext context);
+}

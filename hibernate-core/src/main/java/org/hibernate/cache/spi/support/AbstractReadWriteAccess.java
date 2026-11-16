@@ -1,0 +1,526 @@
+package org.hibernate.cache.spi.support;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import java.io.Serial;
+import java.io.Serializable;
+import java.util.Comparator;
+import java.util.Locale;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import org.hibernate.cache.spi.DomainDataRegion;
+import org.hibernate.cache.spi.access.SoftLock;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+
+
+import static org.hibernate.cache.spi.SecondLevelCacheLogger.L2CACHE_LOGGER;
+
+/**
+ * @author Steve Ebersole
+ */
+public abstract class AbstractReadWriteAccess extends AbstractCachedDomainDataAccess {
+
+	private final UUID uuid = UUID.randomUUID();
+	private final AtomicLong nextLockId = new AtomicLong();
+	private final ReentrantReadWriteLock reentrantReadWriteLock = new ReentrantReadWriteLock();
+	private final Lock readLock = reentrantReadWriteLock.readLock();
+	private final Lock writeLock = reentrantReadWriteLock.writeLock();
+
+	protected AbstractReadWriteAccess(
+			@Nonnull DomainDataRegion domainDataRegion,
+			@Nonnull DomainDataStorageAccess storageAccess) {
+		super( domainDataRegion, storageAccess );
+	}
+
+	@Nullable
+	protected abstract Comparator<Object> getVersionComparator();
+
+	@Nonnull
+	protected UUID uuid() {
+		return uuid;
+	}
+
+	protected long nextLockId() {
+		return nextLockId.getAndIncrement();
+	}
+
+	protected Lock readLock() {
+		return readLock;
+	}
+
+	protected Lock writeLock() {
+		return writeLock;
+	}
+
+	/**
+	 * Returns <code>null</code> if the item is not readable.  Locked items are not readable, nor are items created
+	 * afterQuery the start of this transaction.
+	 */
+	@Override
+	@Nullable
+	public Object get(@Nonnull SharedSessionContractImplementor session, @Nonnull Object key) {
+			final boolean traceEnabled = L2CACHE_LOGGER.isTraceEnabled();
+			if ( traceEnabled ) {
+				L2CACHE_LOGGER.gettingCachedData( getRegion().getName(), getAccessType(), key );
+			}
+			try {
+				readLock.lock();
+				final var item = (Lockable) getStorageAccess().getFromCache( key, session );
+				if ( item == null ) {
+					if ( traceEnabled ) {
+						L2CACHE_LOGGER.cacheMiss( getRegion().getName(), key );
+					}
+					return null;
+				}
+
+				if ( isReadable( session, item ) ) {
+					if ( traceEnabled ) {
+						L2CACHE_LOGGER.cacheHit( getRegion().getName(), key );
+					}
+					return item.getValue();
+				}
+				else {
+					if ( traceEnabled ) {
+						L2CACHE_LOGGER.cacheHitUnreadable( getRegion().getName(), key );
+					}
+					return null;
+				}
+		}
+		finally {
+			readLock.unlock();
+		}
+	}
+
+	private static boolean isReadable(@Nonnull SharedSessionContractImplementor session, @Nonnull Lockable item) {
+		return item.isReadable( session.getCacheTransactionSynchronization().getCachingTimestamp() );
+	}
+
+	@Override
+	public boolean putFromLoad(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nonnull Object value,
+			@Nullable Object version) {
+		return doPutFromLoad( session, key, value, version, false );
+	}
+
+	@Override
+	public final boolean putFromLoad(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nonnull Object value,
+			@Nullable Object version,
+			boolean minimalPutOverride) {
+		return doPutFromLoad( session, key, value, version, minimalPutOverride );
+	}
+
+	private boolean doPutFromLoad(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nonnull Object value,
+			@Nullable Object version,
+			boolean minimalPutOverride) {
+		try {
+			final boolean traceEnabled = L2CACHE_LOGGER.isTraceEnabled();
+			if ( traceEnabled ) {
+				L2CACHE_LOGGER.cachingDataFromLoad( getRegion().getName(), getAccessType(), key, value );
+			}
+			writeLock.lock();
+			final var item = (Lockable) getStorageAccess().getFromCache( key, session );
+			if ( isWritable( session, version, item ) ) {
+				if ( minimalPutOverride && version == null && item != null ) {
+					// we didn't have a version to check, so we don't know for
+					// sure whether the cached item is stale, but 'minimal puts'
+					// is enabled, so we just assume it's not stale
+					if ( traceEnabled ) {
+						L2CACHE_LOGGER.cachePutFromLoadSkippedDueToMinimalPut(
+								getRegion().getName(),
+								getAccessType(),
+								key
+						);
+					}
+					return false;
+				}
+				else {
+					getStorageAccess().putIntoCache(
+							key,
+							new Item( value, version,
+									session.getCacheTransactionSynchronization()
+											.getCachingTimestamp() ),
+							session
+					);
+					return true;
+				}
+			}
+			else {
+				if ( traceEnabled ) {
+					L2CACHE_LOGGER.cachePutFromLoadFailedNonWritable(
+							getRegion().getName(),
+							getAccessType(),
+							key,
+							value
+					);
+				}
+				return false;
+			}
+		}
+		finally {
+			writeLock.unlock();
+		}
+	}
+
+	private boolean isWritable(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nullable Object version,
+			@Nullable Lockable item) {
+		return item == null
+			|| item.isWriteable( session.getCacheTransactionSynchronization().getCachingTimestamp(),
+									version, getVersionComparator() );
+	}
+
+	/**
+	 * @deprecated No longer called
+	 */
+	@Deprecated(since = "7.4")
+	protected abstract AccessedDataClassification getAccessedDataClassification();
+
+	@Override
+	@Nonnull
+	public SoftLock lockItem(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nullable Object version) {
+		try {
+			writeLock.lock();
+			final long timeout = nextTimestamp() + getTimeout();
+			if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+				L2CACHE_LOGGER.lockingCacheItem( getRegion().getName(), getAccessType(), key, timeout, version );
+			}
+			final var item = (Lockable) getStorageAccess().getFromCache( key, session );
+			final var lock = lock( item, version, timeout );
+			getStorageAccess().putIntoCache( key, lock, session );
+			return lock;
+		}
+		finally {
+			writeLock.unlock();
+		}
+	}
+
+	@Nonnull
+	private SoftLockImpl lock(@Nullable Lockable item, @Nullable Object version, long timeout) {
+		return item == null
+				? new SoftLockImpl( timeout, uuid, nextLockId(), version )
+				: item.lock( timeout, uuid, nextLockId() );
+	}
+
+	@Override
+	public void unlockItem(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nullable SoftLock lock) {
+		try {
+			if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+				L2CACHE_LOGGER.unlockingCacheItem( getRegion().getName(), getAccessType(), key );
+			}
+			writeLock.lock();
+			final var item = (Lockable) getStorageAccess().getFromCache( key, session );
+			if ( item != null && item.isUnlockable( lock ) ) {
+				decrementLock( session, key, (SoftLockImpl) item );
+			}
+			else {
+				handleLockExpiry( session, key );
+			}
+		}
+		finally {
+			writeLock.unlock();
+		}
+	}
+
+	long getTimeout() {
+		return getRegion().getRegionFactory().getTimeout();
+	}
+
+	long nextTimestamp() {
+		return getRegion().getRegionFactory().nextTimestamp();
+	}
+
+	protected void decrementLock(
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull Object key,
+			@Nonnull SoftLockImpl lock) {
+		lock.unlock( nextTimestamp() );
+		getStorageAccess().putIntoCache( key, lock, session );
+	}
+
+	protected void handleLockExpiry(@Nonnull SharedSessionContractImplementor session, @Nonnull Object key) {
+		L2CACHE_LOGGER.softLockedCacheExpired( getRegion().getName(), key );
+		if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+			L2CACHE_LOGGER.cachedEntryExpired( key );
+		}
+		final var regionFactory = getRegion().getRegionFactory();
+		// create a new lock that times out immediately
+		long timestamp = regionFactory.nextTimestamp() + regionFactory.getTimeout();
+		final var newLock = new SoftLockImpl( timestamp, uuid, nextLockId.getAndIncrement(), null );
+		//newLock.unlock( timestamp );
+		newLock.unlock( timestamp - regionFactory.getTimeout() );
+		getStorageAccess().putIntoCache( key, newLock, session );
+	}
+
+	@Override
+	public void remove(@Nonnull SharedSessionContractImplementor session, @Nonnull Object key) {
+		if ( getStorageAccess().getFromCache( key, session ) instanceof SoftLock ) {
+			if ( L2CACHE_LOGGER.isDebugEnabled() ) {
+				L2CACHE_LOGGER.debugf( "Skipping remove call in read-write access to maintain SoftLock: ", key );
+			}
+			// don't do anything... we want the SoftLock to remain in place
+		}
+		else {
+			super.remove( session, key );
+		}
+	}
+
+	@Override
+	public void removeAll(@Nonnull SharedSessionContractImplementor session) {
+		// A no-op
+	}
+
+	/**
+	 * Interface type implemented by all wrapper objects in the cache.
+	 */
+	public interface Lockable {
+
+		/**
+		 * Returns <code>true</code> if the enclosed value can be read by a transaction started at the given time.
+		 */
+		boolean isReadable(long txTimestamp);
+
+		/**
+		 * Returns <code>true</code> if the enclosed value can be replaced with one of the given version by a
+		 * transaction started at the given time.
+		 */
+		boolean isWriteable(
+				long txTimestamp,
+				@Nullable Object version,
+				@Nullable Comparator<Object> versionComparator);
+
+		/**
+		 * Returns the enclosed value.
+		 */
+		@Nullable
+		Object getValue();
+
+		/**
+		 * Returns <code>true</code> if the given lock can be unlocked using the given SoftLock instance as a handle.
+		 */
+		boolean isUnlockable(@Nullable SoftLock lock);
+
+		/**
+		 * Locks this entry, stamping it with the UUID and lockId given, with the lock timeout occurring at the specified
+		 * time.  The returned Lock object can be used to unlock the entry in the future.
+		 */
+		@Nonnull
+		SoftLockImpl lock(long timeout, @Nonnull UUID uuid, long lockId);
+	}
+
+	/**
+	 * Wrapper type representing unlocked items.
+	 */
+	public final static class Item implements Serializable, Lockable {
+		@Serial
+		private static final long serialVersionUID = 1L;
+		private final Object value;
+		private final Object version;
+		private final long timestamp;
+
+		/**
+		 * Creates an unlocked item wrapping the given value with a version and creation timestamp.
+		 */
+		Item(@Nonnull Object value, @Nullable Object version, long timestamp) {
+			this.value = value;
+			this.version = version;
+			this.timestamp = timestamp;
+		}
+
+		@Override
+		public boolean isReadable(long txTimestamp) {
+			if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+				L2CACHE_LOGGER.checkingReadWriteItemReadability( timestamp, version, txTimestamp );
+			}
+
+			return txTimestamp > timestamp;
+		}
+
+		@Override
+		public boolean isWriteable(
+				long txTimestamp,
+				@Nullable Object newVersion,
+				@Nullable Comparator<Object> versionComparator) {
+			if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+				L2CACHE_LOGGER.checkingReadWriteItemWriteability( timestamp, version, txTimestamp, newVersion );
+			}
+
+			return version != null && versionComparator.compare( version, newVersion ) < 0;
+		}
+
+		@Override
+		@Nonnull
+		public Object getValue() {
+			return value;
+		}
+
+		@Override
+		public boolean isUnlockable(@Nullable SoftLock lock) {
+			return false;
+		}
+
+		@Override
+		@Nonnull
+		public SoftLockImpl lock(long timeout, @Nonnull UUID uuid, long lockId) {
+			return new SoftLockImpl( timeout, uuid, lockId, version );
+		}
+
+		@Override
+		public String toString() {
+			return String.format(
+					Locale.ROOT,
+					"read-write Item(%s)",
+					getValue()
+			);
+		}
+	}
+
+	/**
+	 * Wrapper type representing locked items.
+	 */
+	public static class SoftLockImpl implements Serializable, Lockable, SoftLock {
+
+		@Serial
+		private static final long serialVersionUID = 2L;
+
+		private final UUID sourceUuid;
+		private final long lockId;
+		private final Object version;
+
+		private long timeout;
+		private boolean concurrent;
+		private int multiplicity = 1;
+		private long unlockTimestamp;
+
+		/**
+		 * Creates a locked item with the given identifiers and object version.
+		 */
+		SoftLockImpl(long timeout, @Nonnull UUID sourceUuid, long lockId, @Nullable Object version) {
+			this.timeout = timeout;
+			this.lockId = lockId;
+			this.version = version;
+			this.sourceUuid = sourceUuid;
+		}
+
+
+		@Override
+		public boolean isReadable(long txTimestamp) {
+			return false;
+		}
+
+		@Override
+		public boolean isWriteable(
+				long txTimestamp,
+				@Nullable Object newVersion,
+				@Nullable Comparator<Object> versionComparator) {
+			if ( L2CACHE_LOGGER.isTraceEnabled() ) {
+				L2CACHE_LOGGER.checkingReadWriteLockWriteability(
+						timeout,
+						lockId,
+						version,
+						sourceUuid,
+						multiplicity,
+						unlockTimestamp,
+						txTimestamp,
+						newVersion
+				);
+			}
+
+			if ( txTimestamp > timeout ) {
+				// if timed-out - allow write
+				return true;
+			}
+			if ( multiplicity > 0 ) {
+				// if still locked - disallow write
+				return false;
+			}
+
+			return version == null
+					? txTimestamp > unlockTimestamp
+					: versionComparator.compare( version, newVersion ) < 0;
+		}
+
+		@Override
+		@Nullable
+		public Object getValue() {
+			return null;
+		}
+
+		@Override
+		public boolean isUnlockable(@Nullable SoftLock lock) {
+			return equals( lock );
+		}
+
+		@Override
+		public boolean equals(Object other) {
+			if ( other == this ) {
+				return true;
+			}
+			else if ( other instanceof SoftLockImpl that ) {
+				return this.lockId == that.lockId
+					&& this.sourceUuid.equals( that.sourceUuid );
+			}
+			else {
+				return false;
+			}
+		}
+
+		@Override
+		public int hashCode() {
+			int hash = ( sourceUuid != null ? sourceUuid.hashCode() : 0 );
+			int temp = (int) lockId;
+			for ( int i = 1; i < Long.SIZE / Integer.SIZE; i++ ) {
+				temp ^= ( lockId >>> ( i * Integer.SIZE ) );
+			}
+			return hash + temp;
+		}
+
+		/**
+		 * Returns true if this Lock has been concurrently locked by more than one transaction.
+		 */
+		public boolean wasLockedConcurrently() {
+			return concurrent;
+		}
+
+		@Override
+		@Nonnull
+		public SoftLockImpl lock(long timeout, @Nonnull UUID uuid, long lockId) {
+			concurrent = true;
+			multiplicity++;
+			this.timeout = timeout;
+			return this;
+		}
+
+		/**
+		 * Unlocks this Lock, and timestamps the unlock event.
+		 */
+		public void unlock(long timestamp) {
+			if ( --multiplicity == 0 ) {
+				unlockTimestamp = timestamp;
+			}
+		}
+
+		@Override
+		public String toString() {
+			return "Lock Source-UUID:" + sourceUuid + " Lock-ID:" + lockId;
+		}
+	}
+}

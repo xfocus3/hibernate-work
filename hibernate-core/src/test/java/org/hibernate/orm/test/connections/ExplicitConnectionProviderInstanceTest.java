@@ -1,0 +1,66 @@
+package org.hibernate.orm.test.connections;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.registry.StandardServiceRegistry;
+import org.hibernate.boot.registry.StandardServiceRegistryBuilder;
+import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
+import org.hibernate.testing.orm.junit.BaseUnitTest;
+import org.hibernate.testing.util.ServiceRegistryUtil;
+import org.jspecify.annotations.NonNull;
+import org.junit.jupiter.api.Test;
+
+import java.sql.Connection;
+import java.sql.SQLException;
+
+/**
+ * @author Steve Ebersole
+ */
+@BaseUnitTest
+public class ExplicitConnectionProviderInstanceTest  {
+
+	@Test
+	public void testPassingConnectionProviderInstanceToBootstrap() {
+		StandardServiceRegistry ssr = ServiceRegistryUtil.serviceRegistryBuilder()
+				.applySetting( AvailableSettings.CONNECTION_PROVIDER, TestingConnectionProviderImpl.INSTANCE )
+				.build();
+		try {
+			assert ssr.getService( ConnectionProvider.class ) == TestingConnectionProviderImpl.INSTANCE;
+		}
+		finally {
+			StandardServiceRegistryBuilder.destroy( ssr );
+		}
+	}
+
+	public static class TestingConnectionProviderImpl implements ConnectionProvider {
+		/**
+		 * Singleton access
+		 */
+		public static final TestingConnectionProviderImpl INSTANCE = new TestingConnectionProviderImpl();
+
+		@Override
+		@Nonnull
+		public Connection getConnection() throws SQLException {
+			throw new UnsupportedOperationException( "Testing" );
+		}
+
+		@Override
+		public void closeConnection(@Nonnull Connection connection) {
+		}
+
+		@Override
+		public boolean supportsAggressiveRelease() {
+			return false;
+		}
+
+		@Override
+		public boolean isUnwrappableAs(@NonNull Class<?> unwrapType) {
+			return false;
+		}
+
+		@Override
+		public <T> T unwrap(@NonNull Class<T> unwrapType) {
+			return null;
+		}
+	}
+}

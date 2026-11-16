@@ -1,0 +1,72 @@
+package org.hibernate.action.queue.internal.decompose.collection;
+
+
+import org.hibernate.action.queue.spi.bind.PostExecutionCallback;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.spi.SessionImplementor;
+import org.hibernate.persister.collection.CollectionPersister;
+
+import static org.hibernate.engine.internal.CacheHelper.usingCache;
+
+/// Post-execution callback for collection remove actions.
+///
+/// This handles all the finalization work that needs to happen after all SQL statements
+/// for the collection removal have been executed, including:
+///
+/// See [ - Updating CollectionEntry state (afterAction)].
+/// See [ - Removing/evicting item from cache].
+/// See [ - Firing POST_COLLECTION_REMOVE event listeners].
+///
+/// See [CollectionRemoveAction].
+///
+/// @author Steve Ebersole
+public class PostCollectionRemoveHandling implements PostExecutionCallback {
+	private final CollectionPersister persister;
+	private final PersistentCollection<?> collection;
+	private final Object affectedOwner;
+	private final Object affectedOwnerId;
+	private final Object cacheKey;
+
+	public PostCollectionRemoveHandling(
+			CollectionPersister persister,
+			PersistentCollection<?> collection,
+			Object affectedOwner,
+			Object affectedOwnerId,
+			Object cacheKey) {
+		this.persister = persister;
+		this.collection = collection;
+		this.affectedOwner = affectedOwner;
+		this.affectedOwnerId = affectedOwnerId;
+		this.cacheKey = cacheKey;
+	}
+
+	@Override
+	public void handle(SessionImplementor session) {
+		// 1. Update CollectionEntry state
+		if (collection != null) {
+			session.getPersistenceContextInternal()
+					.getCollectionEntry(collection)
+					.afterAction(collection);
+		}
+		DecompositionSupport.syncOwnerCollectionLoadedState( persister, affectedOwner, session );
+
+		// 2. Evict from cache
+		evict(session, cacheKey);
+
+		// 3. Fire POST_COLLECTION_REMOVE event
+		DecompositionSupport.firePostRemove(
+				persister,
+				collection,
+				affectedOwner,
+				affectedOwnerId,
+				session
+		);
+
+	}
+
+	private void evict(SessionImplementor session, Object cacheKey) {
+		if ( cacheKey != null ) {
+			usingCache( persister, cache -> cache.remove( session, cacheKey ) );
+		}
+	}
+}

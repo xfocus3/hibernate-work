@@ -1,0 +1,89 @@
+package org.hibernate.orm.test.write.staticinsert;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+import org.hibernate.cfg.BatchSettings;
+import org.hibernate.testing.jdbc.CollectingStatementObserver;
+import org.hibernate.testing.orm.domain.StandardDomainModel;
+import org.hibernate.testing.orm.domain.retail.CardPayment;
+import org.hibernate.testing.orm.domain.retail.DomesticVendor;
+import org.hibernate.testing.orm.domain.retail.ForeignVendor;
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.ServiceRegistry;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.hibernate.testing.orm.junit.Setting;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Simple tests for new "write path" approach in cases of static (non-dynamic) inserts
+ *
+ * @implNote Batching must be disabled to get proper statement counts.
+ *
+ * @author Steve Ebersole
+ * @author Andrea Boriero
+ */
+@ServiceRegistry(settings = @Setting(name = BatchSettings.STATEMENT_BATCH_SIZE, value = "-1"))
+public class SimpleStaticInsertTests {
+
+	@Test
+	@DomainAndFactory
+	public void simpleSingleTableWithSecondaryTableTest(SessionFactoryScope scope) {
+		final CollectingStatementObserver statementInspector = scope.getCollectingStatementObserver();
+		statementInspector.clear();
+
+		scope.inTransaction( (session) -> {
+			session.persist( new DomesticVendor( 1, "Acme Anvil Inc.", "Acme Worldwide") );
+			session.persist( new ForeignVendor( 2, "Acme Train Inc.", "Acme Worldwide") );
+		} );
+
+		// supplemental details are null, so we should have no inserts for the secondary table
+		assertThat( statementInspector.getSqlQueries() ).hasSize( 2 );
+	}
+
+	@Test
+	@DomainAndFactory
+	public void simpleSingleTableWithSecondaryTableTest2(SessionFactoryScope scope) {
+		final CollectingStatementObserver statementInspector = scope.getCollectingStatementObserver();
+		statementInspector.clear();
+
+		scope.inTransaction( (session) -> {
+			session.persist( new DomesticVendor( 1, "Acme Anvil Inc.", "Acme Worldwide", "supplemental details - domestic" ) );
+			session.persist( new ForeignVendor( 2, "Acme Train Inc.", "Acme Worldwide", "supplemental details - foreign" ) );
+		} );
+
+		// supplemental details are non-null, so we should have inserts for the secondary table
+		assertThat( statementInspector.getSqlQueries() ).hasSize( 4 );
+	}
+
+	@Test
+	@DomainAndFactory
+	public void simpleJoinedTest(SessionFactoryScope scope) {
+		final CollectingStatementObserver statementInspector = scope.getCollectingStatementObserver();
+		statementInspector.clear();
+
+		scope.inTransaction( (session) -> {
+			session.persist( new CardPayment( 1, 123456, 1L, "USD" ) );
+			session.persist( new CardPayment( 2, 456789, 200L, "USD" ) );
+		} );
+
+		assertThat( statementInspector.getSqlQueries() ).hasSize( 4 );
+	}
+
+	@AfterEach
+	public void dropTestData(SessionFactoryScope scope) {
+		scope.getSessionFactory().getSchemaManager().truncate();
+	}
+
+	@Target({ ElementType.TYPE, ElementType.METHOD})
+	@Retention(RetentionPolicy.RUNTIME)
+	@DomainModel( standardModels = StandardDomainModel.RETAIL )
+	@SessionFactory( useCollectingStatementObserver = true )
+	@interface DomainAndFactory {}
+}

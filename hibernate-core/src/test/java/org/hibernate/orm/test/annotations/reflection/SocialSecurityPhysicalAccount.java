@@ -1,0 +1,12 @@
+package org.hibernate.orm.test.annotations.reflection;
+
+import jakarta.persistence.Entity;
+
+/**
+ * @author Emmanuel Bernard
+ */
+@Entity
+public class SocialSecurityPhysicalAccount {
+	public String number;
+	public String countryCode;
+}

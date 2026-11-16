@@ -1,0 +1,539 @@
+package org.hibernate.query.sqm.sql.internal;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Consumer;
+
+import org.hibernate.AssertionFailure;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.metamodel.mapping.EntityAssociationMapping;
+import org.hibernate.metamodel.mapping.EntityDiscriminatorMapping;
+import org.hibernate.metamodel.mapping.EntityIdentifierMapping;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.mapping.EntityValuedModelPart;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.ValuedModelPart;
+import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
+import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
+import org.hibernate.persister.entity.UnionSubclassEntityPersister;
+import org.hibernate.query.sqm.tuple.internal.AnonymousTupleEntityValuedModelPart;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.domain.SqmEntityValuedSimplePath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.query.sqm.tree.spi.select.SqmDynamicInstantiation;
+import org.hibernate.query.sqm.tree.spi.select.SqmDynamicInstantiationArgument;
+import org.hibernate.query.sqm.tree.spi.select.SqmQuerySpec;
+import org.hibernate.query.sqm.tree.spi.select.SqmSelection;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.translation.Clause;
+import org.hibernate.sql.ast.spi.SqlAstWalker;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+import org.hibernate.sql.ast.spi.query.expression.SqlTuple;
+import org.hibernate.sql.ast.spi.query.expression.SqlTupleContainer;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.update.Assignable;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.sql.results.graph.Fetchable;
+
+import jakarta.persistence.criteria.Selection;
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.query.sqm.internal.SqmUtil.determineAffectedTableName;
+import static org.hibernate.query.sqm.internal.SqmUtil.isAssociationAffectedByEnabledFilters;
+
+public class EntityValuedPathInterpretation<T> extends AbstractSqmPathInterpretation<T>
+		implements SqlTupleContainer, Assignable {
+	private final Expression sqlExpression;
+	private final ModelPart parameterInferenceMapping;
+	private final @Nullable String affectedTableName;
+
+	public static <T> EntityValuedPathInterpretation<T> from(
+			SqmEntityValuedSimplePath<T> sqmPath,
+			MappingModelExpressible<?> inferredMapping,
+			SqmToSqlAstConverter sqlAstCreationState) {
+		final var navigablePath = sqmPath.getNavigablePath();
+		final var tableGroup =
+				sqlAstCreationState.getFromClauseAccess()
+						.findTableGroup( navigablePath );
+		final var pathMapping = (EntityValuedModelPart) tableGroup.getModelPart();
+		if ( inferredMapping instanceof EntityAssociationMapping inferredAssociation ) {
+			if ( pathMapping instanceof EntityAssociationMapping pathAssociation && inferredMapping != pathMapping ) {
+				// In here, the inferred mapping and the actual path mapping are association mappings,
+				// but for different associations, so we have to check if both associations point to the same target
+				final var pathTargetPart =
+						pathAssociation.getForeignKeyDescriptor()
+								.getPart( pathAssociation.getSideNature().inverse() );
+				final var inferredTargetPart =
+						inferredAssociation.getForeignKeyDescriptor()
+								.getPart( inferredAssociation.getSideNature().inverse() );
+
+				// If the inferred association and path association targets are the same, we can use the path mapping type
+				// which will render the FK of the path association
+				if ( pathTargetPart == inferredTargetPart ) {
+					return from(
+							navigablePath,
+							tableGroup,
+							pathMapping,
+							inferredMapping,
+							sqlAstCreationState
+					);
+				}
+				// When the inferred mapping and the path mapping differ,
+				// we always render the PK for the inferred and mapping path
+				else {
+					// If the path mapping refers to the primary key though,
+					// we can also render FK as that is equivalent
+					if ( pathAssociation.isReferenceToPrimaryKey() ) {
+						return from(
+								navigablePath,
+								tableGroup,
+								pathMapping,
+								inferredMapping,
+								sqlAstCreationState
+						);
+					}
+					else {
+						// but if the association FK does not point to the primary key,
+						// we can't allow FK optimizations as that is problematic for self-referential associations,
+						// because then we would render the PK of the association owner instead of the target
+						return from(
+								navigablePath,
+								tableGroup,
+								pathMapping.getEntityMappingType().getIdentifierMapping(),
+								pathMapping,
+								pathMapping,
+								sqlAstCreationState
+						);
+					}
+				}
+			}
+			else if ( pathMapping instanceof AnonymousTupleEntityValuedModelPart ) {
+				// AnonymousEntityValuedModelParts use the PK, which the inferred path will also use in this case,
+				// so we render this path as it is
+				return from(
+						navigablePath,
+						tableGroup,
+						pathMapping,
+						inferredMapping,
+						sqlAstCreationState
+				);
+			}
+			else {
+				// This is the case when the inferred mapping is an association, but the path mapping is not,
+				// or the path mapping and the inferred mapping are for the same association,
+				// in which case we render this path like the inferred mapping
+				return from(
+						navigablePath,
+						tableGroup,
+						(EntityValuedModelPart) inferredMapping,
+						inferredMapping,
+						sqlAstCreationState
+				);
+			}
+		}
+		else {
+			// No inferred mapping available or it refers to an EntityMappingType
+			return from(
+					navigablePath,
+					tableGroup,
+					pathMapping,
+					inferredMapping,
+					sqlAstCreationState
+			);
+		}
+	}
+
+	private static <T> EntityValuedPathInterpretation<T> from(
+			NavigablePath navigablePath,
+			TableGroup tableGroup,
+			EntityValuedModelPart mapping,
+			MappingModelExpressible<?> inferredMapping,
+			SqmToSqlAstConverter sqlAstCreationState) {
+		final ModelPart resultModelPart;
+		final TableGroup resultTableGroup;
+		// For association mappings where the FK optimization i.e. use of the parent table group is allowed,
+		// we try to make use of it and the FK model part if possible based on the inferred mapping
+		if ( mapping instanceof EntityAssociationMapping associationMapping ) {
+			final var keyTargetMatchPart =
+					associationMapping.getForeignKeyDescriptor()
+							.getPart( associationMapping.getSideNature() );
+
+			if ( associationMapping.isFkOptimizationAllowed()
+					&& !isAssociationAffectedByEnabledFilters( associationMapping, sqlAstCreationState ) ) {
+				if ( forceUseOfForeignKeyAssociationSidePart( inferredMapping,
+						associationMapping, keyTargetMatchPart ) ) {
+					resultModelPart = associationMapping.getForeignKeyDescriptor()
+							.getPart( associationMapping.getSideNature() );
+					resultTableGroup = sqlAstCreationState.getFromClauseAccess()
+							.findTableGroup( tableGroup.getNavigablePath().getParent() );
+				}
+				else {
+					if ( !tableGroup.getNavigablePath().isParentOrEqual( navigablePath ) ) {
+						// Force the use of the FK target key if the navigable path for this entity valued path is
+						// not equal to or a child of the table group navigable path.
+						// This can happen when using an implicit join path e.g. `where root.association.id is null`,
+						// yet also an explicit join was made which is compatible e.g. `join fetch root.association`.
+						// Since we have an explicit join in this case anyway, it's fine to us the FK target key.
+						resultModelPart = associationMapping.getForeignKeyDescriptor()
+								.getPart( associationMapping.getSideNature().inverse() );
+					}
+					else {
+						resultModelPart = keyTargetMatchPart;
+					}
+					resultTableGroup = tableGroup;
+				}
+			}
+			else if ( inferredMapping == null
+					&& hasNotFound( mapping )
+					&& sqlAstCreationState.getCurrentClauseStack().getCurrent() == Clause.SET ) {
+				// for not-found mappings encountered in the SET clause of an UPDATE statement
+				// we will want to (1) not join and (2) render the fk
+				resultModelPart = keyTargetMatchPart;
+				resultTableGroup = sqlAstCreationState.getFromClauseAccess()
+						.findTableGroup( tableGroup.getNavigablePath().getParent() );
+			}
+			else {
+				// If the mapping is an inverse association, use the PK and disallow FK optimizations
+				resultModelPart = associationMapping.getAssociatedEntityMappingType().getIdentifierMapping();
+				resultTableGroup = tableGroup;
+			}
+		}
+		else if ( mapping instanceof AnonymousTupleEntityValuedModelPart ) {
+			resultModelPart = ( (AnonymousTupleEntityValuedModelPart) mapping ).getForeignKeyPart();
+			resultTableGroup = tableGroup;
+		}
+		else {
+			// If the mapping is not an association, use the PK and disallow FK optimizations
+			resultModelPart = mapping.getEntityMappingType().getIdentifierMapping();
+			resultTableGroup = tableGroup;
+		}
+		return from(
+				navigablePath,
+				resultTableGroup,
+				resultModelPart,
+				mapping,
+				mapping,
+				sqlAstCreationState
+		);
+	}
+
+	private static boolean forceUseOfForeignKeyAssociationSidePart(
+			MappingModelExpressible<?> inferredMapping,
+			EntityAssociationMapping associationMapping,
+			ValuedModelPart keyTargetMatchPart) {
+		// The following is an optimization for EntityCollectionPart path mappings with a join table.
+		// We can possibly avoid doing the join of the target table by using the parent table group
+		// and forcing to use the foreign key part of the association side
+		if ( inferredMapping != null && hasJoinTable( associationMapping ) ) {
+			// But we need to make sure the inferred mapping points to the same FK target
+			if ( inferredMapping instanceof EntityMappingType entityMappingType ) {
+				// If the inferred mapping is an EntityMappingType, meaning it's some sort of root path,
+				// we only have to make sure the FK target is part of the mapping type
+				return entityMappingType.findSubPart( keyTargetMatchPart.getPartName() ) != null;
+			}
+			else if ( inferredMapping instanceof EntityAssociationMapping entityAssociationMapping) {
+				// Otherwise, it must be an association mapping
+				// Comparing UK-based toOne with PK-based collection part
+				// In this case, we compare based on PK/FK, and can use the FK part if it points to the PK
+				return entityAssociationMapping.getKeyTargetMatchPart() != keyTargetMatchPart
+					&& associationMapping.isReferenceToPrimaryKey();
+			}
+			else {
+				throw new AssertionFailure( "Unrecognized inferred mapping type" );
+			}
+		}
+		else {
+			return  false;
+		}
+	}
+
+	private static boolean hasNotFound(EntityValuedModelPart mapping) {
+		return mapping instanceof ToOneAttributeMapping && ( (ToOneAttributeMapping) mapping ).hasNotFoundAction();
+	}
+
+	private static boolean hasJoinTable(EntityAssociationMapping associationMapping) {
+		return associationMapping instanceof EntityCollectionPart entityCollectionPart
+			&& entityCollectionPart.getCardinality() == EntityCollectionPart.Cardinality.MANY_TO_MANY;
+	}
+
+	public static <T> EntityValuedPathInterpretation<T> from(
+			NavigablePath navigablePath,
+			TableGroup tableGroup,
+			ModelPart resultModelPart,
+			EntityValuedModelPart mapping,
+			EntityValuedModelPart treatedMapping,
+			SqmToSqlAstConverter sqlAstCreationState) {
+		final boolean expandToAllColumns;
+		final var currentClause = sqlAstCreationState.getCurrentClauseStack().getCurrent();
+		if ( currentClause == Clause.GROUP || currentClause == Clause.ORDER ) {
+			assert sqlAstCreationState.getCurrentSqmQueryPart().isSimpleQueryPart();
+			final SqmQuerySpec<?> querySpec = sqlAstCreationState.getCurrentSqmQueryPart().getFirstQuerySpec();
+			if ( currentClause == Clause.ORDER && !querySpec.groupByClauseContains( navigablePath, sqlAstCreationState ) ) {
+				// We must ensure that the order by expression be expanded but only if the group by
+				// contained the same expression, and that was expanded as well
+				expandToAllColumns = false;
+			}
+			else {
+				// When the table group is selected and the navigablePath is selected we need to expand
+				// to all columns, as we must make sure we include all columns present in the select clause
+				expandToAllColumns = isSelected(
+						tableGroup,
+						navigablePath,
+						querySpec,
+						sqlAstCreationState.getCurrentProcessingState().isTopLevel()
+				);
+			}
+		}
+		else {
+			expandToAllColumns = false;
+		}
+
+		final var sqlExprResolver = sqlAstCreationState.getSqlExpressionResolver();
+		final Expression sqlExpression;
+		if ( expandToAllColumns ) {
+			// Expand to all columns of the entity mapping type to ensure a correct group / order by expression,
+			// or use only the primary key if the dialect supports functional dependency
+			final var dialect = sqlAstCreationState.getCreationContext().getDialect();
+			final var entityMappingType = mapping.getEntityMappingType();
+			final var identifierMapping = entityMappingType.getIdentifierMapping();
+			final List<Expression> expressions = new ArrayList<>( identifierMapping.getJdbcTypeCount() );
+			final SelectableConsumer selectableConsumer = (selectionIndex, selectableMapping) -> {
+				final var tableReference = tableGroup.resolveTableReference(
+						navigablePath,
+						selectableMapping.getContainingTableExpression()
+				);
+				expressions.add( sqlExprResolver.resolveSqlExpression( tableReference, selectableMapping ) );
+			};
+			identifierMapping.forEachSelectable( selectableConsumer );
+			if ( !supportsFunctionalDependency( dialect, entityMappingType ) ) {
+				final EntityDiscriminatorMapping discriminatorMapping = entityMappingType.getDiscriminatorMapping();
+				if ( discriminatorMapping != null ) {
+					expressions.add( discriminatorMapping.resolveSqlExpression(
+							navigablePath,
+							discriminatorMapping.getJdbcMapping(),
+							tableGroup,
+							sqlAstCreationState
+					) );
+				}
+				for ( int i = 0; i < entityMappingType.getNumberOfFetchables(); i++ ) {
+					final Fetchable fetchable = entityMappingType.getFetchable( i );
+					if ( fetchable.isSelectable() ) {
+						fetchable.forEachSelectable( selectableConsumer );
+					}
+				}
+			}
+			sqlExpression = new SqlTuple( expressions, entityMappingType );
+		}
+		else {
+			final var basicValuedModelPart = resultModelPart.asBasicValuedModelPart();
+			if ( basicValuedModelPart != null ) {
+				final TableReference tableReference = tableGroup.resolveTableReference(
+						navigablePath,
+						basicValuedModelPart,
+						basicValuedModelPart.getContainingTableExpression()
+				);
+				sqlExpression = sqlExprResolver.resolveSqlExpression( tableReference, basicValuedModelPart );
+			}
+			else {
+				final List<Expression> expressions = new ArrayList<>( resultModelPart.getJdbcTypeCount() );
+				resultModelPart.forEachSelectable(
+						(selectionIndex, selectableMapping) -> {
+							final TableReference tableReference = tableGroup.resolveTableReference(
+									navigablePath,
+									(ValuedModelPart) resultModelPart,
+									selectableMapping.getContainingTableExpression()
+							);
+							expressions.add( sqlExprResolver.resolveSqlExpression( tableReference, selectableMapping ) );
+						}
+				);
+				sqlExpression = new SqlTuple( expressions, resultModelPart );
+			}
+		}
+		return new EntityValuedPathInterpretation<>(
+				sqlExpression,
+				navigablePath,
+				tableGroup,
+				treatedMapping,
+				treatedMapping instanceof ValuedModelPart valuedModelPart
+						? determineAffectedTableName( tableGroup, valuedModelPart )
+						: null,
+				resultModelPart instanceof EntityIdentifierMapping identifierMapping
+						? identifierMapping.findContainingEntityMapping()
+						: mapping
+		);
+	}
+
+	private static boolean isSelected(
+			TableGroup tableGroup,
+			NavigablePath path,
+			SqmQuerySpec<?> sqmQuerySpec,
+			boolean isTopLevel) {
+		// If the table group is not initialized, i.e. not selected, no need to check selections
+		if ( !tableGroup.isInitialized() || sqmQuerySpec.getSelectClause().getSelections().isEmpty() ) {
+			return false;
+		}
+		final NavigablePath tableGroupPath = isTopLevel ? null : tableGroup.getNavigablePath();
+		for ( SqmSelection<?> selection : sqmQuerySpec.getSelectClause().getSelections() ) {
+			if ( selectionContains( selection.getSelectableNode(), path, tableGroupPath ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean selectionContains(Selection<?> selection, NavigablePath path, NavigablePath tableGroupPath) {
+		if ( selection instanceof SqmPath<?> sqmPath ) {
+			// Expansion is needed if the table group is null, i.e. we're in a top level query where EVPs are always
+			// expanded to all columns, or if the selection is on the same table (lhs) as the group by expression ...
+			return ( tableGroupPath == null || sqmPath.getLhs() != null && sqmPath.getLhs().getNavigablePath().equals( tableGroupPath ) )
+					// ... and if the entity valued path is selected or any of its columns are
+					&& path.isParentOrEqual( sqmPath.getNavigablePath() );
+		}
+		else if ( selection.isCompoundSelection() ) {
+			for ( Selection<?> compoundSelection : selection.getCompoundSelectionItems() ) {
+				if ( selectionContains( compoundSelection, path, tableGroupPath ) ) {
+					return true;
+				}
+			}
+		}
+		else if ( selection instanceof SqmDynamicInstantiation ) {
+			for ( SqmDynamicInstantiationArgument<?> argument : ( (SqmDynamicInstantiation<?>) selection ).getArguments() ) {
+				if ( selectionContains( argument.getSelectableNode(), path, tableGroupPath ) ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean supportsFunctionalDependency(Dialect dialect, EntityMappingType entityMappingType) {
+		final var analysisSupport = dialect.getFunctionalDependencyAnalysisSupport();
+		if ( analysisSupport.supportsAnalysis() ) {
+			if ( entityMappingType.getSqmMultiTableMutationStrategy() == null ) {
+				// A subquery may be used to render a single-table inheritance subtype, in which case
+				// we cannot use functional dependency analysis unless the dialect supports table groups
+				return analysisSupport.supportsTableGroups() || entityMappingType.getSuperMappingType() == null;
+			}
+			else {
+				return analysisSupport.supportsTableGroups() && ( analysisSupport.supportsConstants() ||
+						// Union entity persisters use a literal 'clazz_' column as a discriminator
+						// that breaks functional dependency for dialects that don't support constants
+						!( entityMappingType.getEntityPersister() instanceof UnionSubclassEntityPersister ) );
+			}
+		}
+		return false;
+	}
+
+	public EntityValuedPathInterpretation(
+			Expression sqlExpression,
+			NavigablePath navigablePath,
+			TableGroup tableGroup,
+			EntityValuedModelPart mapping) {
+		this( sqlExpression, navigablePath, tableGroup, mapping,
+				mapping instanceof ValuedModelPart valuedModelPart
+						? determineAffectedTableName( tableGroup, valuedModelPart )
+						: null );
+	}
+
+	public EntityValuedPathInterpretation(
+			Expression sqlExpression,
+			NavigablePath navigablePath,
+			TableGroup tableGroup,
+			EntityValuedModelPart mapping,
+			@Nullable String affectedTableName) {
+		this( sqlExpression, navigablePath, tableGroup, mapping, affectedTableName, mapping );
+	}
+
+	private EntityValuedPathInterpretation(
+			Expression sqlExpression,
+			NavigablePath navigablePath,
+			TableGroup tableGroup,
+			EntityValuedModelPart mapping,
+			@Nullable String affectedTableName,
+			ModelPart parameterInferenceMapping) {
+		super( navigablePath, mapping, tableGroup );
+		this.sqlExpression = sqlExpression;
+		this.affectedTableName = affectedTableName;
+		this.parameterInferenceMapping = parameterInferenceMapping;
+	}
+
+	/// The mapping used to extract an entity parameter's value for comparison with this expression.
+	/// Retains association-key extraction when rendering the FK, and identifier extraction when rendering the PK.
+	public ModelPart getParameterInferenceMapping() {
+		return parameterInferenceMapping;
+	}
+
+	@Override
+	public Expression getSqlExpression() {
+		return sqlExpression;
+	}
+
+	@Override
+	public @Nullable String getAffectedTableName() {
+		return affectedTableName;
+	}
+
+	@Override
+	public void accept(SqlAstWalker sqlTreeWalker) {
+		sqlExpression.accept( sqlTreeWalker );
+	}
+
+	@Override
+	public List<ColumnReference> getColumnReferences() {
+		if ( sqlExpression instanceof SqlTuple ) {
+			//noinspection unchecked
+			return (List<ColumnReference>) ( (SqlTuple) sqlExpression ).getExpressions();
+		}
+		return Collections.singletonList( (ColumnReference) sqlExpression );
+	}
+
+	@Override
+	public void visitColumnReferences(Consumer<ColumnReference> columnReferenceConsumer) {
+		if ( sqlExpression instanceof SqlTuple tuple ) {
+			for ( var expression : tuple.getExpressions() ) {
+				columnReferenceConsumer.accept( (ColumnReference) expression );
+			}
+		}
+		else {
+			columnReferenceConsumer.accept( (ColumnReference) sqlExpression );
+		}
+	}
+
+	@Override
+	public SqlTuple getSqlTuple() {
+		return sqlExpression instanceof SqlTuple tuple ? tuple : null;
+	}
+
+	@Override
+	public void applySqlSelections(DomainResultCreationState creationState) {
+		applySqlSelections( sqlExpression, creationState.getSqlAstCreationState() );
+	}
+
+	private void applySqlSelections(Expression sqlExpression, SqlAstCreationState creationState) {
+		if ( sqlExpression instanceof SqlTuple tuple ) {
+			for ( var expression : tuple.getExpressions() ) {
+				applySqlSelections( expression, creationState );
+			}
+		}
+		else {
+			creationState.getSqlExpressionResolver().resolveSqlSelection(
+					sqlExpression,
+					getExpressionType().getJavaType(),
+					null,
+					creationState.getCreationContext().getMappingMetamodel().getTypeConfiguration()
+			);
+		}
+	}
+
+	@Override
+	public EntityValuedModelPart getExpressionType() {
+		return (EntityValuedModelPart) super.getExpressionType();
+	}
+
+}

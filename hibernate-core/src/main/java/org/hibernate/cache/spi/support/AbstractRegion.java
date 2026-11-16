@@ -1,0 +1,38 @@
+package org.hibernate.cache.spi.support;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.cache.spi.Region;
+import org.hibernate.cache.spi.RegionFactory;
+
+/**
+ * @author Steve Ebersole
+ */
+public abstract class AbstractRegion implements Region {
+	private final String name;
+	private final RegionFactory regionFactory;
+
+	/**
+	 * Constructs an {@link AbstractRegion}.
+	 *
+	 * @param name - the unqualified region name
+	 * @param regionFactory - the region factory
+	 */
+	public AbstractRegion(String name, RegionFactory regionFactory) {
+		this.name = name;
+		this.regionFactory = regionFactory;
+	}
+
+	@Override
+	@Nonnull
+	public String getName() {
+		return name;
+	}
+
+	@Override
+	@Nonnull
+	public RegionFactory getRegionFactory() {
+		return regionFactory;
+	}
+
+}

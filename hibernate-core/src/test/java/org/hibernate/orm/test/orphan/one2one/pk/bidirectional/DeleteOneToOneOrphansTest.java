@@ -1,0 +1,65 @@
+package org.hibernate.orm.test.orphan.one2one.pk.bidirectional;
+
+import java.util.List;
+
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+/**
+ * @author Steve Ebersole
+ */
+@DomainModel(
+		xmlMappings = "org/hibernate/orm/test/orphan/one2one/pk/bidirectional/Mapping.hbm.xml"
+)
+@SessionFactory
+public class DeleteOneToOneOrphansTest {
+
+	@BeforeEach
+	public void createData(SessionFactoryScope scope) {
+		scope.inTransaction(
+				session -> {
+					Employee emp = new Employee();
+					emp.setInfo( new EmployeeInfo( emp ) );
+					session.persist( emp );
+				}
+		);
+	}
+
+	@AfterEach
+	public void cleanupData(SessionFactoryScope scope) {
+		scope.getSessionFactory().getSchemaManager().truncate();
+	}
+
+	@Test
+	public void testOrphanedWhileManaged(SessionFactoryScope scope) {
+		Employee e = scope.fromTransaction(
+				session -> {
+					assertEquals( 1, session.createQuery( "from EmployeeInfo", EmployeeInfo.class ).list().size() );
+					List<Employee> employees = session.createQuery( "from Employee", Employee.class ).list();
+					assertEquals( 1, employees.size() );
+					Employee emp = employees.get( 0 );
+					assertNotNull( emp.getInfo() );
+					emp.setInfo( null );
+					return emp;
+				}
+		);
+
+		scope.inTransaction(
+				session -> {
+					Employee emp = session.get( Employee.class, e.getId() );
+					assertNull( emp.getInfo() );
+					assertEquals( 0, session.createQuery( "from EmployeeInfo", EmployeeInfo.class ).list().size() );
+					assertEquals( 1, session.createQuery( "from Employee", Employee.class ).list().size() );
+				}
+		);
+
+	}
+}

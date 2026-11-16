@@ -1,0 +1,62 @@
+package org.hibernate.engine.transaction.jta.platform.internal;
+
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.boot.registry.StandardServiceInitiator;
+import org.hibernate.boot.registry.selector.spi.StrategySelector;
+import org.hibernate.cfg.AvailableSettings;
+import org.hibernate.engine.transaction.jta.platform.spi.JtaPlatform;
+import org.hibernate.engine.transaction.jta.platform.spi.JtaPlatformResolver;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.internal.CoreMessageLogger.CORE_LOGGER;
+
+/**
+ * Standard initiator for the standard {@link JtaPlatform}
+ *
+ * @author Steve Ebersole
+ */
+public class JtaPlatformInitiator implements StandardServiceInitiator<JtaPlatform> {
+	public static final JtaPlatformInitiator INSTANCE = new JtaPlatformInitiator();
+
+	@Nonnull
+	@Override
+	public Class<JtaPlatform> getServiceInitiated() {
+		return JtaPlatform.class;
+	}
+
+	@Override
+	public @Nullable JtaPlatform initiateService(@Nonnull Map<String, Object> configurationValues, @Nonnull ServiceRegistryImplementor registry) {
+		final Object setting = configurationValues.get( AvailableSettings.JTA_PLATFORM );
+		JtaPlatform platform =
+				registry.requireService( StrategySelector.class )
+						.resolveStrategy( JtaPlatform.class, setting );
+
+		if ( platform == null ) {
+			CORE_LOGGER.trace( "No JtaPlatform was specified, checking resolver" );
+			platform = registry.requireService( JtaPlatformResolver.class )
+					.resolveJtaPlatform( configurationValues, registry );
+		}
+
+		if ( platform == null ) {
+			CORE_LOGGER.trace( "No JtaPlatform was specified, checking fallback provider" );
+			platform = getFallbackProvider( configurationValues, registry );
+		}
+
+		if ( platform == null || platform instanceof NoJtaPlatform ) {
+			CORE_LOGGER.noJtaPlatform();
+		}
+		else {
+			CORE_LOGGER.usingJtaPlatform( platform.getClass().getName() );
+		}
+		return platform;
+	}
+
+	protected @Nullable JtaPlatform getFallbackProvider(Map<?,?> configurationValues, ServiceRegistryImplementor registry) {
+		return null;
+	}
+}

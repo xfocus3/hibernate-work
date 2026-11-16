@@ -1,0 +1,34 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+
+import org.hibernate.Filter;
+import org.hibernate.sql.ast.spi.creation.SqlAstCreationState;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+
+/**
+ * Things that can have {@link org.hibernate.annotations.SQLRestriction},
+ * and/or {@link org.hibernate.annotations.Filter} applied to them.
+ * This is effectively {@linkplain EntityMappingType entities} and
+ * {@linkplain PluralAttributeMapping plural attributes}.
+ */
+public interface Restrictable extends FilterRestrictable, WhereRestrictable {
+
+	/**
+	 * Applies the base set of restrictions.
+	 */
+	void applyBaseRestrictions(
+			@Nonnull Consumer<Predicate> predicateConsumer,
+			@Nonnull TableGroup tableGroup,
+			boolean useQualifier,
+			@Nonnull Map<String, Filter> enabledFilters,
+			boolean onlyApplyLoadByKeyFilters,
+			@Nullable Set<String> treatAsDeclarations,
+			@Nullable SqlAstCreationState creationState);
+}

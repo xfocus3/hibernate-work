@@ -1,0 +1,78 @@
+package org.hibernate.query.sqm.tree.spi.domain;
+
+import jakarta.annotation.Nullable;
+import java.time.temporal.Temporal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Expression;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SqmPathSource;
+import org.hibernate.query.sqm.tree.spi.expression.SqmTemporalExpression;
+import org.hibernate.query.sqm.tree.spi.expression.SqmTemporalExpressionImplementor;
+import org.hibernate.query.sqm.tree.spi.expression.SqmTemporalExpressionWrapper;
+import org.hibernate.spi.NavigablePath;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SqmTemporalValuedSimplePath<T extends Temporal & Comparable<? super T>>
+		extends SqmComparableValuedSimplePath<T>
+		implements SqmTemporalPath<T>, SqmTemporalExpressionImplementor<T> {
+	public SqmTemporalValuedSimplePath(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull SqmPathSource<T> referencedPathSource,
+			@Nullable SqmPath<?> lhs,
+			@Nonnull NodeBuilder nodeBuilder) {
+		this( navigablePath, referencedPathSource, lhs, null, nodeBuilder );
+	}
+
+	public SqmTemporalValuedSimplePath(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull SqmPathSource<T> referencedPathSource,
+			@Nullable SqmPath<?> lhs,
+			@Nullable String explicitAlias,
+			@Nonnull NodeBuilder nodeBuilder) {
+		super( navigablePath, referencedPathSource, lhs, explicitAlias, nodeBuilder );
+	}
+
+	@Nonnull
+	@Override
+	protected SqmTemporalValuedSimplePath<T> createCopy(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull SqmPathSource<T> referencedPathSource,
+			@Nullable SqmPath<?> lhs,
+			@Nullable String explicitAlias,
+			@Nonnull NodeBuilder nodeBuilder) {
+		return new SqmTemporalValuedSimplePath<>(
+				navigablePath,
+				referencedPathSource,
+				lhs,
+				explicitAlias,
+				nodeBuilder
+		);
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> coalesce(@Nonnull Expression<? extends T> y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().coalesce( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> coalesce(@Nonnull T y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().coalesce( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> nullif(@Nonnull Expression<? extends T> y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().nullif( this, y ) );
+	}
+
+	@Nonnull
+	@Override
+	public SqmTemporalExpression<T> nullif(@Nonnull T y) {
+		return new SqmTemporalExpressionWrapper<>( nodeBuilder().nullif( this, y ) );
+	}
+}

@@ -1,0 +1,31 @@
+package org.hibernate.loader;
+
+import jakarta.annotation.Nonnull;
+import java.util.List;
+
+import org.hibernate.HibernateException;
+
+/**
+ * Exception used to indicate that a query is attempting to simultaneously fetch multiple
+ * {@linkplain org.hibernate.type.BagType bags}
+*
+* @author Steve Ebersole
+*/
+public class MultipleBagFetchException extends HibernateException {
+	private final List bagRoles;
+
+	public MultipleBagFetchException(@Nonnull List bagRoles) {
+		super( "cannot simultaneously fetch multiple bags: " + bagRoles );
+		this.bagRoles = bagRoles;
+	}
+
+	/**
+	 * Retrieves the collection-roles for the bags encountered.
+	 *
+	 * @return The bag collection roles.
+	 */
+	@Nonnull
+	public List getBagRoles() {
+		return bagRoles;
+	}
+}

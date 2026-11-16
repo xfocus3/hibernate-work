@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<blueprint default-activation="eager"
+           xmlns="http://www.osgi.org/xmlns/blueprint/v1.0.0"
+        >
+
+    <bean id="serviceContributor" class="org.hibernate.spatial.integration.SpatialInitializer"/>
+    <service ref="serviceContributor" interface="org.hibernate.service.spi.ServiceContributor"/>
+    <bean id="spatialTypeContributor" class="org.hibernate.spatial.contributor.SpatialTypeContributor"/>
+    <service ref="spatialTypeContributor" interface="org.hibernate.boot.model.TypeContributor"/>
+
+    <bean id="spatialFunctionContributor" class="org.hibernate.spatial.contributor.SpatialFunctionContributor"/>
+    <service ref="spatialFunctionContributor" interface="org.hibernate.boot.model.FunctionContributor"/>
+</blueprint>

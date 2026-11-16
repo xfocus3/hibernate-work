@@ -1,0 +1,21 @@
+include::{root-project-dir}/.asciidoctorconfig.adoc[]
+:doctype: book
+:icons: font
+:html-meta-canonical-link: https://docs.hibernate.org/stable/orm/repositories/html_single/
+
+
+= Introducing Hibernate Data Repositories
+:toc2:
+:toclevels: 3
+:sectanchors:
+
+include::Preface.adoc[]
+
+:numbered:
+
+include::Repositories.adoc[]
+include::Configuration.adoc[]
+include::Pagination.adoc[]
+include::Reactive.adoc[]
+
+

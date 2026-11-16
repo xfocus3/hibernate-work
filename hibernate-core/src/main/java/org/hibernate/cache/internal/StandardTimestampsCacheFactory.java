@@ -1,0 +1,27 @@
+package org.hibernate.cache.internal;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.cache.spi.CacheImplementor;
+import org.hibernate.cache.spi.TimestampsCache;
+import org.hibernate.cache.spi.TimestampsCacheFactory;
+import org.hibernate.cache.spi.TimestampsRegion;
+
+/**
+ * Standard Hibernate implementation of the QueryCacheFactory interface.  Returns instances of
+ * {@link QueryResultsCacheImpl}.
+ */
+public class StandardTimestampsCacheFactory implements TimestampsCacheFactory {
+	/**
+	 * Singleton access
+	 */
+	public static final StandardTimestampsCacheFactory INSTANCE = new StandardTimestampsCacheFactory();
+
+	@Override
+	@Nonnull
+	public TimestampsCache buildTimestampsCache(
+			@Nonnull CacheImplementor cacheManager,
+			@Nonnull TimestampsRegion timestampsRegion) {
+		return new TimestampsCacheEnabledImpl( timestampsRegion );
+	}
+}

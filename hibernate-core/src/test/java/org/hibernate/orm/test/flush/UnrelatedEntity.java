@@ -1,0 +1,35 @@
+package org.hibernate.orm.test.flush;
+
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+
+/**
+ * @author Gail Badner
+ */
+@Entity
+public class UnrelatedEntity {
+	private Long id;
+	private String name;
+
+	public UnrelatedEntity() {
+	}
+
+	@Id
+	@GeneratedValue
+	public Long getId() {
+		return id;
+	}
+
+	public void setId(Long id) {
+		this.id = id;
+	}
+
+	public String getName() {
+		return name;
+	}
+
+	public void setName(String name) {
+		this.name = name;
+	}
+}

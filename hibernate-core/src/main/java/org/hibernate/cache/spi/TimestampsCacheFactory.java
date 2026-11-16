@@ -1,0 +1,23 @@
+package org.hibernate.cache.spi;
+
+import jakarta.annotation.Nonnull;
+
+/**
+ * Responsible for building the {@link TimestampsCache} to use for
+ * managing query results with respect to staleness of the underlying
+ * tables (sometimes called "query spaces" or "table spaces").
+ * <p>
+ * An implementation may be selected using the configuration property
+ * {@link org.hibernate.cfg.AvailableSettings#QUERY_CACHE_FACTORY}.
+ *
+ * @author Steve Ebersole
+ */
+public interface TimestampsCacheFactory {
+	/**
+	 * Build the {@link TimestampsCache}.
+	 */
+	@Nonnull
+	TimestampsCache buildTimestampsCache(
+			@Nonnull CacheImplementor cacheManager,
+			@Nonnull TimestampsRegion timestampsRegion);
+}

@@ -1,0 +1,265 @@
+package org.hibernate.orm.test.type;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+import java.io.Serializable;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Types;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.OffsetTime;
+import java.time.ZonedDateTime;
+import java.util.UUID;
+
+import org.hibernate.HibernateException;
+import org.hibernate.dialect.type.spi.DirectJavaTimeJdbcSupports;
+import org.hibernate.testing.orm.junit.BaseUnitTest;
+import org.hibernate.type.AbstractSingleColumnStandardBasicType;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.BasicTypeRegistry;
+import org.hibernate.type.CustomType;
+import org.hibernate.type.SqlTypes;
+import org.hibernate.type.descriptor.WrapperOptions;
+import org.hibernate.type.descriptor.java.StringJavaType;
+import org.hibernate.type.descriptor.java.UUIDJavaType;
+import org.hibernate.type.descriptor.jdbc.BinaryJdbcType;
+import org.hibernate.type.descriptor.jdbc.CharJdbcType;
+import org.hibernate.type.descriptor.jdbc.ObjectJdbcType;
+import org.hibernate.type.descriptor.jdbc.VarcharJdbcType;
+import org.hibernate.type.internal.BasicTypeImpl;
+import org.hibernate.type.spi.TypeConfiguration;
+import org.hibernate.usertype.UserType;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+
+/**
+ * @author Steve Ebersole
+ */
+@BaseUnitTest
+public class BasicTypeRegistryTest {
+	@Test
+	public void testLegacyJavaTimeTypePriming() {
+		final BasicTypeRegistry registry = new TypeConfiguration( false ).getBasicTypeRegistry();
+
+		assertJavaTimeType( registry, LocalDate.class, "LocalDate", SqlTypes.DATE );
+		assertJavaTimeType( registry, LocalDateTime.class, "LocalDateTime", SqlTypes.TIMESTAMP );
+		assertJavaTimeType( registry, LocalTime.class, "LocalTime", SqlTypes.TIME );
+		assertJavaTimeType( registry, OffsetDateTime.class, "OffsetDateTime", SqlTypes.TIMESTAMP_WITH_TIMEZONE );
+		assertJavaTimeType( registry, OffsetTime.class, "OffsetTime", SqlTypes.TIME_WITH_TIMEZONE );
+		assertJavaTimeType( registry, ZonedDateTime.class, "ZonedDateTime", SqlTypes.TIMESTAMP_WITH_TIMEZONE );
+	}
+
+	@Test
+	public void testDirectJavaTimeTypePriming() {
+		final BasicTypeRegistry registry = new TypeConfiguration( true ).getBasicTypeRegistry();
+
+		assertJavaTimeType( registry, LocalDate.class, "LocalDate", SqlTypes.LOCAL_DATE );
+		assertJavaTimeType( registry, LocalDateTime.class, "LocalDateTime", SqlTypes.LOCAL_DATE_TIME );
+		assertJavaTimeType( registry, LocalTime.class, "LocalTime", SqlTypes.LOCAL_TIME );
+		assertJavaTimeType( registry, OffsetDateTime.class, "OffsetDateTime", SqlTypes.OFFSET_DATE_TIME );
+		assertJavaTimeType( registry, OffsetTime.class, "OffsetTime", SqlTypes.OFFSET_TIME );
+		assertJavaTimeType( registry, ZonedDateTime.class, "ZonedDateTime", SqlTypes.OFFSET_DATE_TIME );
+	}
+
+	@Test
+	public void testUnsupportedDirectJavaTimeTypePriming() {
+		final BasicTypeRegistry registry = new TypeConfiguration(
+				true,
+				DirectJavaTimeJdbcSupports.none()
+		).getBasicTypeRegistry();
+
+		assertJavaTimeType( registry, LocalDate.class, "LocalDate", SqlTypes.DATE );
+		assertJavaTimeType( registry, LocalDateTime.class, "LocalDateTime", SqlTypes.TIMESTAMP );
+		assertJavaTimeType( registry, LocalTime.class, "LocalTime", SqlTypes.TIME );
+		assertJavaTimeType( registry, OffsetDateTime.class, "OffsetDateTime", SqlTypes.TIMESTAMP_WITH_TIMEZONE );
+		assertJavaTimeType( registry, OffsetTime.class, "OffsetTime", SqlTypes.TIME_WITH_TIMEZONE );
+		assertJavaTimeType( registry, ZonedDateTime.class, "ZonedDateTime", SqlTypes.TIMESTAMP_WITH_TIMEZONE );
+	}
+
+	@Test
+	public void testAllDirectJavaTimeTypePriming() {
+		final BasicTypeRegistry registry = new TypeConfiguration(
+				true,
+				DirectJavaTimeJdbcSupports.all()
+		).getBasicTypeRegistry();
+
+		assertJavaTimeType( registry, LocalDate.class, "LocalDate", SqlTypes.LOCAL_DATE );
+		assertJavaTimeType( registry, LocalDateTime.class, "LocalDateTime", SqlTypes.LOCAL_DATE_TIME );
+		assertJavaTimeType( registry, LocalTime.class, "LocalTime", SqlTypes.LOCAL_TIME );
+		assertJavaTimeType( registry, OffsetDateTime.class, "OffsetDateTime", SqlTypes.OFFSET_DATE_TIME );
+		assertJavaTimeType( registry, OffsetTime.class, "OffsetTime", SqlTypes.OFFSET_TIME );
+		assertJavaTimeType( registry, ZonedDateTime.class, "ZonedDateTime", SqlTypes.ZONED_DATE_TIME );
+	}
+
+	private <T> void assertJavaTimeType(
+			BasicTypeRegistry registry,
+			Class<T> javaType,
+			String typeName,
+			int jdbcTypeCode) {
+		final BasicType<T> registeredType = registry.getRegisteredType( javaType );
+		assertNotNull( registeredType );
+		assertEquals( typeName, registeredType.getName() );
+		assertEquals( jdbcTypeCode, registeredType.getJdbcType().getJdbcTypeCode() );
+		assertSame( registeredType, registry.getRegisteredType( typeName ) );
+	}
+
+	@Test
+	public void testOverriding() {
+		TypeConfiguration typeConfiguration = new TypeConfiguration();
+		BasicTypeRegistry registry = typeConfiguration.getBasicTypeRegistry();
+
+		BasicType<?> uuidBinaryRegistration = registry.getRegisteredType( "uuid-binary" );
+		assertInstanceOf( UUIDJavaType.class, uuidBinaryRegistration.getJavaTypeDescriptor() );
+		assertInstanceOf( BinaryJdbcType.class, uuidBinaryRegistration.getJdbcType() );
+
+		final BasicType<?> uuidRegistration = registry.getRegisteredType( UUID.class.getName() );
+		assertInstanceOf( UUIDJavaType.class, uuidRegistration.getJavaTypeDescriptor() );
+		assertInstanceOf( ObjectJdbcType.class, uuidRegistration.getJdbcType() );
+
+		final BasicType<?> override = new BasicTypeImpl<>( UUIDJavaType.INSTANCE, CharJdbcType.INSTANCE );
+		registry.register( override, UUID.class.getName() );
+
+		final BasicType<?> overrideRegistration = registry.getRegisteredType( UUID.class.getName() );
+
+		assertSame( override, overrideRegistration );
+		assertNotSame( uuidBinaryRegistration, overrideRegistration );
+		assertNotSame( uuidRegistration, overrideRegistration );
+	}
+
+	@Test
+	public void testExpanding() {
+		TypeConfiguration typeConfiguration = new TypeConfiguration();
+		BasicTypeRegistry registry = typeConfiguration.getBasicTypeRegistry();
+
+		BasicType<?> type = registry.getRegisteredType( SomeNoopType.INSTANCE.getName() );
+		assertNull( type );
+
+		registry.register( SomeNoopType.INSTANCE );
+		type = registry.getRegisteredType( SomeNoopType.INSTANCE.getName() );
+		assertNotNull( type );
+		assertSame( SomeNoopType.INSTANCE, type );
+	}
+
+	@Test
+	public void testRegisteringUserTypes() {
+		TypeConfiguration typeConfiguration = new TypeConfiguration();
+		BasicTypeRegistry registry = typeConfiguration.getBasicTypeRegistry();
+
+		registry.register( new TotallyIrrelevantUserType(), "key" );
+		BasicType<?> customType = registry.getRegisteredType( "key" );
+		assertNotNull( customType );
+		assertEquals( CustomType.class, customType.getClass() );
+		assertEquals( TotallyIrrelevantUserType.class, ( (CustomType<Object>) customType ).getUserType().getClass() );
+
+		BasicType<?> type = registry.getRegisteredType( UUID.class.getName() );
+		assertThat( type.getJavaTypeDescriptor() ).isInstanceOf( UUIDJavaType.class );
+		assertThat( type.getJdbcType() ).isInstanceOf( ObjectJdbcType.class );
+
+		registry.register( new TotallyIrrelevantUserType(), UUID.class.getName() );
+		assertNotSame( type, registry.getRegisteredType( UUID.class.getName() ) );
+		assertEquals( CustomType.class, registry.getRegisteredType( UUID.class.getName() ).getClass() );
+	}
+
+	public static class SomeNoopType extends AbstractSingleColumnStandardBasicType<String> {
+		public static final SomeNoopType INSTANCE = new SomeNoopType();
+
+		public SomeNoopType() {
+			super( VarcharJdbcType.INSTANCE, StringJavaType.INSTANCE );
+		}
+
+		public String getName() {
+			return "noop";
+		}
+
+		@Override
+		protected boolean registerUnderJavaType() {
+			return false;
+		}
+	}
+
+	public static class TotallyIrrelevantUserType implements UserType<Object> {
+
+		@Override
+		public int getSqlType() {
+			return Types.VARCHAR;
+		}
+
+		@Override
+		@Nonnull
+		public Class<Object> returnedClass() {
+			return Object.class;
+		}
+
+		@Override
+		public boolean equals(@Nullable Object x, @Nullable Object y) throws HibernateException {
+			return false;
+		}
+
+		@Override
+		public int hashCode(@Nonnull Object x) throws HibernateException {
+			return 0;
+		}
+
+		@Override
+		@Nullable
+		public Object nullSafeGet(
+				@Nonnull ResultSet rs,
+				int position,
+				@Nonnull WrapperOptions options) throws SQLException {
+			return null;
+		}
+
+		@Override
+		public void nullSafeSet(
+				@Nonnull PreparedStatement st,
+				@Nullable Object value,
+				int index,
+				@Nonnull WrapperOptions options) throws HibernateException, SQLException {
+		}
+
+		@Override
+		@Nullable
+		public Object deepCopy(@Nullable Object value) throws HibernateException {
+			return null;
+		}
+
+		@Override
+		public boolean isMutable() {
+			return false;
+		}
+
+		@Override
+		@Nullable
+		public Serializable disassemble(@Nullable Object value) throws HibernateException {
+			return null;
+		}
+
+		@Override
+		@Nullable
+		public Object assemble(@Nullable Serializable cached, @Nullable Object owner) throws HibernateException {
+			return null;
+		}
+
+		@Override
+		@Nullable
+		public Object replace(
+				@Nullable Object original,
+				@Nullable Object target,
+				@Nullable Object owner) throws HibernateException {
+			return null;
+		}
+	}
+
+}

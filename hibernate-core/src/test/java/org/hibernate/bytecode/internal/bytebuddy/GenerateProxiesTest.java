@@ -1,0 +1,27 @@
+package org.hibernate.bytecode.internal.bytebuddy;
+
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
+import java.lang.reflect.InvocationTargetException;
+
+import org.hibernate.proxy.pojo.bytebuddy.ByteBuddyProxyHelper;
+import org.junit.jupiter.api.Test;
+
+public class GenerateProxiesTest {
+
+	@Test
+	public void generateBasicProxy() {
+		BasicProxyFactoryImpl basicProxyFactory = new BasicProxyFactoryImpl( SimpleEntity.class, null,
+				new ByteBuddyState() );
+		assertNotNull( basicProxyFactory.getProxy() );
+	}
+
+	@Test
+	public void generateProxy() throws InstantiationException, IllegalAccessException, IllegalArgumentException,
+			InvocationTargetException, NoSuchMethodException, SecurityException {
+		ByteBuddyProxyHelper byteBuddyProxyHelper = new ByteBuddyProxyHelper( new ByteBuddyState() );
+		Class<?> proxyClass = byteBuddyProxyHelper.buildProxy( SimpleEntity.class, new Class<?>[0] );
+		assertNotNull( proxyClass );
+		assertNotNull( proxyClass.getConstructor().newInstance() );
+	}
+}

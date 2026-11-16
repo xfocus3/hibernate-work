@@ -1,0 +1,306 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nullable;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import org.hibernate.query.criteria.JpaExpression;
+import org.hibernate.query.criteria.JpaSimpleCase;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.tree.spi.SqmCacheable;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Expression;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import static org.hibernate.query.internal.QueryHelper.highestPrecedenceType2;
+
+/**
+ * @author Steve Ebersole
+ */
+public class SqmCaseSimple<T, R>
+		extends AbstractSqmExpression<R>
+		implements JpaSimpleCase<T, R> {
+	private final SqmExpression<T> fixture;
+	private final List<WhenFragment<? extends T, ? extends R>> whenFragments;
+	private @Nullable SqmExpression<? extends R> otherwise;
+
+	public SqmCaseSimple(@Nonnull SqmExpression<T> fixture, @Nonnull NodeBuilder nodeBuilder) {
+		this( fixture, null, 10, nodeBuilder );
+	}
+
+	public SqmCaseSimple(@Nonnull SqmExpression<T> fixture, int estimatedWhenSize, @Nonnull NodeBuilder nodeBuilder) {
+		this( fixture, null, estimatedWhenSize, nodeBuilder );
+	}
+
+	public SqmCaseSimple(@Nonnull SqmExpression<T> fixture, @Nullable SqmBindableType<R> inherentType, @Nonnull NodeBuilder nodeBuilder) {
+		this( fixture, inherentType, 10, nodeBuilder );
+	}
+
+	private SqmCaseSimple(
+			@Nonnull SqmExpression<T> fixture,
+			@Nullable SqmBindableType<R> inherentType,
+			int estimatedWhenSize,
+			@Nonnull NodeBuilder nodeBuilder) {
+		super( inherentType, nodeBuilder );
+		this.whenFragments = new ArrayList<>( estimatedWhenSize );
+		this.fixture = fixture;
+	}
+
+	@Nonnull
+	@Override
+	public SqmCaseSimple<T, R> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		final SqmCaseSimple<T, R> caseSearched = context.registerCopy(
+				this,
+				new SqmCaseSimple<>( fixture.copy( context ), getNodeType(), whenFragments.size(), nodeBuilder() )
+		);
+		for ( WhenFragment<? extends T, ? extends R> whenFragment : whenFragments ) {
+			caseSearched.whenFragments.add(
+					new SqmCaseSimple.WhenFragment<>(
+							whenFragment.checkValue.copy( context ),
+							whenFragment.result.copy( context )
+					)
+			);
+		}
+		if ( otherwise != null ) {
+			caseSearched.otherwise = otherwise.copy( context );
+		}
+		copyTo( caseSearched, context );
+		return caseSearched;
+	}
+
+	@Nonnull
+	public SqmExpression<T> getFixture() {
+		return fixture;
+	}
+
+	@Nonnull
+	public List<WhenFragment<? extends T,? extends R>> getWhenFragments() {
+		return whenFragments;
+	}
+
+	public @Nullable SqmExpression<? extends R> getOtherwise() {
+		return otherwise;
+	}
+
+	public void otherwise(@Nonnull SqmExpression<? extends R> otherwiseExpression) {
+		this.otherwise = otherwiseExpression;
+
+		applyInferableResultType( otherwiseExpression.getNodeType(), otherwiseExpression.getJavaTypeDescriptor() );
+	}
+
+	public void when(@Nonnull SqmExpression<? extends T> test, @Nonnull SqmExpression<? extends R> result) {
+		whenFragments.add( new WhenFragment<>( test, result ) );
+
+		// TODO: currently does nothing, but it would be nice if it worked!
+		test.applyInferableType( fixture.getNodeType(), fixture.getJavaTypeDescriptor() );
+
+		applyInferableResultType( result.getNodeType(), result.getJavaTypeDescriptor() );
+	}
+
+	private void applyInferableResultType(@Nullable SqmBindableType<?> type, @Nullable JavaType<?> clazz) {
+		if ( type != null ) {
+			final SqmBindableType<?> oldType = getExpressible();
+			final SqmBindableType<?> newType = highestPrecedenceType2( oldType, type );
+			if ( newType != null && newType != oldType ) {
+				internalApplyInferableType( newType, highestPrecedenceType2( getJavaTypeDescriptor(), clazz ) );
+			}
+		}
+	}
+
+	@Override
+	protected void internalApplyInferableType(@Nullable SqmBindableType<?> newType) {
+		super.internalApplyInferableType( newType );
+
+		if ( otherwise != null ) {
+			otherwise.applyInferableType( newType );
+		}
+
+		if ( whenFragments != null ) {
+			whenFragments.forEach( whenFragment -> whenFragment.getResult().applyInferableType( newType ) );
+		}
+	}
+
+	@Override
+	protected void internalApplyInferableType(@Nullable SqmBindableType<?> newType, @Nullable JavaType<?> newJavaType) {
+		super.internalApplyInferableType( newType, newJavaType );
+
+		if ( otherwise != null ) {
+			otherwise.applyInferableType( newType, newJavaType );
+		}
+
+		if ( whenFragments != null ) {
+			whenFragments.forEach( whenFragment -> whenFragment.getResult().applyInferableType( newType, newJavaType ) );
+		}
+	}
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return walker.visitSimpleCaseExpression( this );
+	}
+
+	@Nonnull
+	@Override
+	public String asLoggableText() {
+		return "<simple-case>";
+	}
+
+	public static class WhenFragment<T,R> implements SqmCacheable {
+		private final SqmExpression<T> checkValue;
+		private final SqmExpression<R> result;
+
+		public WhenFragment(SqmExpression<T> checkValue, SqmExpression<R> result) {
+			this.checkValue = checkValue;
+			this.result = result;
+		}
+
+		public SqmExpression<T> getCheckValue() {
+			return checkValue;
+		}
+
+		public SqmExpression<R> getResult() {
+			return result;
+		}
+
+		@Override
+		public boolean equals(@Nullable Object object) {
+			return object instanceof WhenFragment<?, ?> that
+				&& checkValue.equals( that.checkValue )
+				&& result.equals( that.result );
+		}
+
+		@Override
+		public int hashCode() {
+			int result = checkValue.hashCode();
+			result = 31 * result + this.result.hashCode();
+			return result;
+		}
+
+		@Override
+		public boolean isCompatible(Object object) {
+			return object instanceof WhenFragment<?, ?> that
+					&& checkValue.isCompatible( that.checkValue )
+					&& result.isCompatible( that.result );
+		}
+
+		@Override
+		public int cacheHashCode() {
+			int result = checkValue.cacheHashCode();
+			result = 31 * result + this.result.cacheHashCode();
+			return result;
+		}
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		hql.append( "case " );
+		fixture.appendHqlString( hql, context );
+		for ( WhenFragment<? extends T, ? extends R> whenFragment : whenFragments ) {
+			hql.append( " when " );
+			whenFragment.checkValue.appendHqlString( hql, context );
+			hql.append( " then " );
+			whenFragment.result.appendHqlString( hql, context );
+		}
+
+		final SqmExpression<? extends R> otherwise = this.otherwise;
+		if ( otherwise != null ) {
+			hql.append( " else " );
+			otherwise.appendHqlString( hql, context );
+		}
+		hql.append( " end" );
+	}
+
+	@Override
+	public boolean equals(@Nullable Object object) {
+		return object instanceof SqmCaseSimple<?, ?> that
+			&& this.fixture.equals( that.fixture )
+			&& Objects.equals( this.whenFragments, that.whenFragments )
+			&& Objects.equals( this.otherwise, that.otherwise );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = fixture.hashCode();
+		result = 31 * result + Objects.hashCode( whenFragments );
+		result = 31 * result + Objects.hashCode( otherwise );
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object object) {
+		return object instanceof SqmCaseSimple<?, ?> that
+			&& this.fixture.isCompatible( that.fixture )
+			&& SqmCacheable.areCompatible( this.whenFragments, that.whenFragments )
+			&& SqmCacheable.areCompatible( this.otherwise, that.otherwise );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		int result = fixture.cacheHashCode();
+		result = 31 * result + SqmCacheable.cacheHashCode( whenFragments );
+		result = 31 * result + SqmCacheable.cacheHashCode( otherwise );
+		return result;
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// JPA
+
+	@Nonnull
+	@Override
+	public JpaExpression<T> getExpression() {
+		return getFixture();
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> when(@Nullable T condition, @Nullable R result) {
+		when( nodeBuilder().value( condition ), nodeBuilder().value( result ) );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> when(@Nullable T condition, @Nonnull Expression<? extends R> result) {
+		when( nodeBuilder().value( condition, fixture ), (SqmExpression<? extends R>) result );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> when(@Nonnull Expression<? extends T> condition, @Nullable R result) {
+		when( condition, nodeBuilder().value( result ) );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> when(@Nonnull Expression<? extends T> condition, @Nonnull Expression<? extends R> result) {
+		when( (SqmExpression<? extends T>) condition, (SqmExpression<? extends R>) result );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> otherwise(@Nullable R result) {
+		otherwise( nodeBuilder().value( result ) );
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public JpaSimpleCase<T, R> otherwise(@Nonnull Expression<? extends R> result) {
+		otherwise( (SqmExpression<? extends R>) result );
+		return this;
+	}
+
+}

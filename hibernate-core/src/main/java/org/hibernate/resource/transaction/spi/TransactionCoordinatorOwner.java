@@ -1,0 +1,74 @@
+package org.hibernate.resource.transaction.spi;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.resource.jdbc.spi.JdbcSessionOwner;
+
+/**
+ * Models an owner of a {@link TransactionCoordinator}.  Mainly used in 2 ways:<ul>
+ *     <li>
+ *         First to allow the coordinator to determine if its owner is still active (open, etc).
+ *     </li>
+ *     <li>
+ *         Second is to allow the coordinator to dispatch before and after completion events to the owner
+ *     </li>
+ * </ul>
+ *
+ * @author Steve Ebersole
+ */
+public interface TransactionCoordinatorOwner {
+	/**
+	 * Is the TransactionCoordinator owner considered active?
+	 *
+	 * @return {@code true} indicates the owner is still active; {@code false} indicates it is not.
+	 */
+	boolean isActive();
+
+	/**
+	 * Validate retained state before completion, including when the owner is inactive/closed.
+	 * Must not access services destroyed by factory closure.
+	 *
+	 * @since 8.0
+	 */
+	default void validateBeforeCompletion() {
+	}
+
+	/**
+	 * Callback indicating recognition of entering into a transactional
+	 * context whether that is explicitly via the Hibernate
+	 * {@link org.hibernate.Transaction} API or via registration
+	 * of Hibernate's JTA Synchronization impl with a JTA Transaction
+	 */
+	default void startTransactionBoundary() {
+		getJdbcSessionOwner().startTransactionBoundary();
+	}
+
+	/**
+	 * An after-begin callback from the coordinator to its owner.
+	 */
+	void afterTransactionBegin();
+
+	/**
+	 * A before-completion callback from the coordinator to its owner.
+	 */
+	void beforeTransactionCompletion();
+
+	/**
+	 * An after-completion callback from the coordinator to its owner.
+	 *
+	 * @param successful Was the transaction successful?
+	 * @param delayed Is this delayed after transaction completion call (aka after a timeout)?
+	 */
+	void afterTransactionCompletion(boolean successful, boolean delayed);
+
+	@Nonnull
+	JdbcSessionOwner getJdbcSessionOwner();
+
+	/**
+	 * Set the effective transaction timeout period for the current transaction, in seconds.
+	 *
+	 * @param seconds The number of seconds before a time out should occur.
+	 */
+	void setTransactionTimeOut(int seconds);
+
+	void flushBeforeTransactionCompletion();
+}

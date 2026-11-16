@@ -1,0 +1,154 @@
+package org.hibernate.metamodel.model.domain.internal;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.cache.MutableCacheKeyBuilder;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.internal.util.collections.ArrayHelper;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+
+/**
+ * @author Christian Beikov
+ */
+public class TupleMappingModelExpressible implements MappingModelExpressible<Object[]> {
+
+	private final @Nullable String[] componentNames;
+	private final MappingModelExpressible<?>[] components;
+	private final JdbcMapping[] mappings;
+
+	public TupleMappingModelExpressible(@Nullable List<String> componentNames, MappingModelExpressible<?>[] components) {
+		this.componentNames = componentNames == null ? null : componentNames.toArray( new String[0] );
+		this.components = components;
+		final ArrayList<JdbcMapping> results = new ArrayList<>();
+		forEachJdbcType( 0, (index, jdbcMapping) -> results.add( jdbcMapping ) );
+		this.mappings = results.toArray( new JdbcMapping[0] );
+	}
+
+	@Nonnull
+	@Override
+	public JdbcMapping getJdbcMapping(final int index) {
+		return mappings[ index ];
+	}
+
+	public @Nullable MappingModelExpressible<?> findComponentMappingModelExpressible(String componentName) {
+		if ( componentNames == null ) {
+			return null;
+		}
+		final int index = ArrayHelper.indexOf( componentNames, componentName );
+		return index == -1 ? null : components[ index ];
+	}
+
+	@Override
+	public int forEachJdbcType(int offset, @Nonnull IndexedConsumer<JdbcMapping> action) {
+		int span = 0;
+		for ( int i = 0; i < components.length; i++ ) {
+			span += components[i].forEachJdbcType( offset + span, action );
+		}
+		return span;
+	}
+
+	@Nullable
+	@Override
+	public Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			return null;
+		}
+		final Object[] disassembled = new Object[components.length];
+		final Object[] array = (Object[]) value;
+		for ( int i = 0; i < components.length; i++ ) {
+			disassembled[i] = components[i].disassemble( array[i], session );
+		}
+		return disassembled;
+	}
+
+	@Override
+	public void addToCacheKey(@Nonnull MutableCacheKeyBuilder cacheKey, @Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		if ( value == null ) {
+			for ( int i = 0; i < components.length; i++ ) {
+				components[i].addToCacheKey( cacheKey, null, session );
+			}
+		}
+		else {
+			final Object[] array = (Object[]) value;
+			for ( int i = 0; i < components.length; i++ ) {
+				components[i].addToCacheKey( cacheKey, array[i], session );
+			}
+		}
+	}
+
+	@Override
+	public <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		int span = 0;
+		if ( value == null ) {
+			for ( int i = 0; i < components.length; i++ ) {
+				span += components[i].forEachDisassembledJdbcValue(
+						null,
+						span + offset,
+						x,
+						y,
+						valuesConsumer,
+						session
+				);
+			}
+		}
+		else {
+			final Object[] values = (Object[]) value;
+			for ( int i = 0; i < components.length; i++ ) {
+				span += components[i].forEachDisassembledJdbcValue(
+						values[i],
+						span + offset,
+						x,
+						y,
+						valuesConsumer,
+						session
+				);
+			}
+		}
+		return span;
+	}
+
+	@Override
+	public <X, Y> int forEachJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		int span = 0;
+		if ( value == null ) {
+			for ( int i = 0; i < components.length; i++ ) {
+				span += components[i].forEachDisassembledJdbcValue(
+						components[i].disassemble( null, session ),
+						span + offset,
+						x, y, valuesConsumer,
+						session
+				);
+			}
+		}
+		else {
+			final Object[] values = (Object[]) value;
+			for ( int i = 0; i < components.length; i++ ) {
+				span += components[i].forEachDisassembledJdbcValue(
+						components[i].disassemble( values[i], session ),
+						span + offset,
+						x, y, valuesConsumer,
+						session
+				);
+			}
+		}
+		return span;
+	}
+}

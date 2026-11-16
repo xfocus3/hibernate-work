@@ -1,0 +1,218 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.Objects;
+import java.util.function.BiConsumer;
+
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.sql.ast.spi.result.DomainResultProducer;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.ast.spi.query.select.SqlSelection;
+import org.hibernate.sql.ast.spi.query.from.TableGroup;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.DomainResultCreationState;
+import org.hibernate.type.descriptor.java.JavaType;
+
+import jakarta.annotation.Nullable;
+
+/// Base descriptor, within the mapping model, for any part of the
+/// application's domain model: an attribute, an entity identifier,
+/// collection elements, and so on.
+///
+/// @see DomainResultProducer
+/// @see jakarta.persistence.metamodel.Bindable
+///
+/// @author Steve Ebersole
+public interface ModelPart extends MappingModelExpressible {
+
+	/// The path for this fetchable back to an entity in the domain model.  Acts as a unique
+	/// identifier for individual parts.
+	/// Some examples:
+	/// * For an entity, the role name is simply the entity name.
+	/// * For embeddable the role name is the path back to the root entity.  E.g. a Person's address
+	/// would be a path `Person#address`.
+	///
+	/// For a collection the path would be the same as the "collection role".  E.g. an Order's lineItems
+	/// would be `Order#lineItems`.  This is the same as the historical `CollectionPersister#getRoleName`.
+	///
+	/// For the (model)parts of a collection the role is either `{element}` or `{index}` depending.  E.g.
+	/// `Order#lineItems.{element}`.  Attributes of the element or index type (embeddable or entity typed)
+	/// would be based on this role.  E.g. `Order#lineItems.{element}.quantity`
+	///
+	/// For an attribute of an embedded, the role would be relative to its "container".  E.g. `Person#address.city` or
+	/// `Person#addresses.{element}.city`
+	///
+	/// @apiNote Whereas [#getPartName()] is local to this part, NavigableRole can be a compound path
+	///
+	/// @see #getPartName()
+	@Nullable
+	NavigableRole getNavigableRole();
+
+	/// The local part name, which is generally the unqualified role name
+	@Nullable
+	String getPartName();
+
+	/// The type for this part.
+	@Nonnull
+	MappingType getPartMappingType();
+
+	/// The Java type for this part.  Generally equivalent to
+	/// [MappingType#getMappedJavaType()] relative to
+	/// [#getPartMappingType()]
+	@Nonnull
+	JavaType<?> getJavaType();
+
+	/// Whether this model part describes something that physically
+	/// exists in the domain model.
+	///
+	/// For example, an entity's [discriminator][EntityDiscriminatorMapping]
+	/// is part of the model, but is not a physical part of the domain model - there
+	/// is no "discriminator attribute".
+	///
+	/// Also indicates whether the part is castable to [VirtualModelPart]
+	default boolean isVirtual() {
+		return false;
+	}
+
+	default boolean isEntityIdentifierMapping() {
+		return false;
+	}
+
+	boolean hasPartitionedSelectionMapping();
+
+	/// Create a [DomainResult] for a specific reference to this [ModelPart].
+	@Nonnull
+	@org.hibernate.SPI(org.hibernate.SPI.Role.SUPPLY)
+	<T> DomainResult<T> createDomainResult(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nullable String resultVariable,
+			@Nonnull DomainResultCreationState creationState);
+
+	/// Apply SQL selections for a specific reference to this [ModelPart]
+	/// outside the domain query's root select clause.
+	void applySqlSelections(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull DomainResultCreationState creationState);
+
+	/// Apply SQL selections for a specific reference to this [ModelPart]
+	/// outside the domain query's root select clause.
+	void applySqlSelections(
+			@Nonnull NavigablePath navigablePath,
+			@Nonnull TableGroup tableGroup,
+			@Nonnull DomainResultCreationState creationState,
+			@Nonnull BiConsumer<SqlSelection,JdbcMapping> selectionConsumer);
+
+	/// Visits each physical (non-formula)  column.
+	default int forEachColumn(@Nonnull SelectableConsumer consumer) {
+		final int[] count = new int[] {0};
+		forEachSelectable( 0, (index, selectableMapping) -> {
+			if ( !selectableMapping.isFormula() ) {
+				consumer.accept( count[0], selectableMapping );
+				count[0] = count[0] + 1;
+			}
+		} );
+		return count[0];
+	}
+
+	/// A shorthand form of [#forEachSelectable(int,SelectableConsumer)], that passes `0` as offset.
+	default int forEachSelectable(@Nonnull SelectableConsumer consumer) {
+		return forEachSelectable( 0, consumer );
+	}
+
+	/// Visits each selectable mapping with the selectable index offset by the given value.
+	/// Returns the amount of jdbc types that have been visited.
+	default int forEachSelectable(int offset, @Nonnull SelectableConsumer consumer) {
+		return 0;
+	}
+
+	@Nullable
+	default AttributeMapping asAttributeMapping() {
+		return null;
+	}
+
+	@Nullable
+	default EntityMappingType asEntityMappingType(){
+		return null;
+	}
+
+	@Nullable default BasicValuedModelPart asBasicValuedModelPart() {
+		return null;
+	}
+
+	/// A shorthand form of [#breakDownJdbcValues(Object,int,Object,Object,JdbcValueBiConsumer,SharedSessionContractImplementor)],
+	/// that passes `0` as offset and null for the two values `X` and `Y`.
+	default int breakDownJdbcValues(
+			@Nullable Object domainValue,
+			@Nonnull JdbcValueConsumer valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return breakDownJdbcValues( domainValue, 0, null, null, valueConsumer, session );
+	}
+
+	/// Breaks down the domain value to its constituent JDBC values.
+	///
+	/// Think of it as breaking the multi-dimensional array into a visitable flat array.
+	/// Additionally, it passes through the values `X` and `Y` to the consumer.
+	/// Returns the amount of jdbc types that have been visited.
+	<X, Y> int breakDownJdbcValues(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer,
+			@Nullable SharedSessionContractImplementor session);
+
+	/// A shorthand form of [#decompose(Object,int,Object,Object,JdbcValueBiConsumer,SharedSessionContractImplementor)],
+	/// that passes `0` as offset and null for the two values `X` and `Y`.
+	default int decompose(
+			@Nullable Object domainValue,
+			@Nonnull JdbcValueConsumer valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return decompose( domainValue, 0, null, null, valueConsumer, session );
+	}
+
+	/// Similar to [#breakDownJdbcValues(Object,int,Object,Object,JdbcValueBiConsumer,SharedSessionContractImplementor)],
+	/// but this method is supposed to be used for decomposing values for assignment expressions.
+	/// Returns the amount of jdbc types that have been visited.
+	default <X, Y> int decompose(
+			@Nullable Object domainValue,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValueBiConsumer<X, Y> valueConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		return breakDownJdbcValues( domainValue, offset, x, y, valueConsumer, session );
+	}
+
+	@Nullable
+	EntityMappingType findContainingEntityMapping();
+
+	default boolean areEqual(@Nullable Object one, @Nullable Object other, @Nullable SharedSessionContractImplementor session) {
+		// NOTE : deepEquals to account for arrays (compound natural-id)
+		return Objects.deepEquals( one, other );
+	}
+
+	/// Functional interface for consuming the JDBC values.
+	@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+	@FunctionalInterface
+	interface JdbcValueConsumer extends JdbcValueBiConsumer<Object, Object> {
+		@Override
+		default void consume(int valueIndex, @Nullable Object x, @Nullable Object y, @Nullable Object value, @Nonnull SelectableMapping jdbcValueMapping) {
+			consume( valueIndex, value, jdbcValueMapping );
+		}
+
+		/// Consume a JDBC-level jdbcValue. The JDBC jdbcMapping descriptor is also passed in
+		void consume(int valueIndex, @Nullable Object value, @Nonnull SelectableMapping jdbcValueMapping);
+	}
+
+	/// Functional interface for consuming the JDBC values, along with two values of type `X` and `Y`.
+	@org.hibernate.SPI({ org.hibernate.SPI.Role.USE, org.hibernate.SPI.Role.IMPLEMENT })
+	@FunctionalInterface
+	interface JdbcValueBiConsumer<X, Y> {
+		/// Consume a JDBC-level jdbcValue.  The JDBC jdbcMapping descriptor is also passed in
+		void consume(int valueIndex, @Nullable X x, @Nullable Y y, @Nullable Object value, @Nonnull SelectableMapping jdbcValueMapping);
+	}
+}

@@ -1,0 +1,260 @@
+== Hibernate ORM
+
+image:https://img.shields.io/maven-central/v/org.hibernate.orm/hibernate-core.svg?label=Maven%20Central&style=for-the-badge[Maven Central,link=https://central.sonatype.com/search?namespace=org.hibernate.orm&sort=name]
+image:https://img.shields.io/github/actions/workflow/status/hibernate/hibernate-orm/ci.yml?branch=main&logo=GitHub&style=for-the-badge[GitHub Actions Status,link=https://github.com/hibernate/hibernate-orm/actions/workflows/ci.yml?query=branch%3Amain]
+image:https://img.shields.io/badge/Revved%20up%20by-Develocity-06A0CE?style=for-the-badge&logo=gradle[Develocity,link=https://develocity.commonhaus.dev/scans?search.rootProjectNames=Hibernate%20ORM]
+image:https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jvm-repo-rebuild/reproducible-central/master/content/org/hibernate/orm/hibernate-core/badge.json&style=for-the-badge[Reproducible Builds,link=https://github.com/jvm-repo-rebuild/reproducible-central/blob/master/content/org/hibernate/orm/hibernate-core/README.md]
+image:https://testpilot.oracle.com/ords/testpilot/badges/github/hibernate/hibernate-orm[Oracle Test Pilot,link=https://testpilot.oracle.com/]
+
+Hibernate ORM is a powerful object/relational mapping solution for Java, the de facto standard implementation of the https://www.oracle.com/java/technologies/persistence-jsp.html[Java Persistence API] (now also known as https://jakarta.ee/specifications/persistence/4.0/[Jakarta Persistence]), https://jakarta.ee/specifications/query/1.0/[Jakarta Query], and https://jakarta.ee/specifications/data/1.1/[Jakarta Data].
+
+Hibernate exposes relational data in a natural and type safe form,
+
+- making it easy to write **complex queries** and work with their results,
+- letting the program easily **synchronize changes** made in memory with the database,
+- respecting the ACID properties of **transactions**,
+- automatically handling *temporal data* and *audit logging*,
+- taking care of *multi-tenancy* and *row-level security*,
+- and allowing **performance optimizations** to be made after the basic persistence logic has already been written.
+
+Hibernate is the best way for a program written in Java to take advantage of the power of the relational model, and of the expressivity of SQL, without sacrificing performance or code reuse.
+
+See https://hibernate.org/orm/[hibernate.org] for more information.
+
+== Getting started
+
+Documentation for Hibernate ORM is available at:
+
+<https://hibernate.org/orm/documentation>
+
+https://github.com/hibernate/hibernate-orm/blob/main/documentation/src/main/asciidoc/introduction/Configuration.adoc[This page] explains how to include Hibernate ORM in a Java project and configure a connection to the database.
+
+== Building from sources
+
+The build requires at least JDK 25, and produces Java 17 bytecode.
+
+Hibernate uses https://gradle.org[Gradle] as its build tool. See the _Gradle Primer_ section below if you're new to
+Gradle.
+
+Contributors should read the link:CONTRIBUTING.md[Contributing Guide].
+
+See the guides for setting up https://hibernate.org/community/contribute/intellij-idea/[IntelliJ] or
+https://hibernate.org/community/contribute/eclipse-ide/[Eclipse] as your development environment.
+
+== Gradle Primer
+
+The Gradle build tool has excellent documentation.
+
+* https://docs.gradle.org/current/userguide/userguide_single.html[Gradle User Guide] is a typical user guide in that
+it follows a topical approach to describing all of the capabilities of Gradle.
+* https://docs.gradle.org/current/dsl/index.html[Gradle DSL Guide] is unique and excellent in quickly
+getting up to speed on certain aspects of Gradle.
+
+Here we summarize the features you'll need to get started in this project.
+
+NOTE: The project has a https://docs.gradle.org/current/userguide/gradle_wrapper.html[Gradle Wrapper].
+The rest of the section will assume execution via the wrapper.
+
+=== Executing Tasks
+
+To print a list of available build _tasks_, execute:
+
+----
+./gradlew tasks
+----
+
+To execute a task across all modules, simply execute the task from the root directory.
+
+----
+cd hibernate-orm
+./gradlew build
+----
+
+Gradle visits each subproject and executes the task if the subproject defines it.
+
+To execute a task in a specific module, either:
+
+- `cd` into that module directory and execute the task, or
+- explicitly qualify the task name with the name of the module.
+
+For example, to run the tests for the `hibernate-core` module from the root directory you could type:
+
+----
+./gradlew hibernate-core:test
+----
+
+=== Common tasks
+
+The common tasks you might use in building Hibernate include:
+
+`build` :: Assembles (jars) and tests this project
+`compile` :: Performs all compilation tasks including staging resources from both main and test
+`jar` :: Generates a jar archive with all the compiled classes
+`test` :: Runs the tests
+`publishToMavenLocal` or `pTML` :: Installs the project jar to your local Maven cache at `~/.m2/repository`. Note that Gradle never uses this, but it can be useful for testing a build with other local Maven-based builds.
+`clean` :: Cleans the build directory
+
+== Testing and databases
+
+Testing Hibernate against an embedded h2 database is easy.
+Just run:
+
+----
+./gradlew test
+----
+
+To run against another database:
+
+1. <<start-test-database,start the database>> using `podman` or `docker`, and then
+2. run the tests with the correct <<profiles,profile>> for that database.
+
+=== Using profiles [[profiles]]
+
+The Hibernate build defines several database testing _profiles_ in `local.databases.gradle`.
+A profile may be activated by name using the `db` build property which can be passed either:
+
+- as a JVM system property `-Ddb=...`, or
+- as a Gradle project property `-Pdb=...`.
+
+Examples below use the Gradle project property.
+
+----
+gradle clean build -Pdb=postgresql
+----
+
+To run a test from your IDE, you need to ensure the property expansions happen.
+Use the following command:
+
+----
+gradle clean compile -Pdb=postgresql
+----
+
+__NOTE: To run tests against a JDBC driver that is not available via Maven central, add the driver to your local Maven repository (`~/.m2/repository`) or to a personal Maven repository server.__
+
+=== Starting a test database as a container [[start-test-database]]
+
+If podman or docker is installed, there's no need to install any database to test Hibernate.
+The script `db.sh` starts a preconfigured database which can be used for testing.
+
+Simply run the following command:
+
+----
+./db.sh postgresql
+----
+
+Running `./db.sh` without an argument prints a list of available database configurations.
+
+By default, `./db.sh` kills any previously started database.
+To keep multiple databases running, use `--keep-orphans` or `-k`:
+
+----
+./db.sh -k postgresql
+./db.sh -k mysql
+----
+
+When the database is properly started, run tests with the corresponding profile, for example, `-Pdb=postgresql` for PostgreSQL.
+The system property `dbHost` configures the IP address of your docker host.
+
+The command for running tests might look like the following:
+
+----
+./gradlew test -Pdb=postgresql "-DdbHost=192.168.99.100"
+----
+
+The following table illustrates a list of commands for various databases that can be tested locally.
+
+|===
+|Database |Start database |Run tests
+
+|H2
+|-
+|`./gradlew test -Pdb=h2`
+
+|HSQLDB
+|-
+|`./gradlew test -Pdb=hsqldb`
+
+|Apache Derby
+|-
+|`./gradlew test -Pdb=derby`
+
+|MySQL
+|`./db.sh mysql`
+|`./gradlew test -Pdb=mysql`
+
+|MariaDB
+|`./db.sh mariadb`
+|`./gradlew test -Pdb=mariadb`
+
+|PostgreSQL
+|`./db.sh postgresql`
+|`./gradlew test -Pdb=postgresql`
+
+|PostgreSQL with PostGIS (required for `hibernate-spatial`)
+|`./db.sh postgis`
+|`./gradlew test -Pdb=postgis`
+
+|EnterpriseDB
+|`./db.sh edb`
+|`./gradlew test -Pdb=edb`
+
+|Oracle
+|`./db.sh oracle`
+|`./gradlew test -Pdb=oracle`
+
+|DB2
+|`./db.sh db2`
+|`./gradlew test -Pdb=db2`
+
+|SQL Server
+|`./db.sh mssql`
+|`./gradlew test -Pdb=mssql`
+
+|Sybase ASE (jTDS)
+|`./db.sh sybase`
+|`./gradlew test -Pdb=sybase`
+
+|Sybase ASE (jConnect)
+|`./db.sh sybase`
+|`./gradlew test -Pdb=sybase_jconn`
+
+|SAP HANA
+|`./db.sh hana`
+|`./gradlew test -Pdb=hana`
+
+|CockroachDB
+|`./db.sh cockroachdb`
+|`./gradlew test -Pdb=cockroachdb`
+
+|TiDB
+|`./db.sh tidb`
+|`./gradlew test -Pdb=tidb`
+
+|Informix
+|`./db.sh informix`
+|`./gradlew test -Pdb=informix`
+
+|Spanner PostgreSQL
+|`./db.sh spanner_pg`
+|`./gradlew test -Pdb=spannerpgsql`
+
+|CUBRID
+|`./db.sh cubrid`
+|`./gradlew test -Pdb=cubrid`
+|===
+
+Stopping a test database
+
+To stop a container, use the `stop` command.
+For example:
+
+[source]
+----
+podman stop mariadb
+----
+
+Substitute `docker` for `podman` if appropriate.
+
+== Continuous Integration
+
+See link:MAINTAINERS.md#ci[MAINTAINERS.md] for information about CI.

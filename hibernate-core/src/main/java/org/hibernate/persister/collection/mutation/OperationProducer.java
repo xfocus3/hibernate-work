@@ -1,0 +1,22 @@
+package org.hibernate.persister.collection.mutation;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.sql.ast.spi.model.MutatingTableReference;
+import org.hibernate.sql.spi.mutation.jdbc.JdbcMutationOperation;
+
+/**
+ * Callback for producing a {@link JdbcMutationOperation} given
+ * a collection-table reference
+ *
+ * @see RowMutationOperations
+ * @see UpdateRowsCoordinator
+ * @see RowMutationOperations
+ *
+ * @author Steve Ebersole
+ */
+@FunctionalInterface
+public interface OperationProducer {
+	@Nonnull
+	JdbcMutationOperation createOperation(@Nonnull MutatingTableReference tableReference);
+}

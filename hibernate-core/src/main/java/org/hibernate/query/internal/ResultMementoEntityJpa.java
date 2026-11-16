@@ -1,0 +1,162 @@
+package org.hibernate.query.internal;
+
+import jakarta.persistence.sql.EntityMapping;
+import jakarta.persistence.sql.MemberMapping;
+import jakarta.persistence.sql.ResultSetMapping;
+import org.hibernate.LockMode;
+import org.hibernate.SessionFactory;
+import org.hibernate.internal.util.collections.CollectionHelper;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.query.named.spi.FetchMemento;
+import org.hibernate.query.named.spi.FetchMementoBasic;
+import org.hibernate.query.named.spi.ResultMementoEntity;
+import org.hibernate.query.results.spi.FetchBuilder;
+import org.hibernate.query.results.spi.FetchBuilderBasicValued;
+import org.hibernate.query.results.spi.ResultBuilderEntityValued;
+import org.hibernate.query.results.internal.complete.CompleteResultBuilderEntityJpa;
+import org.hibernate.query.results.internal.complete.DelayedFetchBuilderBasicPart;
+import org.hibernate.query.results.internal.implicit.ImplicitFetchBuilderBasic;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.results.graph.Fetchable;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Consumer;
+
+/**
+ * @author Steve Ebersole
+ */
+public class ResultMementoEntityJpa implements ResultMementoEntity, FetchMemento.Parent {
+	private final NavigablePath navigablePath;
+	private final EntityMappingType entityDescriptor;
+	private final LockMode lockMode;
+	private final FetchMementoBasic discriminatorMemento;
+	private final Map<String, FetchMemento> explicitFetchMementoMap;
+
+	public ResultMementoEntityJpa(
+			EntityMappingType entityDescriptor,
+			LockMode lockMode,
+			FetchMementoBasic discriminatorMemento,
+			Map<String, FetchMemento> explicitFetchMementoMap) {
+		this(
+				new NavigablePath( entityDescriptor.getEntityName() ),
+				entityDescriptor,
+				lockMode,
+				discriminatorMemento,
+				explicitFetchMementoMap
+		);
+	}
+	public ResultMementoEntityJpa(
+			NavigablePath navigablePath,
+			EntityMappingType entityDescriptor,
+			LockMode lockMode,
+			FetchMementoBasic discriminatorMemento,
+			Map<String, FetchMemento> explicitFetchMementoMap) {
+		this.navigablePath = navigablePath;
+		this.entityDescriptor = entityDescriptor;
+		this.lockMode = lockMode;
+		this.discriminatorMemento = discriminatorMemento;
+		this.explicitFetchMementoMap = explicitFetchMementoMap;
+	}
+
+	@Override
+	public NavigablePath getNavigablePath() {
+		return navigablePath;
+	}
+
+	@Override
+	public Class<?> getResultJavaType() {
+		return entityDescriptor.getJavaType().getJavaTypeClass();
+	}
+
+	@Override
+	public ResultBuilderEntityValued resolve(
+			Consumer<String> querySpaceConsumer,
+			ResultSetMappingResolutionContext context) {
+
+		final HashMap<Fetchable, FetchBuilder> explicitFetchBuilderMap = new HashMap<>();
+
+		// If there are no explicit fetches, we don't register DELAYED
+		// builders to get implicit fetching of all basic fetchables
+		if ( !explicitFetchMementoMap.isEmpty() ) {
+			explicitFetchMementoMap.forEach(
+					(relativePath, fetchMemento) -> explicitFetchBuilderMap.put(
+							(Fetchable) entityDescriptor.findByPath( relativePath ),
+							fetchMemento.resolve( this, querySpaceConsumer, context )
+					)
+			);
+
+			final boolean isEnhancedForLazyLoading = entityDescriptor.getRepresentationStrategy().isBytecodeEnhanced();
+			// Implicit basic fetches are DELAYED by default, so register
+			// fetch builders for the remaining basic fetchables
+			entityDescriptor.forEachAttributeMapping(
+					attributeMapping -> {
+						final var basicPart = attributeMapping.asBasicValuedModelPart();
+						if ( basicPart != null ) {
+							explicitFetchBuilderMap.computeIfAbsent(
+									attributeMapping,
+									k -> new DelayedFetchBuilderBasicPart(
+											navigablePath.append( k.getFetchableName() ),
+											basicPart,
+											isEnhancedForLazyLoading
+									)
+							);
+						}
+					}
+			);
+		}
+
+		return new CompleteResultBuilderEntityJpa(
+				navigablePath,
+				entityDescriptor,
+				lockMode,
+				discriminatorFetchBuilder( querySpaceConsumer, context ),
+				explicitFetchBuilderMap
+		);
+	}
+
+	@Override
+	public <R> ResultSetMapping<R> toJpaMapping(SessionFactory sessionFactory) {
+		//noinspection unchecked
+		return new EntityMapping<>(
+				(Class<R>) getResultJavaType(),
+				lockMode.toJpaLockMode(),
+				entityDescriptor.getDiscriminatorMapping() == null ? null : entityDescriptor.getDiscriminatorMapping().getSelectableName(),
+				toJpaFieldMappings( sessionFactory ),
+				null
+		);
+	}
+
+	private static final MemberMapping<?>[] NO_MEMBERS = new MemberMapping<?>[0];
+
+	private <T> MemberMapping<T>[] toJpaFieldMappings(SessionFactory sessionFactory) {
+		if ( CollectionHelper.isEmpty( explicitFetchMementoMap ) ) {
+			//noinspection unchecked
+			return (MemberMapping<T>[]) NO_MEMBERS;
+		}
+
+		var memberMappings = new MemberMapping[ explicitFetchMementoMap.size() ];
+		int index = 0;
+		for ( Map.Entry<String, FetchMemento> entry : explicitFetchMementoMap.entrySet() ) {
+			memberMappings[index++] = entry.getValue().toJpaMemberMapping( this, sessionFactory );
+		}
+		//noinspection unchecked
+		return (MemberMapping<T>[]) memberMappings;
+	}
+
+	private FetchBuilderBasicValued discriminatorFetchBuilder(
+			Consumer<String> querySpaceConsumer,
+			ResultSetMappingResolutionContext context) {
+		final var discriminatorMapping = entityDescriptor.getDiscriminatorMapping();
+		if ( discriminatorMapping == null || !entityDescriptor.hasSubclasses() ) {
+			assert discriminatorMemento == null;
+			return  null;
+		}
+		else {
+			return discriminatorMemento == null
+					? new ImplicitFetchBuilderBasic( navigablePath, discriminatorMapping )
+					: (FetchBuilderBasicValued)
+							discriminatorMemento.resolve( this, querySpaceConsumer, context );
+		}
+	}
+}

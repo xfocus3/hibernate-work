@@ -1,0 +1,15 @@
+package org.hibernate.graph.spi;
+
+import org.hibernate.Incubating;
+import org.hibernate.metamodel.model.domain.EntityDomainType;
+
+/**
+ * @author Gavin King
+ *
+ * @since 7.2
+ */
+@Incubating(since = "5.4")
+@FunctionalInterface
+public interface GraphParserEntityClassResolver {
+	EntityDomainType<?> resolveEntityClass(Class<?> entityClass);
+}

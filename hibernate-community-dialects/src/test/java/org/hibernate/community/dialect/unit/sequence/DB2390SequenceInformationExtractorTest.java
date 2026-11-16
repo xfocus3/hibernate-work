@@ -1,0 +1,29 @@
+package org.hibernate.community.dialect.unit.sequence;
+
+import org.hibernate.community.dialect.DB2zLegacyDialect;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.orm.test.dialect.unit.sequence.AbstractSequenceInformationExtractorTest;
+
+import org.hibernate.testing.orm.junit.JiraKey;
+
+/**
+ * @author Andrea Boriero
+ */
+@JiraKey(value = "HHH-11470")
+public class DB2390SequenceInformationExtractorTest extends AbstractSequenceInformationExtractorTest {
+
+	@Override
+	public Dialect getDialect() {
+		return new DB2zLegacyDialect();
+	}
+
+	@Override
+	public boolean expectsSequenceMetadata() {
+		return false;
+	}
+
+	@Override
+	public String expectedQuerySequencesString() {
+		return null;
+	}
+}

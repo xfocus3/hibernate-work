@@ -1,0 +1,17 @@
+package org.hibernate.engine.jdbc.proxy;
+
+import java.sql.Clob;
+
+/**
+ * Contract for {@link Clob} wrappers.
+ *
+ * @author Steve Ebersole
+ */
+public interface WrappedClob {
+	/**
+	 * Retrieve the wrapped {@link java.sql.Blob} reference
+	 *
+	 * @return The wrapped {@link java.sql.Blob} reference
+	 */
+	Clob getWrappedClob();
+}

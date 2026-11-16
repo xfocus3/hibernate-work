@@ -1,0 +1,69 @@
+package org.hibernate.orm.test.jpa.callbacks.jpa4;
+
+import org.hibernate.testing.orm.junit.DomainModel;
+import org.hibernate.testing.orm.junit.SessionFactory;
+import org.hibernate.testing.orm.junit.SessionFactoryScope;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Simple tests of multiple sources of listening for events - @EntityListener, @EntityListeners, callback
+ *
+ * @author Steve Ebersole
+ */
+@DomainModel( annotatedClasses = {
+		Book.class, Person.class, Publisher.class, CreationWatcher.class, BookWatcher.class,
+		Cat.class, Dog.class, AnimalWatcher.class
+} )
+@SessionFactory
+public class MultipleListenerTests {
+	@AfterEach
+	void tearDown(SessionFactoryScope factoryScope) {
+		factoryScope.dropData();
+	}
+
+	@Test
+	void testOrderingAmongstEventHandlers(SessionFactoryScope factoryScope) {
+		EventSink.reset();
+
+		factoryScope.inTransaction( (session) -> {
+			var publisher = new Publisher( 1, "Hibernate Press" );
+			var author = new Person( 1, "Billy" );
+			session.persist( publisher );
+			session.persist( author );
+			session.persist( new Book( 1, "123456789", "The Wrath of Rings", author ) );
+		} );
+
+		// CreationWatcher
+		assertThat( EventSink.personCreationEvents ).containsExactly( CreationWatcher.class );
+
+		// CreationWatcher & BookWatcher
+		// 		- because they are both @EntityListener, the order is undefined
+		assertThat( EventSink.bookCreationEvents ).containsExactlyInAnyOrder( CreationWatcher.class, BookWatcher.class );
+
+
+		// PublisherListener & CreationWatcher & Publisher (callback)
+		//		- only CreationWatcher is an @EntityListener, so the order is well-defined
+		assertThat( EventSink.publisherCreationEvents ).containsExactly( CreationWatcher.class, PublisherListener.class, Publisher.class );
+	}
+
+	@Test
+	void testListenerTargetAssignability(SessionFactoryScope factoryScope) {
+		assertThat( AnimalWatcher.creations ).isEmpty();
+
+		factoryScope.inTransaction( (session) -> {
+			session.persist( new Cat( 1, "Cat" ) );
+		} );
+
+		assertThat( AnimalWatcher.creations ).hasSize( 2 );
+		AnimalWatcher.creations.clear();
+
+		factoryScope.inTransaction( (session) -> {
+			session.persist( new Dog( 1, "Dog" ) );
+		} );
+
+		assertThat( AnimalWatcher.creations ).hasSize( 2 );
+	}
+}

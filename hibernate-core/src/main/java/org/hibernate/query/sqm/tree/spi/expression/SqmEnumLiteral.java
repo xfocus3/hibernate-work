@@ -1,0 +1,197 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import jakarta.annotation.Nullable;
+import jakarta.annotation.Nonnull;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.Locale;
+
+import org.hibernate.query.hql.spi.SemanticPathPart;
+import org.hibernate.query.hql.spi.SqmCreationState;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.UnknownPathException;
+import org.hibernate.query.sqm.tree.spi.SqmCopyContext;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmDomainType;
+import org.hibernate.type.descriptor.java.EnumJavaType;
+
+import static jakarta.persistence.metamodel.Type.PersistenceType.BASIC;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+/**
+ * Specialized SQM literal defined by an enum reference.  E.g.
+ * {@code ".. where p.sex = Sex.MALE"}
+ *
+ * @author Steve Ebersole
+ */
+public class SqmEnumLiteral<E extends Enum<E>> extends SqmLiteral<E> implements SqmBindableType<E>, SemanticPathPart {
+	private final EnumJavaType<E> referencedEnumTypeDescriptor;
+	private final String enumValueName;
+
+	public SqmEnumLiteral(
+			@Nonnull E enumValue,
+			@Nonnull EnumJavaType<E> referencedEnumTypeDescriptor,
+			@Nonnull String enumValueName,
+			@Nonnull NodeBuilder nodeBuilder) {
+		super( null, referencedEnumTypeDescriptor, enumValue, nodeBuilder );
+		this.referencedEnumTypeDescriptor = referencedEnumTypeDescriptor;
+		this.enumValueName = enumValueName;
+	}
+
+	@Nonnull
+	@Override
+	public SqmEnumLiteral<E> copy(@Nonnull SqmCopyContext context) {
+		final var existing = context.getCopy( this );
+		if ( existing != null ) {
+			return existing;
+		}
+		final SqmEnumLiteral<E> expression = context.registerCopy(
+				this,
+				new SqmEnumLiteral<>(
+						getEnumValue(),
+						referencedEnumTypeDescriptor,
+						enumValueName,
+						nodeBuilder()
+				)
+		);
+		copyTo( expression, context );
+		return expression;
+	}
+
+	@Override
+	@Nonnull
+	public SqmBindableType<E> getExpressible() {
+		return this;
+	}
+
+	@Override
+	public @Nonnull SqmBindableType<E> getNodeType() {
+		return this;
+	}
+
+	@Override
+	@Nonnull
+	public PersistenceType getPersistenceType() {
+		return BASIC;
+	}
+
+	@Override
+	public @Nullable SqmDomainType<E> getSqmType() {
+		return null;
+	}
+
+	@Nonnull
+	public E getEnumValue() {
+		return castNonNull( getLiteralValue() );
+	}
+
+	@Nonnull
+	@Override
+	public EnumJavaType<E> getExpressibleJavaType() {
+		return referencedEnumTypeDescriptor;
+	}
+
+	@Override
+	public @Nonnull Class<E> getJavaType() {
+		return referencedEnumTypeDescriptor.getJavaTypeClass();
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// SemanticPathPart
+
+	@Nonnull
+	@Override
+	public SemanticPathPart resolvePathPart(
+			@Nonnull String name,
+			boolean isTerminal,
+			@Nonnull SqmCreationState creationState) {
+		throw new UnknownPathException(
+				String.format(
+						Locale.ROOT,
+						"Static enum reference [%s#%s] cannot be de-referenced",
+						referencedEnumTypeDescriptor.getTypeName(),
+						enumValueName
+				)
+		);
+	}
+
+	@Nonnull
+	@Override
+	public SqmPath<?> resolveIndexedAccess(
+			@Nonnull SqmExpression<?> selector,
+			boolean isTerminal,
+			@Nonnull SqmCreationState creationState) {
+		throw new UnknownPathException(
+				String.format(
+						Locale.ROOT,
+						"Static enum reference [%s#%s] cannot be de-referenced",
+						referencedEnumTypeDescriptor.getTypeName(),
+						enumValueName
+				)
+		);
+	}
+
+	@Nonnull
+	private Integer ordinalValue() {
+		return getExpressibleJavaType().toOrdinal( getEnumValue() );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<Long> asLong() {
+		return nodeBuilder().literal( ordinalValue().longValue() );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<Integer> asInteger() {
+		return nodeBuilder().literal( ordinalValue() );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<Float> asFloat() {
+		return nodeBuilder().literal( ordinalValue().floatValue() );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<Double> asDouble() {
+		return nodeBuilder().literal( ordinalValue().doubleValue() );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<BigDecimal> asBigDecimal() {
+		throw new UnsupportedOperationException( "Enum literal cannot be cast to BigDecimal" );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<BigInteger> asBigInteger() {
+		throw new UnsupportedOperationException( "Enum literal cannot be cast to BigInteger" );
+	}
+
+	@Nonnull
+	@Override
+	public SqmExpression<String> asString() {
+		return nodeBuilder().literal( getExpressibleJavaType().toName( getEnumValue() ) );
+	}
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return walker.visitEnumLiteral( this );
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		hql.append( getEnumValue().getDeclaringClass().getTypeName() );
+		hql.append( '.' );
+		hql.append( enumValueName );
+	}
+}

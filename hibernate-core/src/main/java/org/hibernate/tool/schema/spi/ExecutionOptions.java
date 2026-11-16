@@ -1,0 +1,19 @@
+package org.hibernate.tool.schema.spi;
+
+import java.util.Map;
+
+import org.hibernate.Incubating;
+
+/**
+ * Parameter object representing options for schema management tool execution
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "5.1")
+public interface ExecutionOptions {
+	Map<String,Object> getConfigurationValues();
+
+	boolean shouldManageNamespaces();
+
+	ExceptionHandler getExceptionHandler();
+}

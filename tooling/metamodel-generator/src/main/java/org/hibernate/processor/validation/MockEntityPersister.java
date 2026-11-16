@@ -1,0 +1,274 @@
+package org.hibernate.processor.validation;
+
+import jakarta.annotation.Nullable;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.persistence.AccessType;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.metamodel.internal.ShortNameImplicitDiscriminatorStrategy;
+import org.hibernate.metamodel.mapping.DiscriminatorType;
+import org.hibernate.metamodel.mapping.EntityDiscriminatorMapping;
+import org.hibernate.metamodel.mapping.internal.DiscriminatorTypeImpl;
+import org.hibernate.metamodel.mapping.internal.UnifiedAnyDiscriminatorConverter;
+import org.hibernate.metamodel.model.domain.NavigableRole;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.persister.entity.Joinable;
+import org.hibernate.type.BasicType;
+import org.hibernate.type.Type;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+import static java.util.Collections.emptyMap;
+
+/**
+ * @author Gavin King
+ */
+@SuppressWarnings("NullAway")
+@org.hibernate.Internal
+public abstract class MockEntityPersister implements EntityPersister, Joinable {
+
+	private static final String[] ID_COLUMN = {"id"};
+
+	private final String entityName;
+	private final MockSessionFactory factory;
+	private final List<MockEntityPersister> subclassPersisters = new ArrayList<>();
+	final AccessType defaultAccessType;
+	private final Map<String,Type> propertyTypesByName = new HashMap<>();
+
+	public MockEntityPersister(String entityName, AccessType defaultAccessType, MockSessionFactory factory) {
+		this.entityName = entityName;
+		this.factory = factory;
+		this.defaultAccessType = defaultAccessType;
+	}
+
+	void initSubclassPersisters() {
+		for (MockEntityPersister other: factory.getMockEntityPersisters()) {
+			other.addPersister(this);
+			this.addPersister(other);
+		}
+	}
+
+	private void addPersister(MockEntityPersister entityPersister) {
+		if (isSubclassPersister(entityPersister)) {
+			subclassPersisters.add(entityPersister);
+		}
+	}
+
+	private Type getSubclassPropertyType(String propertyPath) {
+		return subclassPersisters.stream()
+				.map(sp -> sp.propertyType(propertyPath))
+				.filter(Objects::nonNull)
+				.findAny()
+				.orElse(null);
+	}
+
+	abstract boolean isSamePersister(MockEntityPersister entityPersister);
+
+	abstract boolean isSubclassPersister(MockEntityPersister entityPersister);
+
+	@Override
+	public boolean isSubclassEntityName(@Nonnull String name) {
+		return isSubclassPersister(subclassPersisters.stream()
+				.filter(persister -> persister.entityName.equals(name))
+				.findFirst().orElseThrow());
+	}
+
+	@Nonnull
+	@Override
+	public SessionFactoryImplementor getFactory() {
+		return factory;
+	}
+
+	@Nonnull
+	@Override
+	public String getEntityName() {
+		return entityName;
+	}
+
+	@Nonnull
+	@Override
+	public final Type getPropertyType(@Nonnull String propertyPath) {
+		final var cached = propertyTypesByName.get(propertyPath);
+		if ( cached == null ) {
+			final var type = propertyType( propertyPath );
+			if ( type == null ) {
+				throw new org.hibernate.MappingException( "Unknown property '" + propertyPath
+						+ "' of entity '" + entityName + "'" );
+			}
+			propertyTypesByName.put( propertyPath, type );
+			return type;
+		}
+		else {
+			return cached;
+		}
+	}
+
+	private Type propertyType(String propertyPath) {
+		final var type = createPropertyType( propertyPath );
+		if ( type != null ) {
+			return type;
+		}
+
+		//check subclasses, needed for treat()
+		final var typeFromSubclass = getSubclassPropertyType( propertyPath );
+		if ( typeFromSubclass != null ) {
+			return typeFromSubclass;
+		}
+
+		if ( "id".equals( propertyPath ) ) {
+			return identifierType();
+		}
+
+		return null;
+	}
+
+	abstract Type createPropertyType(String propertyPath);
+
+	/**
+	 * Override on subclasses!
+	 */
+	@Nullable
+	@Override
+	public String getIdentifierPropertyName() {
+		return getRootEntityPersister().identifierPropertyName();
+	}
+
+	protected abstract String identifierPropertyName();
+
+	/**
+	 * Override on subclasses!
+	 */
+	@Nonnull
+	@Override
+	public Type getIdentifierType() {
+		return getRootEntityPersister().identifierType();
+	}
+
+	protected abstract Type identifierType();
+
+	/**
+	 * Override on subclasses!
+	 */
+	@Nullable
+	@Override
+	public BasicType<?> getVersionType() {
+		return getRootEntityPersister().versionType();
+	}
+
+	protected abstract BasicType<?> versionType();
+
+	@Nonnull
+	@Override
+	public abstract String getRootEntityName();
+
+	public MockEntityPersister getRootEntityPersister() {
+		return factory.createMockEntityPersister(getRootEntityName());
+	}
+
+	@Nonnull
+	@Override
+	public Set<String> getSubclassEntityNames() {
+		final var names = new HashSet<String>();
+		names.add( entityName );
+		for (MockEntityPersister persister : factory.getMockEntityPersisters()) {
+			if (persister.isSubclassPersister(this)) {
+				names.add(persister.entityName);
+			}
+		}
+		return names;
+	}
+
+	@Nonnull
+	@Override
+	public String[] toColumns(@Nonnull String propertyName) {
+		return new String[] { "" };
+	}
+
+	@Nonnull
+	@Override
+	public String[] getPropertySpaces() {
+		return new String[] {entityName};
+	}
+
+	@Nonnull
+	@Override
+	public Serializable[] getQuerySpaces() {
+		return new Serializable[] {entityName};
+	}
+
+	@Nonnull
+	@Override
+	public EntityPersister getEntityPersister() {
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	public String[] getIdentifierColumnNames() {
+		return ID_COLUMN;
+	}
+
+	@Nullable
+	@Override
+	public DiscriminatorType<?> getDiscriminatorDomainType() {
+		var type = getDiscriminatorType();
+		return new DiscriminatorTypeImpl<>(
+				type,
+				new UnifiedAnyDiscriminatorConverter<>(
+						new NavigableRole( entityName )
+								.append( EntityDiscriminatorMapping.DISCRIMINATOR_ROLE_NAME ),
+						type.getJavaTypeDescriptor(),
+						type.getRelationalJavaType(),
+						emptyMap(),
+						ShortNameImplicitDiscriminatorStrategy.SHORT_NAME_STRATEGY,
+						factory.getMetamodel()
+				)
+		);
+	}
+
+	@Nonnull
+	@Override
+	public String getTableName() {
+		return entityName;
+	}
+
+	@Override
+	public String toString() {
+		return "MockEntityPersister[" + entityName + "]";
+	}
+
+	@Override
+	public int getVersionPropertyIndex() {
+		return 0;
+	}
+
+	@Override
+	public boolean isVersioned() {
+		return true;
+	}
+
+	@Nullable
+	@Override
+	public String getMappedSuperclass() {
+		return null;
+	}
+
+	@Nullable
+	@Override
+	public BasicType<String> getDiscriminatorType() {
+		return factory.getTypeConfiguration().getBasicTypeForJavaType(String.class);
+	}
+
+	@Override
+	public boolean isMutable() {
+		return true;
+	}
+}

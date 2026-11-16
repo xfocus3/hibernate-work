@@ -1,0 +1,19 @@
+plugins {
+    id "local.publishing-java-module"
+    id "local.publishing-group-relocation"
+}
+
+description = 'Integration for javax.cache into Hibernate as a second-level caching service'
+
+dependencies {
+    api project( ':hibernate-core' )
+    api libs.jcache
+
+    testImplementation project( ':hibernate-testing' )
+
+    testRuntimeOnly(libs.ehcache) {
+        capabilities {
+            requireCapability 'org.ehcache.modules:ehcache-xml-jakarta'
+        }
+    }
+}

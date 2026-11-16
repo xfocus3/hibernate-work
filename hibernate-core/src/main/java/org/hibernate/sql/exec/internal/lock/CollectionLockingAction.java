@@ -1,0 +1,184 @@
+package org.hibernate.sql.exec.internal.lock;
+
+import jakarta.persistence.PessimisticLockScope;
+import jakarta.persistence.Timeout;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.graph.GraphSemantic;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.query.sqm.mutation.internal.SqmMutationStrategyHelper;
+import org.hibernate.sql.ast.spi.query.select.QuerySpec;
+import org.hibernate.sql.exec.spi.ExecutionContext;
+import org.hibernate.sql.exec.spi.JdbcSelectWithActionsBuilder;
+import org.hibernate.sql.exec.spi.LoadedValuesCollector;
+import org.hibernate.sql.exec.spi.PostAction;
+import org.hibernate.sql.exec.spi.StatementAccess;
+
+import java.sql.Connection;
+import java.util.IdentityHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.hibernate.sql.exec.SqlExecLogger.SQL_EXEC_LOGGER;
+
+/**
+ * Supplemental collection locking for direct executions using
+ * {@linkplain PessimisticLockScope#EXTENDED}.
+ * <p>
+ * Direct force increments are completed only after the collection acquisitions
+ * succeed. Cursor completion runs after all lifecycle notifications for the
+ * logical result, rather than from the first entity's after-load callback.
+ *
+ * @author Steve Ebersole
+ * @implSpec Integrations overriding the protected acquisition method must retain
+ * the ordering provided by {@link DirectLockingCompletion}. Asynchronous integrations
+ * retain the collector's invocation-owned state until acquisition and increment
+ * completion; no thread-local or session-wide completion state is required.
+ */
+public class CollectionLockingAction implements PostAction {
+	// Used by Hibernate Reactive
+	protected final LockMode lockMode;
+	// Used by Hibernate Reactive
+	protected final Timeout lockTimeout;
+
+	// Used by Hibernate Reactive
+	protected CollectionLockingAction(
+			LockMode lockMode,
+			Timeout lockTimeout) {
+		this.lockMode = lockMode;
+		this.lockTimeout = lockTimeout;
+	}
+
+	public static void apply(
+			LockOptions lockOptions,
+			QuerySpec lockingTarget,
+			JdbcSelectWithActionsBuilder jdbcSelectBuilder) {
+		assert lockOptions.getLockScope() == PessimisticLockScope.EXTENDED;
+
+		final var factory = resolveLoadedValuesCollectorFactory( lockingTarget );
+		jdbcSelectBuilder.setLoadedValuesCollectorFactory(
+				lockOptions.getLockMode() == LockMode.PESSIMISTIC_FORCE_INCREMENT
+						? factory.withDeferredForceIncrement() : factory );
+
+		// additionally, add a post-action which uses the collected values.
+		jdbcSelectBuilder.appendPostAction( new CollectionLockingAction(
+				lockOptions.getLockMode(),
+				lockOptions.getTimeout()
+		) );
+	}
+
+
+
+	@Override
+	public void performPostAction(
+			StatementAccess jdbcStatementAccess,
+			Connection jdbcConnection,
+			ExecutionContext executionContext,
+			LoadedValuesCollector loadedValuesCollector) {
+		if ( executionContext.isScrollResult() ) {
+			final Runnable acquisition = () -> {
+				try {
+					performPostAction( executionContext, loadedValuesCollector );
+				}
+				finally {
+					loadedValuesCollector.getCollectedCollections().clear();
+					loadedValuesCollector.getCollectedEntities().clear();
+				}
+			};
+			final var completion = DirectLockingCompletion.from( loadedValuesCollector );
+			if ( completion != null ) {
+				// A per-entity after-load callback is too early when the logical row
+				// contains several entities whose lifecycle notifications must run first.
+				completion.registerCursorAcquisition( acquisition );
+			}
+			else {
+				executionContext.getCallback().registerAfterLoadAction( (entity, entityMappingType, session) -> acquisition.run() );
+			}
+		}
+		else {
+			performPostAction( executionContext, loadedValuesCollector );
+		}
+	}
+
+	// Used by Hibernate Reactive
+	protected void performPostAction(ExecutionContext executionContext, LoadedValuesCollector loadedValuesCollector) {
+		final var completion = DirectLockingCompletion.from( loadedValuesCollector );
+		if ( completion == null ) {
+			lockCollections( executionContext, loadedValuesCollector );
+		}
+		else {
+			completion.complete( () -> lockCollections( executionContext, loadedValuesCollector ), executionContext.getSession() );
+		}
+	}
+
+	private void lockCollections(ExecutionContext executionContext, LoadedValuesCollector loadedValuesCollector) {
+		LockingHelper.logLoadedValues( loadedValuesCollector );
+
+		final var session = executionContext.getSession();
+
+		// NOTE: we deal with effective graphs here to make sure embedded associations are treated as lazy
+		final var effectiveEntityGraph = session.getLoadQueryInfluencers().getEffectiveEntityGraph();
+		final var initialGraph = effectiveEntityGraph.getGraph();
+		final var initialSemantic = effectiveEntityGraph.getSemantic();
+
+		// collect registrations by entity type
+		final var entitySegments = segmentLoadedValues( loadedValuesCollector );
+
+		try {
+			// for each entity-type, prepare a locking select statement per table.
+			// this is based on the attributes for "state array" ordering purposes -
+			// we match each attribute to the table it is mapped to and add it to
+			// the select-list for that table-segment.
+			entitySegments.forEach( (entityMappingType, entityKeys) -> {
+				if ( SQL_EXEC_LOGGER.isDebugEnabled() ) {
+					SQL_EXEC_LOGGER.startingIncludeCollectionsLockingProcess( entityMappingType.getEntityName() );
+				}
+
+				// apply an empty "fetch graph" to make sure any embedded associations reachable from
+				// any of the DomainResults we will create are treated as lazy
+				final var graph = entityMappingType.createRootGraph( session );
+				effectiveEntityGraph.clear();
+				effectiveEntityGraph.applyGraph( graph, GraphSemantic.FETCH );
+
+				// create a cross-reference of information related to an entity based on its identifier.
+				// we use this as the collection owners whose collections need to be locked
+				final var entityDetailsMap = LockingHelper.resolveEntityKeys( entityKeys, executionContext );
+
+				SqmMutationStrategyHelper.visitCollectionTables( entityMappingType, (attribute) -> {
+					// we may need to lock the "collection table".
+					// the conditions are a bit unclear as to directionality, etc., so for now lock each.
+					LockingHelper.lockCollectionTable(
+							attribute,
+							lockMode,
+							lockTimeout,
+							entityDetailsMap,
+							executionContext
+					);
+				} );
+			} );
+		}
+		finally {
+			// reset the effective graph to whatever it was when we started
+			effectiveEntityGraph.clear();
+			session.getLoadQueryInfluencers().applyEntityGraph( initialGraph, initialSemantic );
+		}
+	}
+
+	// Used by Hibernate Reactive
+	protected static LoadedValuesCollectorFactory resolveLoadedValuesCollectorFactory(QuerySpec lockingTarget) {
+		return new LoadedValuesCollectorFactory( lockingTarget.getRootPathsForLocking() );
+	}
+
+	// Used by Hibernate Reactive
+	protected static Map<EntityMappingType, List<EntityKey>> segmentLoadedValues(LoadedValuesCollector loadedValuesCollector) {
+		final Map<EntityMappingType, List<EntityKey>> map = new IdentityHashMap<>();
+		LockingHelper.segmentLoadedValues( loadedValuesCollector.getCollectedEntities(), map );
+		if ( map.isEmpty() ) {
+			// NOTE: this may happen with Session#lock routed through SqlAstBasedLockingStrategy.
+			// however, we cannot tell that is the code path from here.
+		}
+		return map;
+	}
+
+}

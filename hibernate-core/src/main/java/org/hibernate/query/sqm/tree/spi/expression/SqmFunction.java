@@ -1,0 +1,242 @@
+package org.hibernate.query.sqm.tree.spi.expression;
+
+import java.util.List;
+import java.util.Objects;
+
+import org.hibernate.query.criteria.JpaFunction;
+import org.hibernate.query.hql.spi.SemanticPathPart;
+import org.hibernate.query.hql.spi.SqmCreationState;
+import org.hibernate.query.sqm.spi.NodeBuilder;
+import org.hibernate.query.sqm.spi.SemanticQueryWalker;
+import org.hibernate.query.sqm.spi.SqmBindableType;
+import org.hibernate.query.sqm.function.SqmFunctionDescriptor;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmCacheable;
+import org.hibernate.query.sqm.tree.spi.SqmRenderContext;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.query.sqm.tree.spi.domain.SqmFunctionPath;
+import org.hibernate.query.sqm.tree.spi.domain.SqmPath;
+import org.hibernate.sql.ast.spi.query.expression.Expression;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+/**
+ * A SQM function
+ *
+ * @author Steve Ebersole
+ */
+public abstract class SqmFunction<T> extends AbstractSqmExpression<T>
+		implements JpaFunction<T>, SemanticPathPart {
+	// this function-name is the one used to resolve the descriptor from
+	// the function registry (which may or may not be a db function name)
+	private final String functionName;
+	private final SqmFunctionDescriptor functionDescriptor;
+
+	private final List<? extends SqmTypedNode<?>> arguments;
+
+	public SqmFunction(
+			@Nonnull String functionName,
+			@Nonnull SqmFunctionDescriptor functionDescriptor,
+			@Nullable SqmBindableType<T> type,
+			@Nonnull List<? extends SqmTypedNode<?>> arguments,
+			@Nonnull NodeBuilder criteriaBuilder) {
+		super( type, criteriaBuilder );
+		this.functionName = functionName;
+		this.functionDescriptor = functionDescriptor;
+		this.arguments = arguments;
+	}
+
+	@Nonnull
+	public SqmFunctionDescriptor getFunctionDescriptor() {
+		return functionDescriptor;
+	}
+
+	@Nonnull
+	@Override
+	public String getFunctionName() {
+		return functionName;
+	}
+
+	@Nonnull
+	public List<? extends SqmTypedNode<?>> getArguments() {
+		return arguments;
+	}
+
+	@Nullable
+	public abstract Expression convertToSqlAst(@Nonnull SqmToSqlAstConverter walker);
+
+	@Nullable
+	@Override
+	public <X> X accept(@Nonnull SemanticQueryWalker<X> walker) {
+		return walker.visitFunction( this );
+	}
+
+	@Override
+	public void appendHqlString(@Nonnull StringBuilder hql, @Nonnull SqmRenderContext context) {
+		// Special case a few functions with special syntax for rendering...
+		// Unless we introduce dedicated SqmXXX classes that override this method, we have to render it this way
+		switch ( functionName ) {
+			case "cast": {
+				hql.append( "cast(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " as " );
+				arguments.get( 1 ).appendHqlString( hql, context );
+				hql.append( ')' );
+				break;
+			}
+			case "extract": {
+				hql.append( "extract(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " from " );
+				arguments.get( 1 ).appendHqlString( hql, context );
+				hql.append( ')' );
+				break;
+			}
+			case "format": {
+				hql.append( "format(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " as " );
+				arguments.get( 1 ).appendHqlString( hql, context );
+				hql.append( ')' );
+				break;
+			}
+			case "overlay": {
+				hql.append( "overlay(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " placing " );
+				arguments.get( 1 ).appendHqlString( hql, context );
+				hql.append( " from " );
+				arguments.get( 2 ).appendHqlString( hql, context );
+				if ( arguments.size() == 4 ) {
+					hql.append( " for " );
+					arguments.get( 3 ).appendHqlString( hql, context );
+				}
+				hql.append( ')' );
+				break;
+			}
+			case "trim": {
+				hql.append( "trim(" );
+				switch ( arguments.size() ) {
+					case 1:
+						arguments.get( 0 ).appendHqlString( hql, context );
+						break;
+					case 2:
+						arguments.get( 0 ).appendHqlString( hql, context );
+						hql.append( " from " );
+						arguments.get( 1 ).appendHqlString( hql, context );
+						break;
+					case 3:
+						arguments.get( 0 ).appendHqlString( hql, context );
+						hql.append( ' ' );
+						arguments.get( 1 ).appendHqlString( hql, context );
+						hql.append( " from " );
+						arguments.get( 2 ).appendHqlString( hql, context );
+						break;
+				}
+				hql.append( ')' );
+				break;
+			}
+			case "pad": {
+				hql.append( "pad(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " with" );
+				for ( int i = 1; i < arguments.size(); i++ ) {
+					hql.append( ' ' );
+					arguments.get( i ).appendHqlString( hql, context );
+				}
+				hql.append( ')' );
+				break;
+			}
+			case "position": {
+				hql.append( "position(" );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				hql.append( " in " );
+				arguments.get( 1 ).appendHqlString( hql, context );
+				hql.append( ')' );
+				break;
+			}
+			default: {
+				hql.append( functionName );
+				if ( arguments.isEmpty() ) {
+					if ( functionDescriptor.alwaysIncludesParentheses() ) {
+						hql.append( "()" );
+					}
+					return;
+				}
+				hql.append( '(' );
+				arguments.get( 0 ).appendHqlString( hql, context );
+				for ( int i = 1; i < arguments.size(); i++ ) {
+					hql.append( ", " );
+					arguments.get( i ).appendHqlString( hql, context );
+				}
+
+				hql.append( ')' );
+				break;
+			}
+		}
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// SemanticPathPart
+
+	private @Nullable SqmFunctionPath<T> functionPath;
+
+	@Nonnull
+	private SqmFunctionPath<T> getFunctionPath() {
+		SqmFunctionPath<T> path = functionPath;
+		if ( path == null ) {
+			path = functionPath = new SqmFunctionPath<>( this );
+		}
+		return path;
+	}
+
+	@Nonnull
+	@Override
+	public SemanticPathPart resolvePathPart(
+			@Nonnull String name,
+			boolean isTerminal,
+			@Nonnull SqmCreationState creationState) {
+		return getFunctionPath().resolvePathPart( name, isTerminal, creationState );
+	}
+
+	@Nonnull
+	@Override
+	public SqmPath<?> resolveIndexedAccess(
+			@Nonnull SqmExpression<?> selector,
+			boolean isTerminal,
+			@Nonnull SqmCreationState creationState) {
+		return getFunctionPath().resolveIndexedAccess( selector, isTerminal, creationState );
+	}
+
+	@Override
+	public boolean equals(@Nullable Object other) {
+		return other instanceof SqmFunction<?> that
+			&& getClass() == other.getClass()
+			&& functionName.equals( that.functionName )
+			&& Objects.equals( arguments, that.arguments );
+	}
+
+	@Override
+	public int hashCode() {
+		int result = functionName.hashCode();
+		result = 31 * result + Objects.hashCode( arguments );
+		return result;
+	}
+
+	@Override
+	public boolean isCompatible(@Nullable Object other) {
+		return other instanceof SqmFunction<?> that
+			&& getClass() == other.getClass()
+			&& functionName.equals( that.functionName )
+			&& SqmCacheable.areCompatible( arguments, that.arguments );
+	}
+
+	@Override
+	public int cacheHashCode() {
+		int result = functionName.hashCode();
+		result = 31 * result + SqmCacheable.cacheHashCode( arguments );
+		return result;
+	}
+}

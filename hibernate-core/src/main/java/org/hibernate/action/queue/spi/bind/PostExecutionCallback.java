@@ -1,0 +1,16 @@
+package org.hibernate.action.queue.spi.bind;
+
+import org.hibernate.Incubating;
+import org.hibernate.engine.spi.SessionImplementor;
+
+/// Support for callbacks after the execution of a FlushOperation.
+///
+/// @see org.hibernate.action.queue.spi.plan.FlushOperation#getPostExecutionCallback()
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "action-queue")
+public interface PostExecutionCallback {
+	/// The callback.
+	void handle(SessionImplementor session);
+}

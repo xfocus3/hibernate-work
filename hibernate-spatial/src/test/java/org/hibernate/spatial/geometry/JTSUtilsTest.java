@@ -1,0 +1,28 @@
+package org.hibernate.spatial.geometry;
+
+import org.hibernate.testing.orm.junit.JiraKey;
+
+import org.geolatte.geom.codec.Wkt;
+import org.geolatte.geom.jts.JTS;
+import org.junit.jupiter.api.Test;
+import org.locationtech.jts.geom.Geometry;
+import org.geolatte.geom.jts.JTSUtils;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+
+public class JTSUtilsTest {
+
+	@Test
+	@JiraKey(value = "HHH-14757")
+	public void testGeometryCollection() {
+		Geometry elem2a = JTS.to( Wkt.fromWkt( "GEOMETRYCOLLECTION(POINT(2 3),LINESTRING(2 3,3 4))" ) );
+		Geometry elem2b = JTS.to( Wkt.fromWkt( "GEOMETRYCOLLECTION(POINT(2 3),LINESTRING(2 3,3 4))" ) );
+		Geometry elem1a = JTS.to( Wkt.fromWkt( "GEOMETRYCOLLECTION(POINT(2 3))" ) );
+		Geometry elem1b = JTS.to( Wkt.fromWkt( "GEOMETRYCOLLECTION(POINT(2 3))" ) );
+
+		assertThat( JTSUtils.equalsExact3D( elem2a, elem2b ) ).isTrue();
+		assertThat( JTSUtils.equalsExact3D( elem1a, elem1b ) ).isTrue();
+	}
+
+}

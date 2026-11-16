@@ -1,0 +1,28 @@
+package org.hibernate.orm.test.delegation;
+
+import jakarta.annotation.Nonnull;
+import org.hibernate.engine.spi.AbstractDelegatingSessionBuilderImplementor;
+import org.hibernate.engine.creation.spi.SessionBuilderImplementor;
+
+/**
+ * If this class does not compile anymore due to unimplemented methods, you should probably add the corresponding
+ * methods to the parent class.
+ *
+ * NOTE: Do not remove!!! Used to verify that delegating SessionBuilder impls compile (aka, validates binary
+ * compatibility against previous versions)
+ *
+ * @author Guillaume Smet
+ */
+@SuppressWarnings("unused")
+public class TestDelegatingSessionBuilderImplementor extends AbstractDelegatingSessionBuilderImplementor {
+
+	public TestDelegatingSessionBuilderImplementor(SessionBuilderImplementor delegate) {
+		super( delegate );
+	}
+
+	@Override
+	@Nonnull
+	protected TestDelegatingSessionBuilderImplementor getThis() {
+		return this;
+	}
+}

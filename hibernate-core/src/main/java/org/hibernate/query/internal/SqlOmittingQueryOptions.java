@@ -1,0 +1,153 @@
+package org.hibernate.query.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.LockOptions;
+import org.hibernate.query.spi.DelegatingQueryOptions;
+import org.hibernate.query.spi.Limit;
+import org.hibernate.query.spi.QueryOptions;
+import org.hibernate.sql.exec.spi.JdbcSelect;
+import org.hibernate.sql.results.spi.ListResultsConsumer;
+
+/**
+ * @author Christian Beikov
+ */
+// used by Hibernate Reactive
+public class SqlOmittingQueryOptions extends DelegatingQueryOptions {
+
+	private final boolean omitLimit;
+	private final boolean omitLocks;
+	private final ListResultsConsumer.UniqueSemantic uniqueSemantic;
+	// Captured at construction so that {@link #peekOriginalLimit()} returns the
+	// original even when this instance wraps another already-omitting one (which
+	// happens, for example, when scroll's adapter rewraps an already-omitted
+	// context to suppress the outer LIMIT).
+	private final Limit originalLimit;
+
+	public SqlOmittingQueryOptions(QueryOptions queryOptions, boolean omitLimit, boolean omitLocks) {
+		super( queryOptions );
+		this.omitLimit = omitLimit;
+		this.omitLocks = omitLocks;
+		uniqueSemantic = null;
+		this.originalLimit = unwrappedLimit( queryOptions );
+	}
+
+	public SqlOmittingQueryOptions(QueryOptions queryOptions, boolean omitLimit, boolean omitLocks, ListResultsConsumer.UniqueSemantic semantic) {
+		super( queryOptions );
+		this.omitLimit = omitLimit;
+		this.omitLocks = omitLocks;
+		this.uniqueSemantic = semantic;
+		this.originalLimit = unwrappedLimit( queryOptions );
+	}
+
+	private static Limit unwrappedLimit(QueryOptions queryOptions) {
+		return queryOptions instanceof SqlOmittingQueryOptions wrapped
+				? wrapped.peekOriginalLimit()
+				: queryOptions.getLimit();
+	}
+
+	public static QueryOptions omitSqlQueryOptions(QueryOptions originalOptions) {
+		return omitSqlQueryOptions( originalOptions, true, true );
+	}
+
+	public static QueryOptions omitSqlQueryOptions(QueryOptions originalOptions, JdbcSelect select) {
+		return omitSqlQueryOptions( originalOptions, !select.usesLimitParameters(), false );
+	}
+
+	public static QueryOptions omitSqlQueryOptions(QueryOptions originalOptions, boolean omitLimit, boolean omitLocks) {
+		final var limit = originalOptions.getLimit();
+
+		// No need for a context when there are no options we use during SQL rendering
+		if ( originalOptions.getLockOptions().isEmpty() ) {
+			if ( !omitLimit || limit.isEmpty() ) {
+				return originalOptions;
+			}
+		}
+
+		if ( !omitLocks ) {
+			if ( !omitLimit || limit.isEmpty() ) {
+				return originalOptions;
+			}
+		}
+
+		return new SqlOmittingQueryOptions( originalOptions, omitLimit, omitLocks );
+	}
+//
+//	public static QueryOptions omitSqlQueryOptionsWithUniqueSemanticFilter(QueryOptions originalOptions, boolean omitLimit, boolean omitLocks) {
+//		final Limit limit = originalOptions.getLimit();
+//
+//		// No need for a context when there are no options we use during SQL rendering
+//		if ( originalOptions.getLockOptions().isEmpty() ) {
+//			if ( !omitLimit || limit == null || limit.isEmpty() ) {
+//				return originalOptions;
+//			}
+//		}
+//
+//		if ( !omitLocks ) {
+//			if ( !omitLimit || limit == null || limit.isEmpty() ) {
+//				return originalOptions;
+//			}
+//		}
+//
+//		return new SqlOmittingQueryOptions( originalOptions, omitLimit, omitLocks, ListResultsConsumer.UniqueSemantic.FILTER );
+//	}
+
+	@Override
+	@Nonnull
+	public LockOptions getLockOptions() {
+		return omitLocks ? new LockOptions() : super.getLockOptions();
+	}
+
+	@Override
+	@Nullable
+	public Integer getFetchSize() {
+		return null;
+	}
+
+	@Override
+	@Nonnull
+	public Limit getLimit() {
+		return omitLimit ? Limit.NONE : super.getLimit();
+	}
+
+	/**
+	 * The original {@code Limit} as it was before any {@code SqlOmittingQueryOptions}
+	 * wrapping. Used by the SQM-to-SQL AST converter to push pagination into a derived
+	 * table when this wrapper has hidden the limit from the SQL translator. Walks
+	 * through chained wraps (the scroll path can wrap an already-wrapped context).
+	 */
+	@Override
+	@Nonnull
+	public Limit peekOriginalLimit() {
+		return originalLimit;
+	}
+
+	@Override
+	@Nullable
+	public Integer getFirstRow() {
+		return omitLimit ? null : super.getFirstRow();
+	}
+
+	@Override
+	@Nullable
+	public Integer getMaxRows() {
+		return omitLimit ? null : super.getMaxRows();
+	}
+
+	@Override
+	@Nonnull
+	public Limit getEffectiveLimit() {
+		return omitLimit ? Limit.NONE : super.getEffectiveLimit();
+	}
+
+	@Override
+	public boolean hasLimit() {
+		return !omitLimit && super.hasLimit();
+	}
+
+	@Override
+	@Nullable
+	public ListResultsConsumer.UniqueSemantic getUniqueSemantic() {
+		return uniqueSemantic;
+	}
+}

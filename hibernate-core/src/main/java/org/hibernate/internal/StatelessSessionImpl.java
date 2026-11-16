@@ -1,0 +1,2005 @@
+package org.hibernate.internal;
+
+import static org.hibernate.metamodel.mapping.internal.CollectionValueWalker.visitCollectionValues;
+import static org.hibernate.engine.internal.TenantIdHelper.MissingRowPolicy.ALLOW;
+
+import static org.hibernate.engine.internal.TenantIdHelper.MissingRowPolicy.THROW;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.EntityAgent;
+import jakarta.persistence.EntityExistsException;
+import jakarta.persistence.EntityGraph;
+import jakarta.persistence.FindOption;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.PersistenceException;
+import jakarta.transaction.SystemException;
+import org.hibernate.engine.internal.TenantIdHelper;
+import org.hibernate.engine.internal.RootTenantCache;
+import org.hibernate.AssertionFailure;
+import org.hibernate.CacheMode;
+import org.hibernate.FlushMode;
+import org.hibernate.HibernateException;
+import org.hibernate.LockMode;
+import org.hibernate.LockOptions;
+import org.hibernate.MappingException;
+import org.hibernate.SessionException;
+import org.hibernate.StatelessSession;
+import org.hibernate.TransientObjectException;
+import org.hibernate.TypeMismatchException;
+import org.hibernate.UnresolvableObjectException;
+import org.hibernate.bytecode.enhance.spi.interceptor.EnhancementAsProxyLazinessInterceptor;
+import org.hibernate.collection.internal.StandardArraySemantics;
+import org.hibernate.collection.spi.CollectionSemantics;
+import org.hibernate.collection.spi.PersistentCollection;
+import org.hibernate.engine.creation.internal.SharedSessionCreationOptions;
+import org.hibernate.engine.creation.internal.options.StatelessOptions;
+import org.hibernate.engine.internal.TransactionCompletionCallbacksImpl;
+import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.LoadQueryInfluencers;
+import org.hibernate.engine.spi.PersistenceContext;
+import org.hibernate.engine.spi.StatelessSessionImplementor;
+import org.hibernate.engine.spi.TransactionCompletionCallbacks;
+import org.hibernate.engine.spi.TransactionCompletionCallbacksImplementor;
+import org.hibernate.engine.transaction.jta.platform.spi.JtaPlatform;
+import org.hibernate.event.service.spi.EventListenerGroups;
+import org.hibernate.event.spi.PostCollectionRecreateEvent;
+import org.hibernate.event.spi.PostCollectionRecreateEventListener;
+import org.hibernate.event.spi.PostCollectionRemoveEvent;
+import org.hibernate.event.spi.PostCollectionRemoveEventListener;
+import org.hibernate.event.spi.PostCollectionUpdateEvent;
+import org.hibernate.event.spi.PostCollectionUpdateEventListener;
+import org.hibernate.event.spi.PostDeleteEvent;
+import org.hibernate.event.spi.PostDeleteEventListener;
+import org.hibernate.event.spi.PostInsertEvent;
+import org.hibernate.event.spi.PostInsertEventListener;
+import org.hibernate.event.spi.PostUpdateEvent;
+import org.hibernate.event.spi.PostUpdateEventListener;
+import org.hibernate.event.spi.PostUpsertEvent;
+import org.hibernate.event.spi.PostUpsertEventListener;
+import org.hibernate.event.spi.PreCollectionRecreateEvent;
+import org.hibernate.event.spi.PreCollectionRecreateEventListener;
+import org.hibernate.event.spi.PreCollectionRemoveEvent;
+import org.hibernate.event.spi.PreCollectionRemoveEventListener;
+import org.hibernate.event.spi.PreCollectionUpdateEvent;
+import org.hibernate.event.spi.PreCollectionUpdateEventListener;
+import org.hibernate.event.spi.PreDeleteEvent;
+import org.hibernate.event.spi.PreInsertEvent;
+import org.hibernate.event.spi.PreUpdateEvent;
+import org.hibernate.event.spi.PreUpsertEvent;
+import org.hibernate.exception.ConstraintViolationException;
+import org.hibernate.generator.BeforeExecutionGenerator;
+import org.hibernate.generator.values.GeneratedValues;
+import org.hibernate.graph.GraphSemantic;
+import org.hibernate.graph.spi.RootGraphImplementor;
+import org.hibernate.id.IdentifierGenerationException;
+import org.hibernate.internal.find.FindByKeyOperation;
+import org.hibernate.internal.find.StatelessFindByKeyOperation;
+import org.hibernate.internal.find.StatelessFindMultipleByKeyOperation;
+import org.hibernate.internal.find.StatelessLoadAccessContext;
+import org.hibernate.internal.util.OptionsHelper;
+import org.hibernate.jpa.event.spi.CallbackType;
+import org.hibernate.loader.ast.internal.LoaderHelper;
+import org.hibernate.loader.ast.spi.CascadingFetchProfile;
+import org.hibernate.loader.internal.CacheLoadHelper;
+import org.hibernate.metamodel.mapping.SingularAttributeMapping;
+import org.hibernate.persister.collection.CollectionPersister;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.query.spi.QueryParameterBindings;
+import org.hibernate.stat.spi.StatisticsImplementor;
+import org.hibernate.type.TypeHelper;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.BiConsumer;
+
+import static java.lang.Boolean.parseBoolean;
+import static java.lang.Integer.parseInt;
+import static org.hibernate.cfg.BatchSettings.STATEMENT_BATCH_SIZE;
+import static org.hibernate.cfg.CacheSettings.JAKARTA_SHARED_CACHE_RETRIEVE_MODE;
+import static org.hibernate.cfg.CacheSettings.JAKARTA_SHARED_CACHE_STORE_MODE;
+import static org.hibernate.cfg.CacheSettings.JPA_SHARED_CACHE_RETRIEVE_MODE;
+import static org.hibernate.cfg.CacheSettings.JPA_SHARED_CACHE_STORE_MODE;
+import static org.hibernate.cfg.QuerySettings.CRITERIA_COPY_TREE;
+import static org.hibernate.engine.internal.CacheHelper.usingCache;
+import static org.hibernate.engine.internal.CacheHelper.writingToCache;
+import static org.hibernate.engine.internal.ManagedTypeHelper.asPersistentAttributeInterceptable;
+import static org.hibernate.engine.internal.ManagedTypeHelper.isPersistentAttributeInterceptable;
+import static org.hibernate.engine.internal.PersistenceContexts.createPersistenceContext;
+import static org.hibernate.engine.internal.Versioning.incrementVersion;
+import static org.hibernate.engine.internal.Versioning.seedVersion;
+import static org.hibernate.engine.internal.Versioning.setVersion;
+import static org.hibernate.engine.transaction.internal.jta.JtaStatusHelper.isRollback;
+import static org.hibernate.event.internal.DefaultInitializeCollectionEventListener.handlePotentiallyEmptyCollection;
+import static org.hibernate.generator.EventType.INSERT;
+import static org.hibernate.internal.Proxies.hasProxyFactory;
+import static org.hibernate.internal.Proxies.narrowOrCreateProxy;
+import static org.hibernate.internal.Proxies.obtainProxyFromFactory;
+import static org.hibernate.internal.SessionLogging.SESSION_LOGGER;
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+import static org.hibernate.jpa.HibernateHints.HINT_JDBC_BATCH_SIZE;
+import static org.hibernate.jpa.internal.util.CacheModeHelper.interpretCacheMode;
+import static org.hibernate.loader.internal.CacheLoadHelper.initializeCollectionFromCache;
+import static org.hibernate.pretty.MessageHelper.collectionInfoString;
+import static org.hibernate.pretty.MessageHelper.infoString;
+import static org.hibernate.proxy.HibernateProxy.extractLazyInitializer;
+
+/**
+ * Concrete implementation of the {@link StatelessSession} API.
+ * <p>
+ * Exposes two interfaces:
+ * <ul>
+ * <li>{@link StatelessSession} to the application, and
+ * <li>{@link org.hibernate.engine.spi.SharedSessionContractImplementor} (an SPI interface) to other subsystems.
+ * </ul>
+ * <p>
+ * This class is not thread-safe.
+ *
+ * @implNote The {@code StatelessSessionImpl} is not an {@link org.hibernate.event.spi.EventSource} and does not
+ * make use of the usual {@linkplain org.hibernate.event.spi eventing infrastructure} to implement persistence
+ * operations. It does raise pre- and post- events for the benefit of integration, however. Since it performs all
+ * operations synchronously, it does not maintain an {@link org.hibernate.action.queue.spi.ActionQueue}. Therefore, it
+ * cannot, unfortunately, reuse the various {@link org.hibernate.action.internal.EntityAction} subtypes. This is
+ * a pity, since it results in some code duplication. On the other hand, a {@code StatelessSession} is easier to
+ * debug and understand. A {@code StatelessSession} does hold state in a long-lived {@link PersistenceContext},
+ * but it does temporarily keep state within an instance of {@code StatefulPersistenceContext} while processing
+ * the results of a given query.
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ */
+// Extended by Hibernate Reactive
+public class StatelessSessionImpl
+		extends AbstractSharedSessionContract
+		implements StatelessSessionImplementor, StatelessLoadAccessContext {
+
+	@Nonnull
+	private final LoadQueryInfluencers influencers;
+
+	@Nonnull
+	private final PersistenceContext temporaryPersistenceContext;
+	private final boolean connectionProvided;
+
+	@Nonnull
+	private final TransactionCompletionCallbacksImplementor transactionCompletionCallbacks;
+
+	@Nonnull
+	private final FlushMode flushMode;
+
+	@Nonnull
+	private final EventListenerGroups eventListenerGroups;
+
+	public StatelessSessionImpl(SessionFactoryImpl factory, StatelessOptions options) {
+		super( factory, options );
+		connectionProvided = options.getConnection() != null;
+		if ( options instanceof SharedSessionCreationOptions sharedOptions
+				&& sharedOptions.isTransactionCoordinatorShared() ) {
+			final var sharedCoordinator = sharedOptions.getTransactionCompletionCallbacks();
+			assert sharedCoordinator != null; // safe, checked isTransactionCoordinatorShared()
+			transactionCompletionCallbacks = sharedCoordinator;
+//			// register a callback with the child session to propagate auto flushing
+//			transactionCompletionCallbacks.registerCallback( session -> {
+//				// NOTE: `session` here is the parent
+//				if ( !isClosed() ) {
+//					triggerChildAutoFlush();
+//				}
+//			} );
+			flushMode = FlushMode.AUTO;
+		}
+		else {
+			transactionCompletionCallbacks = new TransactionCompletionCallbacksImpl( this );
+			flushMode = FlushMode.MANUAL;
+		}
+		temporaryPersistenceContext = createPersistenceContext( this );
+		influencers = new LoadQueryInfluencers( getFactory() );
+		influencers.setBatchSize( options.getDefaultBatchFetchSize() );
+		influencers.setSubselectFetchEnabled( options.isSubselectFetchEnabled() );
+		influencers.setTemporalIdentifier( options.getTemporalIdentifier() );
+		for ( var enabledFilterOption : options.getEnabledFilterOptions() ) {
+			influencers.enableFilter( enabledFilterOption );
+		}
+		eventListenerGroups = factory.getEventListenerGroups();
+		setUpMultitenancy( factory, influencers );
+		if ( getJdbcBatchSize() == null ) {
+			// A nonzero batch size forces the use of write-behind
+			// Therefore, ignore the value of hibernate.jdbc.batch_size
+			setJdbcBatchSize( 0 );
+		}
+
+		final var statistics = factory.getStatistics();
+		if ( statistics.isStatisticsEnabled() ) {
+			statistics.openSession();
+		}
+	}
+
+	@Override
+	public void close() {
+		checkSessionReentrancy();
+		RuntimeException preCloseException = null;
+		if ( !isClosed() ) {
+			preCloseException = getFactory().preClose( this );
+			final var statistics = getFactory().getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				statistics.closeSession();
+			}
+		}
+		try {
+			super.close();
+		}
+		catch (RuntimeException e) {
+			if ( preCloseException != null ) {
+				e.addSuppressed( preCloseException );
+			}
+			throw e;
+		}
+		if ( preCloseException != null ) {
+			throw preCloseException;
+		}
+	}
+
+	@Override
+	protected void cleanupOnClose() {
+		// detach any tracked entities and collections so
+		// they don't hold references to a closed session
+		temporaryPersistenceContext.clear();
+	}
+
+	@Override
+	public void markForRollbackOnly() {
+		// not necessary, according to spec and heritage
+	}
+
+	@Override
+	public StatelessSessionImplementor getStatelessSession() {
+		return this;
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// After the "unseal" PR is applied, this should all be consolidated
+	// with the Session forms on SharedSessionContract
+
+	@Override
+	@Nonnull
+	protected Map<String, Object> getInitialProperties() {
+		return new HashMap<>();
+	}
+
+	@SuppressWarnings("deprecation")
+	protected void interpretProperty(
+			@Nonnull String propertyName,
+			@Nullable Object value,
+			@Nonnull Map<String, Object> properties) {
+		switch ( propertyName ) {
+			case JPA_SHARED_CACHE_RETRIEVE_MODE:
+			case JAKARTA_SHARED_CACHE_RETRIEVE_MODE:
+				properties.put( JPA_SHARED_CACHE_RETRIEVE_MODE, value );
+				properties.put( JAKARTA_SHARED_CACHE_RETRIEVE_MODE, value );
+				setCacheMode(
+						interpretCacheMode(
+								determineCacheStoreMode( properties ),
+								(CacheRetrieveMode) value
+						)
+				);
+				break;
+			case JPA_SHARED_CACHE_STORE_MODE:
+			case JAKARTA_SHARED_CACHE_STORE_MODE:
+				properties.put( JPA_SHARED_CACHE_STORE_MODE, value );
+				properties.put( JAKARTA_SHARED_CACHE_STORE_MODE, value );
+				setCacheMode(
+						interpretCacheMode(
+								(CacheStoreMode) value,
+								determineCacheRetrieveMode( properties )
+						)
+				);
+				break;
+			case CRITERIA_COPY_TREE:
+				if ( value == null ) {
+					throw new IllegalArgumentException( CRITERIA_COPY_TREE + " cannot be null" );
+				}
+				setCriteriaCopyTreeEnabled( parseBoolean( value.toString() ) );
+				break;
+			case STATEMENT_BATCH_SIZE:
+			case HINT_JDBC_BATCH_SIZE:
+				setJdbcBatchSize( value == null ? null : parseInt( value.toString() ) );
+				break;
+			default:
+				SESSION_LOGGER.tracef( "Unsupported property : %s", propertyName  );
+				break;
+		}
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Override
+	public boolean shouldAutoJoinTransaction() {
+		return true;
+	}
+
+	@Override
+	@Nonnull
+	public FlushMode getHibernateFlushMode() {
+		// NOTE: only ever *not* MANUAL when this is a "child session"
+		return flushMode;
+	}
+
+	private StatisticsImplementor getStatistics() {
+		return getFactory().getStatistics();
+	}
+
+	@Override
+	public void setCacheRetrieveMode(@Nonnull CacheRetrieveMode cacheRetrieveMode) {
+		setCacheMode( CacheMode.fromJpaModes( cacheRetrieveMode, getCacheMode().getJpaStoreMode() ) );
+	}
+
+	@Override
+	public void setCacheStoreMode(@Nonnull CacheStoreMode cacheStoreMode) {
+		setCacheMode( CacheMode.fromJpaModes( getCacheMode().getJpaRetrieveMode(), cacheStoreMode ) );
+	}
+
+	@Override
+	@Nonnull
+	public CacheRetrieveMode getCacheRetrieveMode() {
+		return getCacheMode().getJpaRetrieveMode();
+	}
+
+	@Override
+	@Nonnull
+	public CacheStoreMode getCacheStoreMode() {
+		return getCacheMode().getJpaStoreMode();
+	}
+
+	@Override
+	public void addOption(@Nonnull EntityAgent.Option option) {
+		OptionsHelper.applyOption( this, option );
+	}
+
+	@Override
+	@Nonnull
+	public Set<EntityAgent.Option> getOptions() {
+		return OptionsHelper.getOptions( this );
+	}
+
+	// inserts ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Override
+	public void insert(@Nonnull Object entity) {
+		insert( null, entity );
+	}
+
+	@Override
+	public void insertMultiple(@Nonnull List<?> entities) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		final Integer batchSize = getJdbcBatchSize();
+		setJdbcBatchSize( entities.size() );
+		try {
+			for ( Object entity : entities ) {
+				doInsert( null, entity );
+			}
+			getJdbcCoordinator().executeBatch();
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			setJdbcBatchSize( batchSize );
+		}
+	}
+
+	@Override
+	public Object insert(@Nullable String entityName, @Nonnull Object entity) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		try {
+			return doInsert( entityName, entity );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+	}
+
+	private Object doInsert(String entityName, Object entity) {
+		checkNotReadOnly();
+		final var persister = getEntityPersister( entityName, entity );
+		final Object id;
+		final Object[] state = persister.getValues( entity );
+		if ( persister.isVersioned() ) {
+			if ( seedVersion( entity, state, persister, this ) ) {
+				persister.setValues( entity, state );
+			}
+		}
+		final var generator = persister.getGenerator();
+		if ( generator.generatedBeforeExecution( entity, this ) ) {
+			if ( !generator.generatesOnInsert() ) {
+				throw new IdentifierGenerationException( "Identifier generator must generate on insert" );
+			}
+			final Object currentValue = generator.allowAssignedIdentifiers() ? persister.getIdentifier( entity ) : null;
+			id = ( (BeforeExecutionGenerator) generator ).generate( this, entity, currentValue, INSERT );
+			persister.setIdentifier( entity, id, this );
+			if ( firePreInsert(entity, id, state, persister) ) {
+				return id;
+			}
+			else {
+				runInterceptorCallback(
+						() -> getInterceptor().onInsert( entity, id, state, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+				final var eventMonitor = getEventMonitor();
+				final var event = eventMonitor.beginEntityInsertEvent();
+				boolean success = false;
+				try {
+					persister.getInsertCoordinator().insert( entity, id, state, this );
+					success = true;
+				}
+				catch (ConstraintViolationException cve) {
+					throw convertException( cve );
+				}
+				finally {
+					eventMonitor.completeEntityInsertEvent( event, id, persister.getEntityName(), success, this );
+				}
+			}
+		}
+		else if ( generator.generatedOnExecution( entity, this ) ) {
+			if ( !generator.generatesOnInsert() ) {
+				throw new IdentifierGenerationException( "Identifier generator must generate on insert" );
+			}
+			if ( firePreInsert(entity, null, state, persister) ) {
+				return null;
+			}
+			else {
+				runInterceptorCallback(
+						() -> getInterceptor().onInsert( entity, null, state, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+				final var eventMonitor = getEventMonitor();
+				final var event = eventMonitor.beginEntityInsertEvent();
+				boolean success = false;
+				Object generatedId = null;
+				try {
+					final var generatedValues = persister.getInsertCoordinator().insert( entity, state, this );
+					generatedId = castNonNull( generatedValues ).getGeneratedValue( persister.getIdentifierMapping() );
+					id = generatedId;
+					success = true;
+				}
+				catch (ConstraintViolationException cve) {
+					throw convertException( cve );
+				}
+				finally {
+					eventMonitor.completeEntityInsertEvent( event, generatedId, persister.getEntityName(), success, this );
+				}
+				persister.setIdentifier( entity, id, this );
+			}
+		}
+		else { // assigned identifier
+			id = persister.getIdentifier( entity, this );
+			if ( id == null ) {
+				throw new IdentifierGenerationException( "Identifier of entity '" + persister.getEntityName() + "' must be manually assigned before calling 'insert()'" );
+			}
+			if ( firePreInsert(entity, id, state, persister) ) {
+				return id;
+			}
+			else {
+				runInterceptorCallback(
+						() -> getInterceptor().onInsert( entity, id, state, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+				final var eventMonitor = getEventMonitor();
+				final var event = eventMonitor.beginEntityInsertEvent();
+				boolean success = false;
+				try {
+					persister.getInsertCoordinator().insert( entity, id, state, this );
+					success = true;
+				}
+				catch (ConstraintViolationException cve) {
+					throw convertException( cve );
+				}
+				finally {
+					eventMonitor.completeEntityInsertEvent( event, id, persister.getEntityName(), success, this );
+				}
+			}
+		}
+		recreateCollections( entity, id, persister );
+		firePostInsert( entity, id, state, persister );
+		final var statistics = getStatistics();
+		if ( statistics.isStatisticsEnabled() ) {
+			statistics.insertEntity( persister.getEntityName() );
+		}
+		return id;
+	}
+
+	private PersistenceException convertException(ConstraintViolationException cve) {
+		return getSessionFactoryOptions().isJpaBootstrap()
+			&& cve.getKind() == ConstraintViolationException.ConstraintKind.UNIQUE
+				? new EntityExistsException( cve )
+				: cve;
+	}
+
+	private void recreateCollections(Object entity, Object id, EntityPersister persister) {
+		if ( persister.hasOwnedCollections() ) {
+			final String entityName = persister.getEntityName();
+			final var eventMonitor = getEventMonitor();
+			final var statistics = getStatistics();
+			forEachOwnedCollection(
+					entity,
+					id,
+					persister,
+					(descriptor, collection) -> {
+						final String role = descriptor.getRole();
+						firePreRecreate( descriptor, collection, id, entityName, entity );
+						final var event = eventMonitor.beginCollectionRecreateEvent();
+						boolean success = false;
+
+						try {
+							descriptor.recreate( collection, id, this );
+							success = true;
+						}
+						finally {
+							eventMonitor.completeCollectionRecreateEvent( event, id, role, success, this );
+						}
+
+						if ( statistics.isStatisticsEnabled() ) {
+							statistics.recreateCollection( role );
+						}
+
+						firePostRecreate( descriptor, collection, id, entityName, entity );
+					}
+			);
+		}
+	}
+
+	// deletes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Override
+	public void delete(@Nonnull Object entity) {
+		delete( null, entity );
+	}
+
+	@Override
+	public void deleteMultiple(@Nonnull List<?> entities) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		final Integer batchSize = getJdbcBatchSize();
+		setJdbcBatchSize( entities.size() );
+		try {
+			for ( Object entity : entities ) {
+				doDelete( null, entity );
+			}
+			getJdbcCoordinator().executeBatch();
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			setJdbcBatchSize( batchSize );
+		}
+	}
+
+	@Override
+	public void delete(@Nullable String entityName, @Nonnull Object entity) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		try {
+			doDelete( entityName, entity );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+	}
+
+	private void doDelete(String entityName, Object entity) {
+		checkNotReadOnly();
+		final var persister = getEntityPersister( entityName, entity );
+		final Object id = persister.getIdentifier( entity, this );
+		TenantIdHelper.validateAssignedTenantId( entity, id, persister, this );
+		if ( persister.hasMultipleTables() || persister.hasOwnedCollections() ) {
+			TenantIdHelper.checkStoredTenantOwnership( id, persister, this, THROW );
+		}
+		final Object version = persister.getVersion( entity );
+		if ( !firePreDelete(entity, id, persister) ) {
+			runInterceptorCallback(
+					() -> getInterceptor().onDelete( entity, id, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+			removeCollections( entity, id, persister );
+			final Object cacheKey = lockCacheItem( id, version, persister );
+			final var eventMonitor = getEventMonitor();
+			final var event = eventMonitor.beginEntityDeleteEvent();
+			boolean success = false;
+			try {
+				persister.getDeleteCoordinator().delete( entity, id, version, this );
+				success = true;
+			}
+			finally {
+				eventMonitor.completeEntityDeleteEvent( event, id, persister.getEntityName(), success, this );
+			}
+			removeCacheItem( cacheKey, persister );
+			firePostDelete( entity, id, persister );
+			final var statistics = getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				statistics.deleteEntity( persister.getEntityName() );
+			}
+		}
+	}
+
+	private void removeCollections(Object entity, Object id, EntityPersister persister) {
+		if ( persister.hasOwnedCollections() ) {
+			final String entityName = persister.getEntityName();
+			final var eventMonitor = getEventMonitor();
+			final var statistics = getStatistics();
+			forEachOwnedCollection( entity, id, persister,
+					(descriptor, collection) -> {
+						final String role = descriptor.getRole();
+						firePreRemove( descriptor, collection, id, entityName, entity );
+						final var event = eventMonitor.beginCollectionRemoveEvent();
+						boolean success = false;
+						try {
+							descriptor.remove( id, this );
+							success = true;
+						}
+						finally {
+							eventMonitor.completeCollectionRemoveEvent( event, id, role, success, this );
+						}
+						firePostRemove( descriptor, collection, id, entityName, entity );
+						if ( statistics.isStatisticsEnabled() ) {
+							statistics.removeCollection( role );
+						}
+					} );
+		}
+	}
+
+
+	// updates ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	@Override
+	public void update(@Nonnull Object entity) {
+		update( null, entity );
+	}
+
+	@Override
+	public void updateMultiple(@Nonnull List<?> entities) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		final Integer batchSize = getJdbcBatchSize();
+		setJdbcBatchSize( entities.size() );
+		try {
+			for ( Object entity : entities ) {
+				doUpdate( null, entity );
+			}
+			getJdbcCoordinator().executeBatch();
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			setJdbcBatchSize( batchSize );
+		}
+	}
+
+	@Override
+	public void update(@Nullable String entityName, @Nonnull Object entity) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		try {
+			doUpdate( entityName, entity );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+	}
+
+	private void doUpdate(String entityName, Object entity) {
+		checkNotReadOnly();
+		final var persister = getEntityPersister( entityName, entity );
+		checkLobVersioning( persister );
+		final Object id = persister.getIdentifier( entity, this );
+		TenantIdHelper.validateAssignedTenantId( entity, id, persister, this );
+		if ( persister.hasMultipleTables() || persister.hasOwnedCollections() ) {
+			TenantIdHelper.checkStoredTenantOwnership( id, persister, this, THROW );
+		}
+		final Object[] state = persister.getValues( entity );
+		final Object oldVersion;
+		if ( persister.isVersioned() ) {
+			oldVersion = persister.getVersion( entity );
+			final Object newVersion = incrementVersion( entity, oldVersion, persister, this );
+			setVersion( state, newVersion, persister );
+			persister.setValues( entity, state );
+		}
+		else {
+			oldVersion = null;
+		}
+		if ( !firePreUpdate(entity, id, state, persister) ) {
+			runInterceptorCallback(
+					() -> getInterceptor().onUpdate( entity, id, state, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+			final Object cacheKey = lockCacheItem( id, oldVersion, persister );
+			final var eventMonitor = getEventMonitor();
+			final var event = eventMonitor.beginEntityUpdateEvent();
+			boolean success = false;
+			try {
+				final var generatedValues =
+						persister.getUpdateCoordinator()
+								.update( entity, id, null, state, oldVersion, null, null, false, this );
+				applyDatabaseResolvedVersion( entity, state, persister, generatedValues );
+				success = true;
+			}
+			finally {
+				eventMonitor.completeEntityUpdateEvent( event, id, persister.getEntityName(), success, this );
+			}
+			removeCacheItem( cacheKey, persister );
+			removeAndRecreateCollections( entity, id, persister );
+			firePostUpdate( entity, id, state, persister );
+			final var statistics = getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				statistics.updateEntity( persister.getEntityName() );
+			}
+		}
+	}
+
+	private static void checkLobVersioning(EntityPersister persister) {
+		if ( !persister.isVersioned() || persister.isVersionPropertyGenerated() ) {
+			return;
+		}
+		final var updateability = persister.getPropertyUpdateability();
+		final var versionability = persister.getPropertyVersionability();
+		final var generators = persister.getGenerators();
+		boolean hasExcludedProperty = false;
+		String lobAttribute = null;
+		for ( int i = 0; i < updateability.length; i++ ) {
+			final var generator = generators[i];
+			final boolean generatedOnUpdate = generator != null
+					&& generator.generatedOnExecution() && generator.generatesOnUpdate();
+			if ( generatedOnUpdate && versionability[i] ) {
+				// Update-generated versioned values already require an ordinary version increment.
+				return;
+			}
+			if ( updateability[i] || generatedOnUpdate ) {
+				if ( !versionability[i] ) {
+					hasExcludedProperty = true;
+				}
+				else if ( persister.getAttributeMapping( i ) instanceof SingularAttributeMapping attribute ) {
+					for ( int j = 0; j < attribute.getJdbcTypeCount(); j++ ) {
+						final var selectable = attribute.getSelectable( j );
+						if ( !selectable.isFormula() && selectable.isUpdateable()
+								&& selectable.getJdbcMapping().getJdbcType().isLob() ) {
+							lobAttribute = attribute.getAttributeName();
+						}
+					}
+				}
+			}
+		}
+		if ( hasExcludedProperty && lobAttribute != null ) {
+			throw new HibernateException( "Cannot update entity '" + persister.getEntityName()
+					+ "' without a snapshot: non-excluded LOB attribute '" + lobAttribute
+					+ "' prevents honoring @ExcludedFromVersioning" );
+		}
+	}
+
+	private static void applyDatabaseResolvedVersion(
+			Object entity,
+			Object[] state,
+			EntityPersister persister,
+			GeneratedValues generatedValues) {
+		final var versionMapping = persister.getVersionMapping();
+		if ( generatedValues != null && versionMapping != null ) {
+			final Object resolvedVersion = generatedValues.getGeneratedValue( versionMapping );
+			if ( resolvedVersion != null ) {
+				setVersion( state, resolvedVersion, persister );
+				persister.setValue( entity, persister.getVersionPropertyIndex(), resolvedVersion );
+			}
+		}
+	}
+
+	private void removeAndRecreateCollections(Object entity, Object id, EntityPersister persister) {
+		if ( persister.hasOwnedCollections() ) {
+			final String entityName = persister.getEntityName();
+			final var eventMonitor = getEventMonitor();
+			final var statistics = getStatistics();
+			forEachOwnedCollection( entity, id, persister,
+					(descriptor, collection) -> {
+						final String role = descriptor.getRole();
+						firePreUpdate( descriptor, collection, id, entityName, entity );
+						final var event = eventMonitor.beginCollectionRemoveEvent();
+						boolean success = false;
+						try {
+							// TODO: can we do better here?
+							descriptor.remove( id, this );
+							descriptor.recreate( collection, id, this );
+							success = true;
+						}
+						finally {
+							eventMonitor.completeCollectionRemoveEvent( event, id, role, success, this );
+						}
+						firePostUpdate( descriptor, collection, id, entityName, entity );
+						if ( statistics.isStatisticsEnabled() ) {
+							statistics.updateCollection( role );
+						}
+					} );
+		}
+	}
+
+	@Override
+	public void upsert(@Nonnull Object entity) {
+		upsert( null, entity );
+	}
+
+	@Override
+	public void upsertMultiple(@Nonnull List<?> entities) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		final Integer batchSize = getJdbcBatchSize();
+		setJdbcBatchSize( entities.size() );
+		try {
+			for ( Object entity : entities ) {
+				doUpsert( null, entity );
+			}
+			getJdbcCoordinator().executeBatch();
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			setJdbcBatchSize( batchSize );
+		}
+	}
+
+	@Override
+	public void upsert(@Nullable String entityName, @Nonnull Object entity) {
+		checkOpen();
+		checkTransactionSyncStatus();
+		try {
+			doUpsert( entityName, entity );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+	}
+
+	private void doUpsert(String entityName, Object entity) {
+		checkNotReadOnly();
+		final var persister = getEntityPersister( entityName, entity );
+		TenantIdHelper.initializeIdentifierTenant( entity, persister, this );
+		final Object id = idToUpsert( entity, persister );
+		TenantIdHelper.validateIdentifierTenant( id, persister, this );
+		final Object[] state = persister.getValues( entity );
+		TenantIdHelper.initializeTenantId( entity, state, persister, this );
+		if ( persister.hasMultipleTables() || persister.hasOwnedCollections() ) {
+			TenantIdHelper.checkStoredTenantOwnership( id, persister, this, ALLOW );
+		}
+		if ( !firePreUpsert(entity, id, state, persister) ) {
+			runInterceptorCallback(
+					() -> getInterceptor().onUpsert( entity, id, state, persister.getPropertyNames(), persister.getPropertyTypes() ) );
+			final Object oldVersion = versionToUpsert( entity, persister, state );
+			final Object cacheKey = lockCacheItem( id, oldVersion, persister );
+			final var eventMonitor = getEventMonitor();
+			final var event = eventMonitor.beginEntityUpsertEvent();
+			boolean success = false;
+			try {
+				final var generatedValues =
+						persister.getMergeCoordinator()
+								.update( entity, id, null, state, oldVersion, null, null, false, this );
+				applyDatabaseResolvedVersion( entity, state, persister, generatedValues );
+				success = true;
+			}
+			finally {
+				eventMonitor.completeEntityUpsertEvent( event, id, persister.getEntityName(), success, this );
+			}
+			removeCacheItem( cacheKey, persister );
+			final var statistics = getStatistics();
+			if ( statistics.isStatisticsEnabled() ) {
+				statistics.upsertEntity( persister.getEntityName() );
+			}
+			removeAndRecreateCollections( entity, id, persister );
+			firePostUpsert(entity, id, state, persister);
+		}
+	}
+
+	// Hibernate Reactive calls this
+	protected Object versionToUpsert(Object entity, EntityPersister persister, Object[] state) {
+		if ( persister.isVersioned() ) {
+			final Object oldVersion = persister.getVersion( entity );
+			final Boolean knownTransient =
+					persister.getVersionMapping()
+							.getUnsavedStrategy()
+							.isUnsaved( oldVersion );
+			if ( knownTransient != null && knownTransient ) {
+				if ( seedVersion( entity, state, persister, this ) ) {
+					persister.setValues( entity, state );
+				}
+				// this is a nonsense but avoids setting version restriction
+				// parameter to null later on deep in the guts
+				return state[persister.getVersionPropertyIndex()];
+			}
+			else {
+				final Object newVersion = incrementVersion( entity, oldVersion, persister, this );
+				setVersion( state, newVersion, persister );
+				persister.setValues( entity, state );
+				return oldVersion;
+			}
+		}
+		else {
+			return null;
+		}
+	}
+
+	// Hibernate Reactive calls this
+	protected Object idToUpsert(Object entity, EntityPersister persister) {
+		final Object id = persister.getIdentifier( entity, this );
+		if ( id == null ) {
+			throw new IllegalArgumentException( "Object passed to upsert() has no identifier" );
+		}
+		final Boolean unsaved =
+				persister.getIdentifierMapping()
+						.getUnsavedStrategy()
+						.isUnsaved( id );
+		if ( unsaved != null && unsaved ) {
+			throw new TransientObjectException( "Object passed to upsert() has an unsaved identifier value: "
+					+ persister.getEntityName() );
+		}
+		return id;
+	}
+
+	// event processing ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	// Hibernate Reactive may need to call this
+	protected boolean firePreInsert(Object entity, Object id, Object[] state, EntityPersister persister) {
+		final var callbacks = persister.getEntityCallbacks();
+		final boolean hasPrePersistCallbacks = callbacks.hasRegisteredCallbacks( CallbackType.PRE_PERSIST );
+		final boolean hasPreInsertCallbacks = callbacks.hasRegisteredCallbacks( CallbackType.PRE_INSERT );
+		if ( ( hasPrePersistCallbacks || hasPreInsertCallbacks )
+				&& callEntityLifecycleCallback( () -> {
+					final boolean prePersist = hasPrePersistCallbacks && callbacks.preCreate( entity );
+					return hasPreInsertCallbacks && callbacks.preInsert( entity ) || prePersist;
+				} ) ) {
+			copyStateFromEntity( entity, state, persister );
+		}
+
+		if ( eventListenerGroups.eventListenerGroup_PRE_INSERT.isEmpty() ) {
+			return false;
+		}
+		else {
+			boolean veto = false;
+			final var event = new PreInsertEvent( entity, id, state, persister, this );
+			for ( var listener : eventListenerGroups.eventListenerGroup_PRE_INSERT.listeners() ) {
+				veto |= listener.onPreInsert( event );
+			}
+			return veto;
+		}
+	}
+
+	// Hibernate Reactive may need to call this
+	protected boolean firePreUpdate(Object entity, Object id, Object[] state, EntityPersister persister) {
+		runEntityLifecycleCallback( () -> persister.getEntityCallbacks().preUpdate( entity ) );
+
+		if ( eventListenerGroups.eventListenerGroup_PRE_UPDATE.isEmpty() ) {
+			return false;
+		}
+		else {
+			boolean veto = false;
+			final var event = new PreUpdateEvent( entity, id, state, null, persister, this );
+			for ( var listener : eventListenerGroups.eventListenerGroup_PRE_UPDATE.listeners() ) {
+				veto |= listener.onPreUpdate( event );
+			}
+			return veto;
+		}
+	}
+
+	// Hibernate Reactive may need to call this
+	protected boolean firePreUpsert(Object entity, Object id, Object[] state, EntityPersister persister) {
+		final var callbacks = persister.getEntityCallbacks();
+		if ( callbacks.hasRegisteredCallbacks( CallbackType.PRE_UPSERT )
+				&& callEntityLifecycleCallback( () -> callbacks.preUpsert( entity ) ) ) {
+			copyStateFromEntity( entity, state, persister );
+		}
+
+		if ( eventListenerGroups.eventListenerGroup_PRE_UPSERT.isEmpty() ) {
+			return false;
+		}
+		else {
+			boolean veto = false;
+			final var event = new PreUpsertEvent( entity, id, state, persister, this );
+			for ( var listener : eventListenerGroups.eventListenerGroup_PRE_UPSERT.listeners() ) {
+				veto |= listener.onPreUpsert( event );
+			}
+			return veto;
+		}
+	}
+
+	private void copyStateFromEntity(Object entity, Object[] state, EntityPersister persister) {
+		final Object[] currentState = persister.getValues( entity );
+		System.arraycopy( currentState, 0, state, 0, state.length );
+		TypeHelper.deepCopy(
+				state,
+				persister.getPropertyTypes(),
+				persister.getPropertyUpdateability(),
+				state,
+				this
+		);
+	}
+
+	// Hibernate Reactive may need to call this
+	protected boolean firePreDelete(Object entity, Object id, EntityPersister persister) {
+		final var callbacks = persister.getEntityCallbacks();
+		final boolean hasPreRemoveCallbacks = callbacks.hasRegisteredCallbacks( CallbackType.PRE_REMOVE );
+		final boolean hasPreDeleteCallbacks = callbacks.hasRegisteredCallbacks( CallbackType.PRE_DELETE );
+		if ( hasPreRemoveCallbacks || hasPreDeleteCallbacks ) {
+			runEntityLifecycleCallback( () -> {
+				if ( hasPreRemoveCallbacks ) {
+					callbacks.preRemove( entity );
+				}
+				if ( hasPreDeleteCallbacks ) {
+					callbacks.preDelete( entity );
+				}
+			} );
+		}
+
+		if ( eventListenerGroups.eventListenerGroup_PRE_DELETE.isEmpty() ) {
+			return false;
+		}
+		else {
+			boolean veto = false;
+			final var event = new PreDeleteEvent( entity, id, null, persister, this );
+			for ( var listener : eventListenerGroups.eventListenerGroup_PRE_DELETE.listeners() ) {
+				veto |= listener.onPreDelete( event );
+			}
+			return veto;
+		}
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostInsert(Object entity, Object id, Object[] state, EntityPersister persister) {
+		eventListenerGroups.eventListenerGroup_POST_INSERT.fireLazyEventOnEachListener(
+				() -> new PostInsertEvent( entity, id, state, persister, this ),
+				PostInsertEventListener::onPostInsert );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostUpdate(Object entity, Object id, Object[] state, EntityPersister persister) {
+		eventListenerGroups.eventListenerGroup_POST_UPDATE.fireLazyEventOnEachListener(
+				() -> new PostUpdateEvent( entity, id, state, null, null, persister, this ),
+				PostUpdateEventListener::onPostUpdate );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostUpsert(Object entity, Object id, Object[] state, EntityPersister persister) {
+		eventListenerGroups.eventListenerGroup_POST_UPSERT.fireLazyEventOnEachListener(
+				() -> new PostUpsertEvent( entity, id, state, null, persister, this ),
+				PostUpsertEventListener::onPostUpsert );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostDelete(Object entity, Object id, EntityPersister persister) {
+		eventListenerGroups.eventListenerGroup_POST_DELETE.fireLazyEventOnEachListener(
+				() -> new PostDeleteEvent( entity, id, null, persister, this ),
+				PostDeleteEventListener::onPostDelete );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePreRecreate(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_PRE_COLLECTION_RECREATE.fireLazyEventOnEachListener(
+				() -> new PreCollectionRecreateEvent( collectionPersister, collection, id, entityName, owner ),
+				PreCollectionRecreateEventListener::onPreRecreateCollection );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePreUpdate(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_PRE_COLLECTION_UPDATE.fireLazyEventOnEachListener(
+				() -> new PreCollectionUpdateEvent( collectionPersister, collection, id, entityName, owner ),
+				PreCollectionUpdateEventListener::onPreUpdateCollection );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePreRemove(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_PRE_COLLECTION_REMOVE.fireLazyEventOnEachListener(
+				() -> new PreCollectionRemoveEvent( collectionPersister, collection, id, entityName, owner ),
+				PreCollectionRemoveEventListener::onPreRemoveCollection );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostRecreate(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_POST_COLLECTION_RECREATE.fireLazyEventOnEachListener(
+				() -> new PostCollectionRecreateEvent( collectionPersister, collection, id, entityName, owner ),
+				PostCollectionRecreateEventListener::onPostRecreateCollection );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostUpdate(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_POST_COLLECTION_UPDATE.fireLazyEventOnEachListener(
+				() -> new PostCollectionUpdateEvent( collectionPersister, collection, id, entityName, owner ),
+				PostCollectionUpdateEventListener::onPostUpdateCollection );
+	}
+
+	// Hibernate Reactive may need to call this
+	protected void firePostRemove(
+			CollectionPersister collectionPersister,
+			PersistentCollection<?> collection,
+			Object id,
+			String entityName,
+			Object owner) {
+		eventListenerGroups.eventListenerGroup_POST_COLLECTION_REMOVE.fireLazyEventOnEachListener(
+				() -> new PostCollectionRemoveEvent( collectionPersister, collection, id, entityName, owner ),
+				PostCollectionRemoveEventListener::onPostRemoveCollection );
+	}
+
+	// collections ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+	// Hibernate Reactive calls this
+	protected void forEachOwnedCollection(
+			Object entity, Object key,
+			EntityPersister persister, BiConsumer<CollectionPersister, PersistentCollection<?>> action) {
+		visitCollectionValues( persister, entity, (attribute, value) -> {
+			final var descriptor = attribute.getCollectionDescriptor();
+			final Object cacheKey = lockCacheItem( key, descriptor );
+			if ( !descriptor.isInverse() ) {
+				final PersistentCollection<?> collection;
+				if ( value instanceof PersistentCollection<?> persistentCollection ) {
+					if ( !persistentCollection.wasInitialized() ) {
+						return;
+					}
+					collection = persistentCollection;
+				}
+				else {
+					collection = wrapOrInstantiateCollection( entity, key, value, descriptor );
+				}
+				action.accept( descriptor, collection );
+			}
+			removeCacheItem( cacheKey, descriptor );
+		} );
+	}
+
+	private PersistentCollection<?> wrapOrInstantiateCollection(
+			Object entity, Object key, Object value, CollectionPersister descriptor) {
+		if ( value == null ) {
+			if ( descriptor.isArray() ) {
+				// Initializing an empty array holder writes through the owner's property accessor.
+				// Wrap an empty array instead, without changing the entity or its component.
+				return wrap( descriptor,
+						StandardArraySemantics.INSTANCE.instantiateWithElements( 0, descriptor, List.of() ), entity );
+			}
+			final var collection = instantiateEmpty( key, descriptor );
+			collection.initializeEmptyCollection( descriptor );
+			collection.setOwner( entity );
+			return collection;
+		}
+		return wrap( descriptor, value, entity );
+	}
+
+	// Hibernate Reactive calls this
+	protected PersistentCollection<?> instantiateEmpty(Object key, CollectionPersister descriptor) {
+		return descriptor.getCollectionSemantics().instantiateWrapper(key, descriptor, this);
+	}
+
+	@SuppressWarnings({"rawtypes", "unchecked"})
+	protected PersistentCollection<?> wrap(CollectionPersister descriptor, Object collection, Object owner) {
+		final CollectionSemantics collectionSemantics = descriptor.getCollectionSemantics();
+		var wrapped = collectionSemantics.wrap( collection, descriptor, this );
+		wrapped.setOwner( owner );
+		return wrapped;
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// loading
+
+	@Override
+	protected <T> FindByKeyOperation<T> byKey(Class<T> entityClass, EntityPersister entityDescriptor, FindOption... options) {
+		return byKey( entityClass, entityDescriptor, null, null, options );
+	}
+
+	@Override
+	protected <T> FindByKeyOperation<T> byKey(
+			Class<T> entityClass,
+			EntityPersister entityDescriptor,
+			GraphSemantic graphSemantic,
+			RootGraphImplementor<T> rootGraph,
+			FindOption... options) {
+		return new StatelessFindByKeyOperation<>(
+				entityDescriptor,
+				this,
+				graphSemantic,
+				rootGraph,
+				null,
+				getCacheMode(),
+				isDefaultReadOnly(),
+				getFactory(),
+				options
+		);
+	}
+
+	@Override @Deprecated
+	@SuppressWarnings("removal")
+	@Nonnull
+	public Object get(@Nonnull String entityName, @Nonnull Object id, @Nonnull LockMode lockMode) {
+		return get( entityName, id, (FindOption) lockMode );
+	}
+
+	@Override @Deprecated
+	@SuppressWarnings("removal")
+	@Nonnull
+	public <T> T get(@Nonnull EntityGraph<T> graph, @Nonnull GraphSemantic graphSemantic, @Nonnull Object id) {
+		return get( graph, graphSemantic, id, LockMode.NONE );
+	}
+
+	@Override @Deprecated
+	@SuppressWarnings("removal")
+	@Nonnull
+	public <T> T get(
+			@Nonnull EntityGraph<T> graph, @Nonnull GraphSemantic graphSemantic,
+			@Nonnull Object id, @Nonnull LockMode lockMode) {
+		final var rootGraph = (RootGraphImplementor<T>) graph;
+		checkOpen();
+
+		final var effectiveEntityGraph = getLoadQueryInfluencers().getEffectiveEntityGraph();
+		effectiveEntityGraph.applyGraph( rootGraph, graphSemantic );
+
+		try {
+			final Object result = get( rootGraph.getGraphedType().getTypeName(), id, lockMode );
+			return graph.getGraphedType().getJavaType().cast( result );
+		}
+		finally {
+			effectiveEntityGraph.clear();
+		}
+	}
+
+	@Override
+	<E> List<E> findMultiple(
+			@Nonnull EntityPersister entityDescriptor,
+			@Nullable GraphSemantic graphSemantic,
+			@Nullable RootGraphImplementor<E> graph,
+			@Nonnull List<?> keys,
+			@Nullable FindOption... options) {
+		try {
+			final var operation = new StatelessFindMultipleByKeyOperation<E>(
+					entityDescriptor,
+					this,
+					null,
+					getCacheMode(),
+					isDefaultReadOnly(),
+					getFactory(),
+					options
+			);
+			return operation.performFind( keys, graphSemantic, graph );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	@SuppressWarnings("removal")
+	@Nonnull
+	public <T> List<T> getMultiple(
+			@Nonnull EntityGraph<T> entityGraph,
+			@Nonnull GraphSemantic graphSemantic,
+			@Nonnull List<?> ids) {
+		checkOpen();
+		try {
+			final var rootGraph = (RootGraphImplementor<T>) entityGraph;
+			final var entityPersister =
+					requireEntityPersisterForLoad( rootGraph.getGraphedType().getTypeName() );
+			return findMultiple( entityPersister, graphSemantic, rootGraph, ids );
+		}
+		catch ( MappingException | TypeMismatchException | ClassCastException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	public void refresh(@Nonnull Object entity) {
+		checkOpen();
+		try {
+			doRefresh( bestGuessEntityName( entity ), entity, LockMode.NONE );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	public void refresh(@Nonnull String entityName, @Nonnull Object entity) {
+		refresh( entityName, entity, LockMode.NONE );
+	}
+
+	@Override
+	public void refresh(@Nonnull Object entity, @Nonnull LockMode lockMode) {
+		checkOpen();
+		try {
+			doRefresh( bestGuessEntityName( entity ), entity, lockMode );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	public void refresh(@Nonnull String entityName, @Nonnull Object entity, @Nonnull LockMode lockMode) {
+		checkOpen();
+		try {
+			doRefresh( entityName, entity, lockMode );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	private void doRefresh(String entityName, Object entity, LockMode lockMode) {
+		if ( getSessionFactoryOptions().isJpaBootstrap()
+				&& lockMode != null && lockMode != LockMode.NONE ) {
+			checkTransactionNeededForUpdateOperation( "No active transaction" );
+		}
+		final var persister = getEntityPersister( entityName, entity );
+		final Object id = persister.getIdentifier( entity, this );
+		if ( SESSION_LOGGER.isTraceEnabled() ) {
+			SESSION_LOGGER.refreshingTransient( infoString( persister, id, getFactory() ) );
+		}
+
+		writingToCache( persister, cache -> {
+			final Object cacheKey = cache.generateCacheKey(
+					id,
+					persister,
+					getFactory(),
+					getTenantIdentifier()
+			);
+			cache.evict( cacheKey );
+		} );
+
+		final Object result =
+				getLoadQueryInfluencers()
+						// TODO: This is wrong. StatelessSession is not supposed
+						//       to be affected by cascade = REFRESH. Fix in H8.
+						.fromInternalFetchProfile( CascadingFetchProfile.REFRESH,
+								() -> persister.load( id, entity, getNullSafeLockMode( lockMode ), this ) );
+		UnresolvableObjectException.throwIfNull( result, id, persister.getEntityName() );
+		if ( temporaryPersistenceContext.isLoadFinished() ) {
+			temporaryPersistenceContext.clear();
+		}
+	}
+
+	@Override
+	public void refresh(@Nonnull Object entity, @Nonnull LockModeType lockModeType) {
+		checkOpen();
+		try {
+			doRefresh( bestGuessEntityName( entity ), entity, LockMode.fromJpaLockMode( lockModeType ) );
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	public void refreshMultiple(@Nonnull List<?> entities) {
+		checkOpen();
+
+		// NOTE: the incoming list of entities can be heterogeneous - the elements
+		// need not be all the same type.
+
+		// for now, a simple implementation -
+		// todo (jpa4) : we will definitely want to improve this.
+
+		try {
+			for ( Object entity : entities ) {
+				doRefresh( bestGuessEntityName( entity ), entity, LockMode.NONE );
+			}
+		}
+		catch ( MappingException e ) {
+			throw getExceptionConverter().convert( new IllegalArgumentException( e.getMessage(), e ) );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+		finally {
+			afterOperation();
+		}
+	}
+
+	@Override
+	public Object immediateLoad(@Nonnull String entityName, @Nonnull Object id) {
+		if ( getPersistenceContextInternal().isLoadFinished() ) {
+			throw new SessionException( "proxies cannot be fetched by a stateless session" );
+		}
+		// unless we are still in the process of handling a top-level load
+		return get( entityName, id );
+	}
+
+	@Override
+	public void initializeCollection(@Nonnull PersistentCollection<?> collection, boolean writing) {
+		checkOpen();
+		final var persistenceContext = getPersistenceContextInternal();
+		final var ce = persistenceContext.getCollectionEntry( collection );
+		if ( ce == null ) {
+			throw new HibernateException( "no entry for collection" );
+		}
+		if ( !collection.wasInitialized() ) {
+			final var loadedPersister = ce.getLoadedPersister();
+			final Object loadedKey = ce.getLoadedKey();
+			if ( loadedPersister == null ) {
+				throw new AssertionFailure( "collection entry has no loaded persister" );
+			}
+			if ( loadedKey == null ) {
+				throw new AssertionFailure( "collection entry has no loaded key" );
+			}
+			if ( SESSION_LOGGER.isTraceEnabled() ) {
+				SESSION_LOGGER.initializingCollection(
+						collectionInfoString( loadedPersister, collection, loadedKey, this ) );
+			}
+			final boolean foundInCache =
+					initializeCollectionFromCache( loadedKey, loadedPersister, collection, this );
+			if ( foundInCache ) {
+				SESSION_LOGGER.collectionInitializedFromCache();
+			}
+			else {
+				loadedPersister.initialize( loadedKey, this );
+				if ( !collection.wasInitialized() || persistenceContext.getCollectionEntry( collection ) == null ) {
+					handlePotentiallyEmptyCollection( collection, persistenceContext, loadedKey, loadedPersister );
+				}
+				SESSION_LOGGER.collectionInitialized();
+				final var statistics = getStatistics();
+				if ( statistics.isStatisticsEnabled() ) {
+					statistics.fetchCollection( loadedPersister.getRole() );
+				}
+			}
+		}
+	}
+
+	@Override
+	@Nonnull
+	public Object instantiate(@Nonnull EntityPersister persister, @Nullable Object id) {
+		checkOpen();
+		return persister.instantiate( id, this );
+	}
+
+	@Override
+	public Object internalLoad(
+			@Nonnull String entityName,
+			@Nonnull Object id,
+			boolean eager,
+			boolean nullable) {
+		checkOpen();
+
+		final var persister = requireEntityPersister( entityName );
+		final var entityKey = generateEntityKey( id, persister );
+
+		// First, try to load it from the temporary PersistenceContext
+		final var persistenceContext = getPersistenceContext();
+		final var holder = persistenceContext.getEntityHolder( entityKey );
+		if ( holder != null && holder.getEntity() != null ) {
+			// We found it in the temporary persistence context.
+			// Should indicate we are in the midst of processing a
+			// result set containing eager fetches via join fetch.
+			return holder.getEntity();
+		}
+
+		if ( !eager ) {
+			// The caller did not request forceful eager loading;
+			// see if we can create some form of proxy.
+
+			// first, check to see if we can use "bytecode proxies"
+			final var enhancementMetadata = persister.getBytecodeEnhancementMetadata();
+			if ( enhancementMetadata.isEnhancedForLazyLoading() ) {
+				// If the entity defines a HibernateProxy factory,
+				// see if there is an existing proxy associated with
+				// the persistence context - and if so, use it
+				if ( hasProxyFactory( persister ) ) {
+					return obtainProxyFromFactory( holder, entityKey, persistenceContext );
+				}
+				else if ( !persister.hasSubclasses() ) {
+					return enhancementMetadata.createEnhancedProxy( entityKey, false, this );
+				}
+				// If we get here, then the entity class has subclasses and there
+				// is no HibernateProxy factory. The entity will be loaded below.
+			}
+			else if ( persister.hasProxy() ) {
+				return narrowOrCreateProxy( holder, entityKey, persistenceContext );
+			}
+		}
+
+		// Otherwise, immediately materialize it.
+		final Object entity = internalLoadGet( entityName, id, persistenceContext );
+		if ( entity == null && !nullable ) {
+			throw notFound( entityName, id );
+		}
+		return entity;
+	}
+
+	// For Hibernate Reactive
+	protected Object internalLoadGet(String entityName, Object id, PersistenceContext persistenceContext) {
+		// Increment/decrement the load count before/after getting the value
+		// to ensure that #find does not clear the PersistenceContext.
+		persistenceContext.beforeLoad();
+		try {
+			return find( entityName, id );
+		}
+		finally {
+			persistenceContext.afterLoad();
+		}
+	}
+
+	@Override
+	@Nonnull
+	public <T> T fetch(@Nonnull T association) {
+		checkOpen();
+		try {
+			return doFetch( association );
+		}
+		catch ( RuntimeException e ) {
+			throw getExceptionConverter().convert( e );
+		}
+	}
+
+	private <T> T doFetch(T association) {
+		final var persistenceContext = getPersistenceContext();
+		final var initializer = extractLazyInitializer( association );
+		if ( initializer != null ) {
+			if ( initializer.isUninitialized() ) {
+				final String entityName = initializer.getEntityName();
+				final Object id = initializer.getInternalIdentifier();
+				initializer.setSession( this );
+				persistenceContext.beforeLoad();
+				try {
+					final Object entity = initializer.getImplementation(); //forces the load to occur
+					if ( entity==null ) {
+						getFactory().getEntityNotFoundDelegate().handleEntityNotFound( entityName, id );
+					}
+					initializer.setImplementation( entity );
+				}
+				finally {
+					initializer.unsetSession();
+					persistenceContext.afterLoad();
+					if ( persistenceContext.isLoadFinished() ) {
+						persistenceContext.clear();
+					}
+				}
+			}
+		}
+		else if ( isPersistentAttributeInterceptable( association ) ) {
+			if ( asPersistentAttributeInterceptable( association ).$$_hibernate_getInterceptor()
+					instanceof EnhancementAsProxyLazinessInterceptor proxyInterceptor ) {
+				proxyInterceptor.setSession( this );
+				try {
+					proxyInterceptor.forceInitialize( association, null );
+					// TODO: statistics?? call statistics.fetchEntity()
+				}
+				finally {
+					proxyInterceptor.unsetSession();
+					if ( persistenceContext.isLoadFinished() ) {
+						persistenceContext.clear();
+					}
+				}
+			}
+		}
+		else if ( association instanceof PersistentCollection<?> collection ) {
+			if ( !collection.wasInitialized() ) {
+				final var collectionDescriptor = requireCollectionPersister( collection.getRole() );
+				final Object key = collection.getKey();
+				if ( key == null ) {
+					throw new AssertionFailure( "collection entry has no loaded key" );
+				}
+				persistenceContext.addUninitializedCollection( collectionDescriptor, collection, key );
+				collection.setCurrentSession( this );
+				try {
+					final boolean foundInCache =
+							initializeCollectionFromCache( key, collectionDescriptor, collection, this );
+					if ( foundInCache ) {
+						SESSION_LOGGER.collectionFetchedFromCache();
+					}
+					else {
+						collectionDescriptor.initialize( key, this );
+						handlePotentiallyEmptyCollection( collection, persistenceContext, key, collectionDescriptor );
+						SESSION_LOGGER.collectionFetched();
+						final var statistics = getStatistics();
+						if ( statistics.isStatisticsEnabled() ) {
+							statistics.fetchCollection( collectionDescriptor.getRole() );
+						}
+					}
+				}
+				finally {
+					collection.$$_hibernate_setInstanceId( 0 );
+					collection.unsetSession( this );
+					if ( persistenceContext.isLoadFinished() ) {
+						persistenceContext.clear();
+					}
+				}
+			}
+		}
+
+		// per JPA, always just returns the argument
+		return association;
+	}
+
+	@Override
+	@Nullable
+	public Object getIdentifier(@Nonnull Object entity) {
+		checkOpen();
+		return getFactory().getPersistenceUnitUtil().getIdentifier(entity);
+	}
+
+	public boolean isAutoCloseSessionEnabled() {
+		return getSessionFactoryOptions().isAutoCloseSessionEnabled();
+	}
+
+	public boolean shouldAutoClose() {
+		return isAutoCloseSessionEnabled() && !isClosed();
+	}
+
+	private boolean isFlushModeNever() {
+		return false;
+	}
+
+	private void managedClose() {
+		if ( isClosed() ) {
+			throw new SessionException( "Session was already closed" );
+		}
+		close();
+	}
+
+	private void managedFlush() {
+		checkOpen();
+		getJdbcCoordinator().executeBatch();
+	}
+
+	@Override
+	public void propagateFlush() {
+		if ( !isClosed() ) {
+			SESSION_LOGGER.automaticallyFlushingChildSession();
+			getJdbcCoordinator().executeBatch();
+		}
+	}
+
+	@Override
+	protected void propagateClose() {
+		if ( !isClosed() ) {
+			SESSION_LOGGER.automaticallyClosingChildSession();
+			close();
+		}
+	}
+
+	@Override
+	public String bestGuessEntityName(@Nonnull Object object) {
+		final var lazyInitializer = extractLazyInitializer( object );
+		return guessEntityName( lazyInitializer == null
+				? object
+				: lazyInitializer.getImplementation() );
+	}
+
+	@Override
+	public Object getContextEntityIdentifier(@Nonnull Object object) {
+		checkOpen();
+		return null;
+	}
+
+	@Override
+	public String guessEntityName(@Nonnull Object entity) {
+		checkOpen();
+		//noinspection ConstantValue
+		if ( entity == null ) {
+			throw new IllegalArgumentException( "Entity may not be null" );
+		}
+		return entity.getClass().getName();
+	}
+
+	@Override
+	@Nonnull
+	public EntityPersister getEntityPersister(@Nullable String entityName, @Nonnull Object entity) {
+		checkOpen();
+		//noinspection ConstantValue
+		if ( entity == null ) {
+			throw new IllegalArgumentException( "Entity may not be null" );
+		}
+		return entityName == null
+				? requireEntityPersister( guessEntityName( entity ) )
+				: requireEntityPersister( entityName ).getSubclassEntityPersister( entity, getFactory() );
+	}
+
+	@Override
+	public Object getEntityUsingInterceptor(@Nonnull EntityKey key) {
+		checkOpen();
+
+		final var persistenceContext = getPersistenceContext();
+		final Object result = persistenceContext.getEntity( key );
+		if ( result != null ) {
+			return result;
+		}
+
+		final Object newObject = callInterceptorCallback(
+				() -> getInterceptor().getEntity( key.getEntityName(), key.getIdentifier() ) );
+		if ( newObject != null ) {
+			persistenceContext.addEntity( key, newObject );
+			return newObject;
+		}
+
+		return null;
+	}
+
+	@Override
+	@Nonnull
+	public PersistenceContext getPersistenceContext() {
+		return temporaryPersistenceContext;
+	}
+
+	public boolean isDefaultReadOnly() {
+		return false;
+	}
+
+	@Override
+	public boolean isIdentifierRollbackEnabled() {
+		// not yet implemented
+		return false;
+	}
+
+	@Override
+	public boolean isManaged(Object entity) {
+		return false;
+	}
+
+	/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	//TODO: COPY/PASTE FROM SessionImpl, pull up!
+
+
+	@Override
+	public void afterOperation(boolean success) {
+		afterOperation();
+	}
+
+	private void afterOperation() {
+		if ( temporaryPersistenceContext.isLoadFinished() ) {
+			temporaryPersistenceContext.clear();
+		}
+		if ( !isTransactionInProgress() && !isDelayAfterTransaction() ) {
+			getJdbcCoordinator().afterTransaction();
+		}
+	}
+
+	@Override
+	public void afterScrollOperation() {
+		temporaryPersistenceContext.clear();
+	}
+
+	@Override
+	public boolean autoPreFlushIfRequired(QueryParameterBindings parameterBindings) {
+		return false;
+	}
+
+	@Override
+	public void flush() {
+	}
+
+	@Override
+	@Nonnull
+	public LoadQueryInfluencers getLoadQueryInfluencers() {
+		return influencers;
+	}
+
+	@Override
+	@SuppressWarnings("removal")
+	public LockOptions getDefaultLockOptions() {
+		return LockOptions.NONE;
+	}
+
+	@Override
+	@Nonnull
+	public PersistenceContext getPersistenceContextInternal() {
+		//In this case implemented the same as #getPersistenceContext
+		return temporaryPersistenceContext;
+	}
+
+	@Override
+	public boolean autoFlushIfRequired(Set<String> querySpaces, boolean skipPreFlush) {
+		return false;
+	}
+
+	@Override
+	public void afterTransactionBegin() {
+		super.afterTransactionBegin();
+		afterTransactionBeginEvents();
+	}
+
+	@Override
+	public void beforeTransactionCompletion() {
+		transactionCompletionCallbacks.beforeTransactionCompletion();
+		flushBeforeTransactionCompletion();
+		beforeTransactionCompletionEvents();
+	}
+
+	@Override
+	public void afterTransactionCompletion(boolean successful, boolean delayed) {
+		transactionCompletionCallbacks.afterTransactionCompletion( successful );
+		afterTransactionCompletionEvents( successful );
+		clearTransactionStartInstant();
+		if ( shouldAutoClose() && !isClosed() ) {
+			managedClose();
+		}
+	}
+
+	@Override
+	public boolean isTransactionInProgress() {
+		return connectionProvided || super.isTransactionInProgress();
+	}
+
+	@Override
+	public TransactionCompletionCallbacks getTransactionCompletionCallbacks() {
+		return transactionCompletionCallbacks;
+	}
+
+	@Override
+	public void flushBeforeTransactionCompletion() {
+		if ( shouldFlushBeforeCompletion() ) {
+			managedFlush();
+		}
+	}
+
+	private boolean shouldFlushBeforeCompletion() {
+		try {
+			return !isClosed()
+				&& !isFlushModeNever()
+				&& !isRollback( getJtaPlatform().getCurrentStatus() );
+		}
+		catch ( SystemException se ) {
+			throw new HibernateException( "could not determine transaction status in beforeCompletion()", se );
+		}
+	}
+
+	private JtaPlatform getJtaPlatform() {
+		return getFactory().getServiceRegistry().requireService( JtaPlatform.class );
+	}
+
+	private LockMode getNullSafeLockMode(LockMode lockMode) {
+		return lockMode == null ? LockMode.NONE : StatelessLocking.getEffectiveLockMode( lockMode, this );
+	}
+
+	protected Object lockCacheItem(Object id, Object previousVersion, EntityPersister persister) {
+		RootTenantCache.invalidateEntity( id, persister, this );
+		return writingToCache( persister, cache -> {
+			final Object cacheKey = cache.generateCacheKey(
+					id,
+					persister,
+					getFactory(),
+					getTenantIdentifier()
+			);
+			final var lock = cache.lockItem( this, cacheKey, previousVersion );
+			transactionCompletionCallbacks.registerCallback(
+					(success, session) -> cache.unlockItem( session, cacheKey, lock ) );
+			return cacheKey;
+		}, null );
+	}
+
+	protected void removeCacheItem(Object cacheKey, EntityPersister persister) {
+		writingToCache( persister, cache -> cache.remove( this, cacheKey ) );
+	}
+
+	protected Object lockCacheItem(Object key, CollectionPersister persister) {
+		RootTenantCache.invalidateCollection( key, persister, this );
+		return usingCache( persister, cache -> {
+			final Object cacheKey = cache.generateCacheKey(
+					key,
+					persister,
+					getFactory(),
+					getTenantIdentifier()
+			);
+			final var lock = cache.lockItem( this, cacheKey, null );
+			transactionCompletionCallbacks.registerCallback(
+					(success, session) -> cache.unlockItem( this, cacheKey, lock ) );
+			return cacheKey;
+		}, null );
+	}
+
+	protected void removeCacheItem(Object cacheKey, CollectionPersister persister) {
+		usingCache( persister, cache -> cache.remove( this, cacheKey ) );
+	}
+
+	@Override
+	public void lock(
+			@Nonnull String entityName,
+			@Nonnull Object child,
+			@SuppressWarnings("removal")
+			@Nonnull LockOptions lockOptions) {
+		final var persister = getEntityPersister( entityName, child );
+		persister.lock( persister.getIdentifier( child ), persister.getVersion( child ), child, lockOptions, this );
+		final var entry = getPersistenceContextInternal().getEntry( child );
+		if ( entry == null ) {
+			throw new AssertionFailure( "no entry in temporary persistence context" );
+		}
+		LoaderHelper.upgradeLock( child, entry, lockOptions, this );
+	}
+
+	@Override
+	public Object loadFromSecondLevelCache(
+			@Nonnull EntityPersister persister,
+			@Nonnull EntityKey entityKey,
+			@Nullable Object instanceToLoad,
+			@Nonnull LockMode lockMode) {
+		return CacheLoadHelper.loadFromSecondLevelCache( this, instanceToLoad, lockMode, persister, entityKey );
+	}
+
+	@Override
+	@Nonnull
+	public TransactionCompletionCallbacksImplementor getTransactionCompletionCallbacksImplementor() {
+		return transactionCompletionCallbacks.forSharing();
+	}
+
+	@Override
+	@Nonnull
+	public <T> T unwrap(@Nonnull Class<T> type) {
+		checkOpen();
+
+		if ( type.isInstance( this ) ) {
+			return type.cast( this );
+		}
+
+		throw new PersistenceException( "Hibernate cannot unwrap '" + getClass().getName()
+										+ "' as '" + type.getName() + "'" );
+	}
+
+}

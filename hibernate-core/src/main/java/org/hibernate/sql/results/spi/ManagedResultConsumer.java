@@ -1,0 +1,74 @@
+package org.hibernate.sql.results.spi;
+
+import org.hibernate.Incubating;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.sql.results.jdbc.spi.RowProcessingState;
+import org.hibernate.sql.results.jdbc.spi.JdbcValues;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesSourceProcessingOptions;
+import org.hibernate.sql.results.jdbc.spi.JdbcValuesSourceProcessingState;
+
+/**
+ * Reads rows without producing a result.
+ *
+ * @since 6.6
+ */
+@Incubating(since = "6.0", group = "result-processing")
+public class ManagedResultConsumer implements ResultsConsumer<Void, Object> {
+
+	public static final ManagedResultConsumer INSTANCE = new ManagedResultConsumer();
+
+	@Override
+	public Void consume(
+			JdbcValues jdbcValues,
+			SharedSessionContractImplementor session,
+			JdbcValuesSourceProcessingOptions processingOptions,
+			JdbcValuesSourceProcessingState jdbcValuesSourceProcessingState,
+			RowProcessingState rowProcessingState,
+			RowReader<Object> rowReader) {
+		final var persistenceContext = session.getPersistenceContextInternal();
+		RuntimeException ex = null;
+		persistenceContext.beforeLoad();
+		persistenceContext.getLoadContexts().register( jdbcValuesSourceProcessingState );
+		try {
+			rowReader.startLoading( rowProcessingState );
+			while ( rowProcessingState.next() ) {
+				rowReader.readRow( rowProcessingState );
+				rowProcessingState.finishRowProcessing( true );
+			}
+			jdbcValuesSourceProcessingState.registerSubselects();
+			rowReader.finishUp( rowProcessingState );
+			jdbcValuesSourceProcessingState.finishUp();
+			return null;
+		}
+		catch (RuntimeException e) {
+			ex = e;
+		}
+		finally {
+			try {
+				jdbcValues.finishUp( session );
+				persistenceContext.afterLoad();
+				persistenceContext.getLoadContexts().deregister( jdbcValuesSourceProcessingState );
+				persistenceContext.initializeNonLazyCollections();
+			}
+			catch (RuntimeException e) {
+				if ( ex != null ) {
+					ex.addSuppressed( e );
+				}
+				else {
+					ex = e;
+				}
+			}
+			finally {
+				if ( ex != null ) {
+					throw ex;
+				}
+			}
+		}
+		throw new IllegalStateException( "Should not reach this" );
+	}
+
+	@Override
+	public boolean canResultsBeCached() {
+		return false;
+	}
+}

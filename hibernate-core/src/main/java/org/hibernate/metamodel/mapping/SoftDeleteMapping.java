@@ -1,0 +1,172 @@
+package org.hibernate.metamodel.mapping;
+
+import jakarta.annotation.Nonnull;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.Internal;
+import org.hibernate.annotations.SoftDeleteType;
+import org.hibernate.sql.ast.spi.creation.SqlExpressionResolver;
+import org.hibernate.sql.ast.spi.query.expression.ColumnReference;
+import org.hibernate.sql.ast.spi.query.from.TableReference;
+import org.hibernate.sql.ast.spi.query.predicate.Predicate;
+import org.hibernate.sql.ast.spi.query.update.Assignment;
+import org.hibernate.sql.ast.spi.model.ColumnValueBinding;
+
+/**
+ * Metadata about the indicator column for entities and collections enabled
+ * for soft delete
+ *
+ * @see org.hibernate.annotations.SoftDelete
+ *
+ * @author Steve Ebersole
+ */
+public interface SoftDeleteMapping extends AuxiliaryMapping, SelectableMapping, VirtualModelPart, SqlExpressible {
+	String ROLE_NAME = "{soft-delete}";
+
+	/**
+	 * The soft-delete strategy - how to interpret indicator values
+	 */
+	@Nonnull
+	@Internal // only used in tests!
+	SoftDeleteType getSoftDeleteStrategy();
+
+	/**
+	 * The name of the soft-delete indicator column.
+	 */
+	@Nonnull
+	@Internal // only used in tests!
+	String getColumnName();
+
+	/**
+	 * The name of the table which holds the {@linkplain #getColumnName() indicator column}
+	 */
+	@Nonnull
+	String getTableName();
+
+	/**
+	 * Create a SQL AST Assignment for setting the soft-delete column to its indicated "deleted" value
+	 *
+	 * @param tableReference Reference for the table containing the soft-delete column
+	 */
+	@Nonnull
+	Assignment createSoftDeleteAssignment(@Nonnull TableReference tableReference);
+
+	/**
+	 * Create a SQL AST Predicate for restricting matches to non-deleted rows
+	 *
+	 * @param tableReference Reference for the table containing the soft-delete column
+	 */
+	@Nonnull
+	Predicate createNonDeletedRestriction(@Nonnull TableReference tableReference);
+
+	/**
+	 * Create a SQL AST Predicate for restricting matches to non-deleted rows
+	 *
+	 * @param tableReference Reference for the table containing the soft-delete column
+	 * @param expressionResolver Resolver for SQL AST Expressions
+	 */
+	@Nonnull
+	Predicate createNonDeletedRestriction(@Nonnull TableReference tableReference, @Nonnull SqlExpressionResolver expressionResolver);
+
+	/**
+	 * Create a ColumnValueBinding for non-deleted indicator.
+	 *
+	 * @param softDeleteColumnReference Reference to the soft-delete column
+	 *
+	 * @apiNote Generally used as a restriction in a SQL AST
+	 */
+	@Nonnull
+	ColumnValueBinding createNonDeletedValueBinding(@Nonnull ColumnReference softDeleteColumnReference);
+
+	/**
+	 * Create a ColumnValueBinding for deleted indicator.
+	 *
+	 * @param softDeleteColumnReference Reference to the soft-delete column
+	 *
+	 * @apiNote Generally used as an assignment in a SQL AST
+	 */
+	@Nonnull
+	ColumnValueBinding createDeletedValueBinding(@Nonnull ColumnReference softDeleteColumnReference);
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// SelectableMapping
+
+	@Nonnull
+	@Override
+	default String getSelectionExpression() {
+		return getColumnName();
+	}
+
+	@Nonnull
+	@Override
+	default String getSelectableName() {
+		return getColumnName();
+	}
+
+	@Nonnull
+	@Override
+	default String getContainingTableExpression() {
+		return getTableName();
+	}
+
+	@Override
+	default @Nullable String getCustomReadExpression() {
+		return null;
+	}
+
+	@Override
+	default @Nullable String getCustomWriteExpression() {
+		return null;
+	}
+
+	@Override
+	default boolean isFormula() {
+		return false;
+	}
+
+	@Override
+	default boolean isNullable() {
+		return false;
+	}
+
+	@Override
+	default boolean isInsertable() {
+		return true;
+	}
+
+	@Override
+	default boolean isUpdateable() {
+		return true;
+	}
+
+	@Override
+	default boolean isPartitioned() {
+		return false;
+	}
+
+	@Override
+	default @Nullable Long getLength() {
+		return null;
+	}
+
+	@Override
+	default @Nullable Integer getArrayLength() {
+		return null;
+	}
+
+	@Override
+	default @Nullable Integer getPrecision() {
+		return null;
+	}
+
+	@Override
+	default @Nullable Integer getScale() {
+		return null;
+	}
+
+	@Override
+	default @Nullable Integer getTemporalPrecision() {
+		return null;
+	}
+}

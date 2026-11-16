@@ -1,0 +1,13 @@
+package org.hibernate.sql.exec.spi;
+
+import org.hibernate.Incubating;
+
+/**
+ * Models the function return when the JdbcOperationQueryCall represents a call to a database
+ * function.
+ *
+ * @author Steve Ebersole
+ */
+@Incubating(since = "6.0", group = "sql-execution")
+public interface JdbcCallFunctionReturn extends JdbcCallParameterRegistration {
+}

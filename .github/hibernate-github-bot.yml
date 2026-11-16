@@ -1,0 +1,109 @@
+---
+jira:
+  projectKey: "HHH"
+  insertLinksInPullRequests: true
+  ignore:
+    # See the `build-dependencies` group in Dependabot's configuration file
+    - user: dependabot[bot]
+      titlePattern: "Bump.*the (build-dependencies|workflow-actions) group.*+"
+  ignoreFiles:
+    # Git
+    - ".git*"
+    - "*/.git*"
+    - ".mailmap"
+    # Gradle
+    - "gradlew*"
+    - "gradle/"
+    - "local-build-plugins/"
+    - "build.gradle"
+    # NOT settings.gradle: contains dependency versions, changing those requires a Jira issue
+    - "utilities.gradle"
+    # CI
+    - ".github/"
+    - ".release/"
+    - "ci/"
+    - "databases/"
+    - "*.sh"
+    - "*.bat"
+    - "Jenkinsfile"
+    - "*/Jenkinsfile"
+    - "*.Jenkinsfile"
+    # In-repo documentation
+    - "design/"
+    - "README.adoc"
+    - "MAINTAINERS.md"
+    - "CONTRIBUTING.md"
+    # Misc. build files
+    - "checkerstubs/"
+    - "drivers/"
+    - "edb/"
+    - "etc/"
+    - "javadoc/"
+    - "patched-libs/"
+    - "release/"
+    - "rules/"
+    - "shared/"
+    - ".sdkmanrc"
+    - "*/.sdkmanrc"
+develocity:
+  buildScan:
+    addCheck: true
+    tags:
+      - column: "OS"
+        pattern: "Linux"
+      - column: "OS"
+        pattern: "Windows.*"
+        replacement: "Windows"
+      - column: "Java"
+        pattern: "jdk-(.*)"
+        replacement: "$1"
+      - column: "Java"
+        pattern: "s390x"
+        replacement: "$0"
+      - column: "DB"
+        pattern: "((?:h2|postgres(?:ql)?|postgis|pgsql|mysql|mariadb|mssql|tidb|cockroach(?:db)?|oracle|db2|hsqldb|edb|informix|sybase|spanner.*)(?:.*(?=)|.*))(?:)?"
+        replacement: "$1"
+      - pattern: "main|HEAD|\\d+\\.\\d+|PR-\\d+|\\d+/merge"
+        replacement: "" # Just remove these tags
+    testSummary:
+      historyQuery: "tag:CI"
+licenseAgreement:
+  enabled: true
+  ignore:
+    - user: dependabot[bot]
+      titlePattern: "Bump.*"
+    # Members of this team already agreed to both LGPL and ASL2 for all their contributions.
+    - team:
+          name: license-agreement
+          organization: hibernate
+      titlePattern: ".*"
+branches:
+  enabled: true
+  label: "%s"
+  ignore:
+    - user: dependabot[bot]
+      titlePattern: ".*"
+pullRequestTasks:
+  # Make the bot add list of tasks to the pull requests and enable the check that makes sure all tasks are completed:
+  enabled: true
+  tasks:
+    # List of tasks for commits without a Jira ID
+    # or for those with Jira ID but that don't have a specific configuration for a corresponding issue type:
+    default:
+      - Add test **OR** check there is no need for a test
+      - "Update documentation as relevant: javadoc for changed API, `documentation/src/main/asciidoc/userguide` for all features, `documentation/src/main/asciidoc/introduction` for main features, links from existing documentation"
+      - "Add entries as relevant to `migration-guide.adoc` (breaking changes) and `whats-new.adoc` (new features/improvements)"
+    # Tasks specific to the bug issue type:
+    bug:
+      - Add test reproducing the bug
+      - "Add entries as relevant to `migration-guide.adoc` **OR** check there are no breaking changes"
+    # Tasks specific to the improvement issue type:
+    improvement:
+      - Add tests for feature/improvement
+      - "Update documentation as relevant: javadoc for changed API, `documentation/src/main/asciidoc/userguide` for all features, `documentation/src/main/asciidoc/introduction` for main features, links from existing documentation"
+      - "Add entries as relevant to `migration-guide.adoc` (breaking changes) and `whats-new.adoc` (new features/improvements)"
+    # Tasks specific to the "new feature" issue type (same as improvement):
+    new feature:
+      - Add tests for feature/improvement
+      - "Update documentation as relevant: javadoc for changed API, `documentation/src/main/asciidoc/userguide` for all features, `documentation/src/main/asciidoc/introduction` for main features, links from existing documentation"
+      - "Add entries as relevant to `migration-guide.adoc` (breaking changes) and `whats-new.adoc` (new features/improvements)"

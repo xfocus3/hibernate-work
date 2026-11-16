@@ -1,0 +1,196 @@
+package org.hibernate.loader.ast.internal;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+
+import org.hibernate.FindMultipleOption;
+import org.hibernate.LockOptions;
+import org.hibernate.engine.spi.EntityKey;
+import org.hibernate.engine.spi.PersistenceContext;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.loader.ast.spi.MultiNaturalIdLoadOptions;
+import org.hibernate.loader.ast.spi.MultiNaturalIdLoader;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+
+import java.util.List;
+import java.util.function.Consumer;
+
+import static java.util.Collections.emptyList;
+import static org.hibernate.internal.util.collections.CollectionHelper.arrayList;
+import static org.hibernate.internal.util.collections.CollectionHelper.isEmpty;
+import static org.hibernate.loader.ast.internal.LoaderHelper.upgradeLock;
+import static org.hibernate.loader.ast.internal.MultiKeyLoadLogging.MULTI_KEY_LOAD_LOGGER;
+
+/**
+ * @author Jan Schatteman
+ */
+public abstract class AbstractMultiNaturalIdLoader<E> implements MultiNaturalIdLoader<E> {
+	private final EntityMappingType entityDescriptor;
+
+	public AbstractMultiNaturalIdLoader(@Nonnull EntityMappingType entityDescriptor) {
+		this.entityDescriptor = entityDescriptor;
+	}
+
+	@Nonnull
+	@Override
+	public <K> List<E> multiLoad(@Nonnull K[] naturalIds, @Nonnull MultiNaturalIdLoadOptions options, @Nonnull SharedSessionContractImplementor session) {
+		assert naturalIds != null;
+		if ( naturalIds.length == 0 ) {
+			return emptyList();
+		}
+		else {
+			return options.getOrderingMode() == FindMultipleOption.OrderingMode.ORDERED
+					? performOrderedMultiLoad( naturalIds, options, session )
+					: performUnorderedMultiLoad( naturalIds, options, session );
+		}
+	}
+
+	@Nonnull
+	private <K> List<E> performUnorderedMultiLoad(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull SharedSessionContractImplementor session) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.unorderedBatchLoadStarting( getEntityDescriptor().getEntityName() );
+		}
+		return unorderedMultiLoad( naturalIds, loadOptions, session );
+	}
+
+	@Nonnull
+	private static LockOptions lockOptions(@Nonnull MultiNaturalIdLoadOptions loadOptions) {
+		final var lockOptions = loadOptions.getLockOptions();
+		return lockOptions == null ? new LockOptions() : lockOptions;
+	}
+
+	@Nonnull
+	private <K> List<E> unorderedMultiLoad(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull SharedSessionContractImplementor session) {
+		final List<E> results = arrayList( naturalIds.length );
+		final var lockOptions = lockOptions( loadOptions );
+		final var unresolvedIds =
+				checkPersistenceContextForCachedResults( naturalIds, loadOptions, session, lockOptions, results::add );
+		if ( !isEmpty( unresolvedIds ) ) {
+			results.addAll( loadEntitiesWithUnresolvedIds( unresolvedIds, loadOptions, lockOptions, session ) );
+		}
+		return results;
+	}
+
+	@Nonnull
+	protected abstract List<E> loadEntitiesWithUnresolvedIds(
+			@Nonnull Object[] unresolvedIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull LockOptions lockOptions,
+			@Nonnull SharedSessionContractImplementor session);
+
+	@Nonnull
+	private <K> List<E> performOrderedMultiLoad(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions options,
+			@Nonnull SharedSessionContractImplementor session) {
+		if ( MULTI_KEY_LOAD_LOGGER.isTraceEnabled() ) {
+			MULTI_KEY_LOAD_LOGGER.orderedMultiLoadStarting( getEntityDescriptor().getEntityName() );
+		}
+		return orderedMultiLoad( naturalIds, options, session );
+	}
+
+	@Nonnull
+	private <K> List<E> orderedMultiLoad(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var lockOptions = lockOptions( loadOptions );
+		final var unresolvedIds =
+				checkPersistenceContextForCachedResults( naturalIds, loadOptions, session, lockOptions, result -> {} );
+		if ( !isEmpty( unresolvedIds ) ) {
+			loadEntitiesWithUnresolvedIds( unresolvedIds, loadOptions, lockOptions, session );
+		}
+		return sortResults( naturalIds, loadOptions, session );
+	}
+
+	@Nonnull
+	private <K> List<E> sortResults(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull SharedSessionContractImplementor session) {
+		final var context = session.getPersistenceContextInternal();
+		final List<E> results = arrayList( naturalIds.length );
+		for ( K naturalId : naturalIds ) {
+			final Object entity = entityForNaturalId( context, naturalId );
+			final Object result;
+			if ( entity == null
+				// the entity is locally deleted, and the options ask that we not return such entities
+				|| loadOptions.getRemovalsMode() == FindMultipleOption.RemovalsMode.REPLACE
+				&& context.getEntry( entity ).getStatus().isDeletedOrGone() ) {
+				result = null;
+			}
+			else {
+				result = context.proxyFor( entity );
+			}
+			//noinspection unchecked
+			results.add( (E) result );
+		}
+		return results;
+	}
+
+	@Nullable
+	private Object entityForNaturalId(@Nonnull PersistenceContext context, @Nullable Object naturalId) {
+		final var descriptor = getEntityDescriptor();
+		final Object id = context.getNaturalIdResolutions().findCachedIdByNaturalId( naturalId, descriptor );
+		// id can be null if a non-existent natural id is requested, or a mutable natural id was changed and then deleted
+		return id == null ? null : context.getEntity( new EntityKey( id, descriptor.getEntityPersister() ) );
+	}
+
+	@Nonnull
+	private <K> Object[] checkPersistenceContextForCachedResults(
+			@Nonnull K[] naturalIds,
+			@Nonnull MultiNaturalIdLoadOptions loadOptions,
+			@Nonnull SharedSessionContractImplementor session,
+			@Nonnull LockOptions lockOptions,
+			@Nonnull Consumer<E> results ) {
+		final var removalsMode = loadOptions.getRemovalsMode();
+		if ( removalsMode == FindMultipleOption.RemovalsMode.EXCLUDE
+				&& loadOptions.getOrderingMode() == FindMultipleOption.OrderingMode.ORDERED ) {
+			throw new IllegalArgumentException( "RemovalsMode.EXCLUDE is incompatible with OrderingMode.ORDERED" );
+		}
+		final List<K> unresolvedIds = arrayList( naturalIds.length );
+		final var context = session.getPersistenceContextInternal();
+		for ( K naturalId : naturalIds ) {
+			final Object entity = entityForNaturalId( context, naturalId );
+			if ( entity != null ) {
+				// Entity is already in the persistence context
+				final var entry = context.getEntry( entity );
+				if ( removalsMode == FindMultipleOption.RemovalsMode.INCLUDE
+						|| !entry.getStatus().isDeletedOrGone() ) {
+					// either a managed entry, or a deleted one with returnDeleted enabled
+					upgradeLock( entity, entry, lockOptions, session );
+					if ( removalsMode != FindMultipleOption.RemovalsMode.EXCLUDE ) {
+						final Object result = context.proxyFor( entity );
+						results.accept( (E) result );
+					}
+				}
+			}
+			else {
+				// entity either doesn't exist or hasn't been loaded in the PC yet, in both cases we add
+				// the natural id to the ids that still need to be recovered; in case the id corresponds
+				// to a nonexistent instance, nothing will be in the results for it, which is OK in an
+				// unordered multiload
+				unresolvedIds.add( naturalId );
+			}
+		}
+		return unresolvedIds.toArray();
+	}
+
+	@Nonnull
+	@Override
+	public EntityMappingType getLoadable() {
+		return getEntityDescriptor();
+	}
+
+	@Nonnull
+	protected final EntityMappingType getEntityDescriptor() {
+		return entityDescriptor;
+	}
+}

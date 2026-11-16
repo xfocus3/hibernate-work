@@ -1,0 +1,8 @@
+<!DOCTYPE hibernate-configuration PUBLIC "-//Hibernate/Hibernate Configuration DTD 3.0//EN" "http://www.hibernate.org/dtd/hibernate-configuration-3.0.dtd">
+<hibernate-configuration>
+	<session-factory>
+		<property name="hibernate.dialect">org.hibernate.orm.test.bootstrap.jpa.PersistenceUnitOverridesTests$PersistenceUnitDialect</property>
+		<mapping class="org.hibernate.orm.test.bootstrap.jpa.PersistenceUnitOverridesTests$MappedEntity"/>
+		<class-cache class="org.hibernate.orm.test.bootstrap.jpa.PersistenceUnitOverridesTests$MappedEntity" usage="read-only"/>
+	</session-factory>
+</hibernate-configuration>

@@ -1,0 +1,147 @@
+[[tooling-gradle]]
+=== Gradle
+
+:tooling-gradle-examples: {root-project-dir}/tooling/hibernate-gradle-plugin/src/functionalTest/resources/guide
+
+The https://plugins.gradle.org/plugin/org.hibernate.orm[`org.hibernate.orm` plugin]
+provides enhancement and reverse-engineering tasks. Apply the Java plugin as well:
+Hibernate's extension and Java task integration are installed when Java support is available.
+
+[[tooling-gradle-enhancement]]
+==== Enhancement and annotation processing
+
+The following `build.gradle` enables default enhancement and metamodel generation:
+
+[source,groovy,subs="attributes+"]
+----
+include::{tooling-gradle-examples}/enhancement.gradle[]
+----
+
+Run `./gradlew classes --no-configuration-cache` to compile and enhance the model. Calling `enhancement {}` opts into
+enhancement, even if the block is empty. Applying the plugin without this block does not.
+Enhancement runs after the selected language compilation tasks; it is not a separate `enhance` task.
+
+By default, `useSameVersion=true` adds the plugin's version of `hibernate-core` to the selected
+source set's `implementation` dependencies. This example uses that dependency. If setting
+`useSameVersion=false`, declare the runtime dependency yourself and keep its version aligned
+with the enhancement tool.
+
+The plugin's top-level `hibernate` options control input scope:
+
+[cols="2,2,4",options="header"]
+|===
+|Option |Default |Purpose
+|`sourceSet` |`main` |The source set containing the model.
+|`languages` |`java`, `kotlin` |The language compilation tasks to which enhancement is attached.
+|`useSameVersion` |`true` |Add the matching core dependency to the selected source set.
+|===
+
+Inside `enhancement`, configure these options only when the defaults do not fit the build:
+
+[cols="2,1,4",options="header"]
+|===
+|Option |Default |Purpose
+|`classNames` |Empty list |Restrict processing to the listed fully qualified class names; empty selects all candidate class files.
+|`enableLazyInitialization` |`true` |Lazy-loading support. Disabling it is deprecated for removal.
+|`enableDirtyTracking` |`true` |Inline dirty tracking. Disabling it is deprecated for removal.
+|`enableAssociationManagement` |`false` |Enhancement-based bidirectional association management; deprecated for removal. Use <<auto-bidir-mgmt,flush-time bidirectional association management>> instead.
+|`enableClientEnhancement` |`false` |Rewrite client accesses to persistent fields. See <<BytecodeEnhancement-client>>.
+|`enableExtendedEnhancement` |Unset |Deprecated alias for client enhancement.
+|===
+
+An explicit `enableClientEnhancement` value takes precedence over the deprecated alias,
+including `false`. For example:
+
+[source,groovy]
+----
+hibernate {
+    enhancement {
+        enableClientEnhancement = true
+    }
+}
+----
+
+Class selection applies to both managed and client processing. Include the required target
+model classes or supply compatibly enhanced targets as described in <<BytecodeEnhancement-client>>.
+Only the selected source set is enhanced; configure additional build invocations/integrations
+as needed rather than assuming test classes are processed automatically.
+
+[[tooling-gradle-modelgen]]
+==== Annotation processor configuration
+
+The `annotationProcessor` dependency in the first example configures <<tooling-modelgen>>;
+the ORM plugin does not add it automatically. `compileOnly` makes the generated
+`jakarta.annotation.Generated` annotation available to compilation.
+Gradle adds the processor's transitive dependencies to its processor path.
+Generated Java sources normally appear under `build/generated/sources/annotationProcessor/java/main`
+and participate in compilation. Reload the Gradle model in the IDE to import this configuration.
+
+Use `testAnnotationProcessor` for test sources requiring processing. Annotation processing
+and enhancement have independent configuration; enabling one does not enable the other.
+The Java processor configuration shown here does not by itself configure Kotlin annotation processing.
+
+[[tooling-gradle-reveng]]
+==== Reverse engineering
+
+Reverse engineering requires an existing database, its JDBC driver on the project's
+`compileClasspath`, and a `reveng {}` configuration. This example reads
+`src/main/resources/hibernate.properties`:
+
+[[tooling-gradle-reveng-example]]
+.Reverse engineering and source-directory registration
+[source,groovy,subs="attributes+"]
+----
+include::{tooling-gradle-examples}/reveng.gradle[]
+----
+
+[[tooling-gradle-reveng-properties]]
+Use the <<tooling-reveng-connection,JDBC properties example>> with a database that already
+contains the tables to inspect. Do not add a catalog/schema filter unrelated to that database.
+The driver must be on the compile classpath in this implementation; `runtimeOnly` alone is insufficient.
+
+[[tooling-gradle-reveng-tasks]]
+===== Tasks and execution
+
+[cols="2,4",options="header"]
+|===
+|Task |Purpose
+|`generateJava` |Generate annotated Java entities.
+|`generateDao` |Generate DAO sources.
+|`generateCfg` |Generate `hibernate.cfg.xml`.
+|`generateHbm` |Generate legacy `hbm.xml`; deprecated for removal. Prefer annotated entities with `generateJava`.
+|`runSql` |Execute the configured `sqlToRun` statement against the database.
+|===
+
+Run generation explicitly, then compile the registered generated sources:
+
+[source,shell]
+----
+./gradlew --no-configuration-cache generateJava
+./gradlew --no-configuration-cache classes
+----
+
+Reverse-engineering tasks currently require the configuration cache to be disabled.
+This is separate from Gradle's task-output build cache. Enhancement also uses task-graph
+callbacks; use `--no-configuration-cache` when running the enhancement examples.
+Generation is not automatically wired into every compilation. To regenerate on compilation,
+add an explicit task dependency and account for its database access and output replacement.
+
+[[tooling-gradle-reveng-configuration]]
+===== Reverse-engineering options
+
+[cols="2,2,4",options="header"]
+|===
+|Option |Default |Purpose
+|`hibernateProperties` |`hibernate.properties` |Properties file basename searched among main resources.
+|`revengFile` |Unset |Reverse-engineering XML basename, also searched among main resources.
+|`outputFolder` |`generated-sources` |Output path relative to the project directory.
+|`packageName` |Empty |Generated classes' default package.
+|`generateAnnotations` |`true` |Generate Jakarta Persistence annotations.
+|`useGenerics` |`true` |Use generics in generated Java.
+|`revengStrategy` |Unset |Custom strategy class; see <<tooling-reveng-custom-strategy>>.
+|`templatePath` |Unset |Custom template directory.
+|`sqlToRun` |Empty string |SQL for `runSql`.
+|===
+
+Place custom strategies and their dependencies on the project compile classpath.
+See <<tooling-reveng>> for filtering, type overrides, and regeneration considerations.

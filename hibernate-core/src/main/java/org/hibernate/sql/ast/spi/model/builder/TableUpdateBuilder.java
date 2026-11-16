@@ -1,0 +1,45 @@
+package org.hibernate.sql.ast.spi.model.builder;
+
+import jakarta.annotation.Nonnull;
+import java.util.function.Predicate;
+
+import org.hibernate.SPI;
+import org.hibernate.metamodel.mapping.SelectableConsumer;
+import org.hibernate.metamodel.mapping.SelectableMapping;
+import org.hibernate.sql.spi.mutation.MutationOperation;
+import org.hibernate.sql.ast.spi.model.LogicalTableUpdate;
+import org.hibernate.sql.ast.spi.model.RestrictedTableMutation;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+
+/**
+ * {@link TableMutationBuilder} implementation for {@code update} statements.
+ *
+ * @author Steve Ebersole
+ */
+@SPI( IMPLEMENT )
+public interface TableUpdateBuilder<O extends MutationOperation>
+		extends RestrictedTableMutationBuilder<O, RestrictedTableMutation<O>>,
+		AssigningTableMutationBuilder<RestrictedTableMutation<O>>,
+		SelectableConsumer {
+
+	/**
+	 * Allows using the update builder as selectable consumer.
+	 * @see org.hibernate.metamodel.mapping.ValuedModelPart#forEachUpdatable(SelectableConsumer)
+	 */
+	@Override
+	default void accept(int selectionIndex, @Nonnull SelectableMapping selectableMapping) {
+		addColumnAssignment( selectableMapping );
+	}
+
+	/** Limit assignments, including generated assignments, to the included columns. */
+	void setColumnInclusion(Predicate<SelectableMapping> columnInclusion);
+
+	/** Require an UPDATE when omitted stored values cannot be supplied to an INSERT. */
+	void setRowKnownToExist(boolean rowKnownToExist);
+
+	void setWhere(String fragment);
+
+	@Override
+	LogicalTableUpdate<O> buildMutation();
+}

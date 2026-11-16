@@ -1,0 +1,103 @@
+package org.hibernate.processor.annotation;
+
+import jakarta.annotation.Nullable;
+
+import javax.lang.model.element.ExecutableElement;
+import java.util.List;
+
+import static org.hibernate.processor.annotation.QueryOptionsSupport.setQueryOptions;
+
+/**
+ * @author Gavin King
+ */
+public class CriteriaFinderMethod extends AbstractCriteriaMethod {
+
+	private final List<Boolean> paramNullability;
+
+	CriteriaFinderMethod(
+			AnnotationMetaEntity annotationMetaEntity,
+			ExecutableElement method,
+			String methodName, String entity,
+			@Nullable ResultSelection selection,
+			@Nullable String containerType,
+			List<String> paramNames, List<String> paramTypes,
+			List<Boolean> paramNullability,
+			List<ParameterConstraint> parameterConstraints,
+			boolean belongsToDao,
+			String sessionType,
+			String sessionName,
+			List<String> fetchProfiles,
+			List<OrderBy> orderBys,
+			boolean addNonnullAnnotation,
+			boolean dataRepository,
+			String fullReturnType,
+			boolean nullable) {
+		super( annotationMetaEntity, method, methodName, entity, selection, containerType, belongsToDao, sessionType, sessionName,
+				fetchProfiles, paramNames, paramTypes, orderBys, addNonnullAnnotation, dataRepository, parameterConstraints,
+				fullReturnType, nullable );
+		this.paramNullability = paramNullability;
+	}
+
+	@Override
+	public boolean isNullable(int index) {
+		return paramNullability.get(index);
+	}
+
+	@Override
+	boolean singleResult() {
+		return containerType == null;
+	}
+
+	@Override
+	void executeQuery(StringBuilder declaration, List<String> paramTypes) {
+		declaration
+				.append('\n');
+		applyCriteriaRestrictionParameters( declaration, paramTypes, "\t" );
+		applyOrderingParameters( declaration, paramTypes, containerType );
+		inTry( declaration );
+		createQuery( declaration, true );
+		setQueryOptions( this, declaration, false, false );
+		declaration.append( ";\n" );
+		results( declaration, paramTypes, containerType );
+		castResult( declaration );
+		select( declaration );
+		setFirstResultLimit( declaration );
+		handlePageParameters( declaration, paramTypes, containerType );
+		var unwrapped = initiallyUnwrapped();
+		unwrapped = enableFetchProfile( declaration, unwrapped );
+		execute( declaration, paramTypes, unwrapped );
+	}
+
+	private void castResult(StringBuilder declaration) {
+		if ( containerType == null && !fetchProfiles.isEmpty()
+				&& isUsingEntityHandler() ) {
+			declaration
+					.append("(")
+					.append(annotationMetaEntity.importType(entity))
+					.append(") ");
+		}
+	}
+
+	private void execute(StringBuilder declaration, List<String> paramTypes, boolean unwrapped) {
+		executeSelect( declaration, paramTypes, containerType, unwrapped, isHibernateQueryType(containerType) );
+	}
+
+	@Override
+	String createQueryMethod() {
+		return isUsingEntityHandler()
+			|| isReactive()
+			|| isUnspecializedQueryType(containerType)
+				? "createQuery"
+				: "createSelectionQuery";
+	}
+
+	@Override
+	String createCriteriaMethod() {
+		return "createQuery";
+	}
+
+	@Override
+	boolean isUsingSpecification() {
+		return false;
+	}
+}

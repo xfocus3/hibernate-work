@@ -1,0 +1,15 @@
+package org.hibernate.orm.test.dialect;
+
+import org.hibernate.dialect.pagination.spi.AbstractLimitHandler;
+import org.hibernate.dialect.pagination.spi.OffsetFetchLimitHandler;
+
+/**
+ * @author Yanming Zhou
+ */
+public class OffsetFetchLimitHandlerTest extends AbstractLimitHandlerTest {
+
+	@Override
+	protected AbstractLimitHandler getLimitHandler() {
+		return OffsetFetchLimitHandler.INSTANCE;
+	}
+}

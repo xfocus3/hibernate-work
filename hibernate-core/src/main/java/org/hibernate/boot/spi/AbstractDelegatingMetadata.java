@@ -1,0 +1,301 @@
+package org.hibernate.boot.spi;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.MappingException;
+import org.hibernate.Remove;
+import org.hibernate.boot.SessionFactoryBuilder;
+import org.hibernate.boot.model.IdentifierGeneratorDefinition;
+import org.hibernate.boot.model.NamedEntityGraphDefinition;
+import org.hibernate.boot.model.TypeDefinition;
+import org.hibernate.boot.model.relational.Database;
+import org.hibernate.boot.query.NamedHqlQueryDefinition;
+import org.hibernate.boot.query.NamedNativeQueryDefinition;
+import org.hibernate.boot.query.NamedProcedureCallDefinition;
+import org.hibernate.boot.query.NamedResultSetMappingDescriptor;
+import org.hibernate.engine.spi.FilterDefinition;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.jpa.boot.spi.PersistenceUnitCallbackDefinition;
+import org.hibernate.mapping.Component;
+import org.hibernate.mapping.FetchProfile;
+import org.hibernate.mapping.MappedSuperclass;
+import org.hibernate.mapping.PersistentClass;
+import org.hibernate.mapping.Table;
+import org.hibernate.metamodel.mapping.DiscriminatorType;
+import org.hibernate.query.named.spi.NamedObjectRepository;
+import org.hibernate.query.sqm.function.SqmFunctionDescriptor;
+import org.hibernate.query.sqm.function.SqmFunctionRegistry;
+import org.hibernate.type.Type;
+import org.hibernate.type.spi.TypeConfiguration;
+
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+
+/**
+ * Convenience base class for custom implementors of {@link MetadataImplementor} using delegation.
+ *
+ * @author Gunnar Morling
+ *
+ */
+public abstract class AbstractDelegatingMetadata implements MetadataImplementor {
+
+	private final MetadataImplementor delegate;
+
+	public AbstractDelegatingMetadata(MetadataImplementor delegate) {
+		this.delegate = delegate;
+	}
+
+	protected MetadataImplementor delegate() {
+		return delegate;
+	}
+
+	@Override
+	public Type getIdentifierType(String className) throws MappingException {
+		return delegate.getIdentifierType( className );
+	}
+
+	@Override
+	public String getIdentifierPropertyName(String className) throws MappingException {
+		return delegate.getIdentifierPropertyName( className );
+	}
+
+	@Override
+	public Type getReferencedPropertyType(String className, String propertyName) throws MappingException {
+		return delegate.getReferencedPropertyType( className, propertyName );
+	}
+
+	@Override
+	@Remove
+	@Nonnull
+	public SessionFactoryBuilder getSessionFactoryBuilder() {
+		return delegate.getSessionFactoryBuilder();
+	}
+
+	@Override
+	@Remove
+	@Nonnull
+	public SessionFactoryImplementor buildSessionFactory() {
+		return delegate.buildSessionFactory();
+	}
+
+	@Override
+	@Nullable
+	public UUID getUUID() {
+		return delegate.getUUID();
+	}
+
+	@Override
+	@Nonnull
+	public Database getDatabase() {
+		return delegate.getDatabase();
+	}
+
+	@Override
+	@Nonnull
+	public Collection<PersistentClass> getEntityBindings() {
+		return delegate.getEntityBindings();
+	}
+
+	@Override
+	@Nullable
+	public PersistentClass getEntityBinding(@Nonnull String entityName) {
+		return delegate.getEntityBinding( entityName );
+	}
+
+	@Override
+	@Nonnull
+	public Collection<org.hibernate.mapping.Collection> getCollectionBindings() {
+		return delegate.getCollectionBindings();
+	}
+
+	@Override
+	@Nullable
+	public org.hibernate.mapping.Collection getCollectionBinding(@Nonnull String role) {
+		return delegate.getCollectionBinding( role );
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, String> getImports() {
+		return delegate.getImports();
+	}
+
+	@Override
+	@Nullable
+	public NamedHqlQueryDefinition<?> getNamedHqlQueryMapping(@Nonnull String name) {
+		return delegate.getNamedHqlQueryMapping( name );
+	}
+
+	@Override
+	public void visitNamedHqlQueryDefinitions(@Nonnull Consumer<NamedHqlQueryDefinition<?>> definitionConsumer) {
+		delegate.visitNamedHqlQueryDefinitions( definitionConsumer );
+	}
+
+	@Override
+	@Nullable
+	public NamedNativeQueryDefinition<?> getNamedNativeQueryMapping(@Nonnull String name) {
+		return delegate.getNamedNativeQueryMapping( name );
+	}
+
+	@Override
+	public void visitNamedNativeQueryDefinitions(@Nonnull Consumer<NamedNativeQueryDefinition<?>> definitionConsumer) {
+		delegate.visitNamedNativeQueryDefinitions( definitionConsumer );
+	}
+
+	@Override
+	@Nullable
+	public NamedProcedureCallDefinition getNamedProcedureCallMapping(@Nonnull String name) {
+		return delegate.getNamedProcedureCallMapping( name );
+	}
+
+	@Override
+	public void visitNamedProcedureCallDefinition(@Nonnull Consumer<NamedProcedureCallDefinition> definitionConsumer) {
+		delegate.visitNamedProcedureCallDefinition( definitionConsumer );
+	}
+
+	@Override
+	@Nullable
+	public NamedResultSetMappingDescriptor getResultSetMapping(@Nonnull String name) {
+		return delegate.getResultSetMapping( name );
+	}
+
+	@Override
+	public void visitNamedResultSetMappingDefinition(
+			@Nonnull Consumer<NamedResultSetMappingDescriptor> definitionConsumer) {
+		delegate.visitNamedResultSetMappingDefinition( definitionConsumer );
+	}
+
+	@Override
+	@Nullable
+	public TypeDefinition getTypeDefinition(@Nonnull String typeName) {
+		return delegate.getTypeDefinition( typeName );
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, FilterDefinition> getFilterDefinitions() {
+		return delegate.getFilterDefinitions();
+	}
+
+	@Override
+	@Nullable
+	public FilterDefinition getFilterDefinition(@Nonnull String name) {
+		return delegate.getFilterDefinition( name );
+	}
+
+	@Override
+	@Nullable
+	public FetchProfile getFetchProfile(@Nonnull String name) {
+		return delegate.getFetchProfile( name );
+	}
+
+	@Override
+	@Nonnull
+	public Collection<FetchProfile> getFetchProfiles() {
+		return delegate.getFetchProfiles();
+	}
+
+	@Override
+	@Nullable
+	public NamedEntityGraphDefinition getNamedEntityGraph(@Nonnull String name) {
+		return delegate.getNamedEntityGraph( name );
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, NamedEntityGraphDefinition> getNamedEntityGraphs() {
+		return delegate.getNamedEntityGraphs();
+	}
+
+	@Override
+	@Nullable
+	public IdentifierGeneratorDefinition getIdentifierGenerator(@Nonnull String name) {
+		return delegate.getIdentifierGenerator( name );
+	}
+
+	@Override
+	@Nonnull
+	public Collection<Table> collectTableMappings() {
+		return delegate.collectTableMappings();
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, SqmFunctionDescriptor> getSqlFunctionMap() {
+		return delegate.getSqlFunctionMap();
+	}
+
+	@Override
+	@Remove
+	public MetadataBuildingOptions getMetadataBuildingOptions() {
+		return delegate.getMetadataBuildingOptions();
+	}
+
+	@Override
+	public TypeConfiguration getTypeConfiguration() {
+		return delegate.getTypeConfiguration();
+	}
+
+	@Override
+	public SqmFunctionRegistry getFunctionRegistry() {
+		return delegate.getFunctionRegistry();
+	}
+
+	@Override
+	public void orderColumns(boolean forceOrdering) {
+		delegate.orderColumns( false );
+	}
+
+	@Override
+	public void validate() throws MappingException {
+		delegate.validate();
+	}
+
+	@Override
+	public Set<MappedSuperclass> getMappedSuperclassMappingsCopy() {
+		return delegate.getMappedSuperclassMappingsCopy();
+	}
+
+	@Override
+	public void initSessionFactory(SessionFactoryImplementor sessionFactory) {
+		delegate.initSessionFactory( sessionFactory );
+	}
+
+	@Override
+	public void visitRegisteredComponents(Consumer<Component> consumer) {
+		delegate().visitRegisteredComponents( consumer );
+	}
+
+	@Override
+	public Component getGenericComponent(Class<?> componentClass) {
+		return delegate().getGenericComponent( componentClass );
+	}
+
+	@Override
+	public DiscriminatorType<?> resolveEmbeddableDiscriminatorType(
+			Class<?> embeddableClass,
+			Supplier<DiscriminatorType<?>> supplier) {
+		return delegate().resolveEmbeddableDiscriminatorType( embeddableClass, supplier );
+	}
+
+	@Override
+	public NamedObjectRepository buildNamedQueryRepository() {
+		return delegate().buildNamedQueryRepository();
+	}
+
+	@Override
+	@Nonnull
+	public Set<String> getContributors() {
+		return delegate.getContributors();
+	}
+
+	@Override
+	public List<PersistenceUnitCallbackDefinition> getPersistenceUnitLifecycleCallbackDefinitions() {
+		return delegate.getPersistenceUnitLifecycleCallbackDefinitions();
+	}
+}

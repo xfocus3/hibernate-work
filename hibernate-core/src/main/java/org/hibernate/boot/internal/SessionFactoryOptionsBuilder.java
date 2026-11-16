@@ -1,0 +1,2060 @@
+package org.hibernate.boot.internal;
+
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TimeZone;
+import java.util.concurrent.Callable;
+import java.util.function.Supplier;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import jakarta.persistence.CacheRetrieveMode;
+import jakarta.persistence.CacheStoreMode;
+import jakarta.persistence.PessimisticLockScope;
+import org.hibernate.CacheMode;
+import org.hibernate.CustomEntityDirtinessStrategy;
+import org.hibernate.EntityNameResolver;
+import org.hibernate.FlushMode;
+import org.hibernate.GraphParserMode;
+import org.hibernate.HibernateException;
+import org.hibernate.Interceptor;
+import org.hibernate.LockOptions;
+import org.hibernate.Remove;
+import org.hibernate.SessionEventListener;
+import org.hibernate.SessionFactoryObserver;
+import org.hibernate.audit.AuditStrategy;
+import org.hibernate.StatementObserver;
+import org.hibernate.boot.ConflictingInterceptorSettingsException;
+import org.hibernate.boot.model.internal.TemporalHelper;
+import org.hibernate.cfg.JdbcSettings;
+import org.hibernate.temporal.TemporalTableStrategy;
+import org.hibernate.context.spi.MultiTenancy;
+import org.hibernate.cfg.GraphParserSettings;
+import org.hibernate.context.spi.TenantCredentialsMapper;
+import org.hibernate.context.spi.TenantDataSourceMapper;
+import org.hibernate.context.spi.TenantSchemaMapper;
+import org.hibernate.metamodel.mapping.EntityMappingType;
+import org.hibernate.metamodel.spi.RuntimeModelCreationContext;
+import org.hibernate.type.TimeZoneStorageStrategy;
+import org.hibernate.annotations.CacheLayout;
+import org.hibernate.boot.registry.StandardServiceRegistry;
+import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+import org.hibernate.boot.registry.selector.spi.StrategySelectionException;
+import org.hibernate.boot.registry.selector.spi.StrategySelector;
+import org.hibernate.boot.spi.BootstrapContext;
+import org.hibernate.boot.spi.MetadataBuildingContext;
+import org.hibernate.boot.spi.SessionFactoryOptions;
+import org.hibernate.cache.internal.NoCachingRegionFactory;
+import org.hibernate.cache.internal.StandardTimestampsCacheFactory;
+import org.hibernate.cache.spi.RegionFactory;
+import org.hibernate.cache.spi.TimestampsCacheFactory;
+import org.hibernate.context.spi.CurrentTenantIdentifierResolver;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.dialect.type.spi.DirectJavaTimeJdbcSupport;
+import org.hibernate.engine.config.spi.ConfigurationService;
+import org.hibernate.engine.jdbc.env.spi.JdbcMetadata;
+import org.hibernate.engine.jdbc.spi.JdbcServices;
+import org.hibernate.engine.internal.StatisticalLoggingSessionEventListener;
+import org.hibernate.callback.internal.ConfiguredInterceptorImpl;
+import org.hibernate.callback.spi.ConfiguredInterceptor;
+import org.hibernate.internal.util.NullnessHelper;
+import org.hibernate.internal.util.config.ConfigurationHelper;
+import org.hibernate.jpa.HibernateHints;
+import org.hibernate.jpa.LegacySpecHints;
+import org.hibernate.jpa.SpecHints;
+import org.hibernate.jpa.internal.util.CacheModeHelper;
+import org.hibernate.jpa.spi.JpaCompliance;
+import org.hibernate.jpa.spi.MutableJpaCompliance;
+import org.hibernate.proxy.EntityNotFoundDelegate;
+import org.hibernate.cfg.CheckHandling;
+import org.hibernate.cfg.MappingSettings;
+import org.hibernate.query.spi.ImmutableEntityUpdateQueryHandlingMode;
+import org.hibernate.query.criteria.ValueHandlingMode;
+import org.hibernate.query.hql.spi.HqlTranslator;
+import org.hibernate.query.internal.NullsHelper;
+import org.hibernate.query.sqm.function.SqmFunctionDescriptor;
+import org.hibernate.query.sqm.function.SqmFunctionRegistry;
+import org.hibernate.query.sqm.mutation.spi.SqmMultiTableInsertStrategy;
+import org.hibernate.query.sqm.mutation.spi.SqmMultiTableMutationStrategy;
+import org.hibernate.query.sqm.sql.spi.SqmTranslatorFactory;
+import org.hibernate.resource.jdbc.spi.PhysicalConnectionHandlingMode;
+import org.hibernate.resource.jdbc.spi.StatementInspector;
+import org.hibernate.resource.transaction.spi.TransactionCoordinatorBuilder;
+import org.hibernate.type.format.FormatMapper;
+import org.hibernate.type.format.FormatMapperCreationContext;
+
+import jakarta.persistence.criteria.Nulls;
+
+import static java.util.Collections.unmodifiableMap;
+import static org.hibernate.Timeouts.WAIT_FOREVER_MILLI;
+import static org.hibernate.boot.model.internal.AuditHelper.determineAuditStrategy;
+import static org.hibernate.cfg.AvailableSettings.*;
+import static org.hibernate.cfg.DialectSpecificSettings.ORACLE_OSON_DISABLED;
+import static org.hibernate.engine.config.spi.StandardConverters.BOOLEAN;
+import static org.hibernate.id.uuid.LocalObjectUuidHelper.generateLocalObjectUuid;
+import static org.hibernate.internal.LockOptionsHelper.applyPropertiesToLockOptions;
+import static org.hibernate.internal.log.DeprecationLogger.DEPRECATION_LOGGER;
+import static org.hibernate.internal.util.PropertiesHelper.map;
+import static org.hibernate.internal.util.StringHelper.isEmpty;
+import static org.hibernate.internal.util.config.ConfigurationHelper.extractPropertyValue;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getBoolean;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getInt;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getInteger;
+import static org.hibernate.internal.util.config.ConfigurationHelper.getString;
+import static org.hibernate.jpa.internal.util.CacheModeHelper.interpretCacheMode;
+import static org.hibernate.jpa.internal.util.ConfigurationHelper.getFlushMode;
+import static org.hibernate.stat.Statistics.DEFAULT_QUERY_STATISTICS_MAX_SIZE;
+import static org.hibernate.type.format.jackson.JacksonIntegration.getJsonJackson3FormatMapperOrNull;
+import static org.hibernate.type.format.jackson.JacksonIntegration.getJsonJacksonFormatMapperOrNull;
+import static org.hibernate.type.format.jackson.JacksonIntegration.getOsonJacksonFormatMapperOrNull;
+import static org.hibernate.type.format.jackson.JacksonIntegration.getXMLJackson3FormatMapperOrNull;
+import static org.hibernate.type.format.jackson.JacksonIntegration.getXMLJacksonFormatMapperOrNull;
+import static org.hibernate.type.format.jakartajson.JakartaJsonIntegration.getJakartaJsonBFormatMapperOrNull;
+import static org.hibernate.type.format.jaxb.JaxbIntegration.getJaxbLegacyXmlFormatMapperOrNull;
+import static org.hibernate.type.format.jaxb.JaxbIntegration.getJaxbXmlFormatMapperOrNull;
+
+/**
+ * In-flight state of {@link SessionFactoryOptions} during {@link org.hibernate.boot.SessionFactoryBuilder}
+ * processing.
+ * <p>
+ * The intention is that {@code SessionFactoryBuilder} internally creates and populates this builder, which
+ * is then used to construct the {@code SessionFactoryOptions} as part of building the {@code SessionFactory}
+ * from {@link org.hibernate.boot.SessionFactoryBuilder#build}.
+ *
+ * @author Steve Ebersole
+ */
+public class SessionFactoryOptionsBuilder implements SessionFactoryOptions {
+	private static final SessionEventListener[] EMPTY_SESSION_EVENT_LISTENERS = new SessionEventListener[0];
+
+	@Nonnull
+	private final String uuid = generateLocalObjectUuid();
+	@Nonnull
+	private final StandardServiceRegistry serviceRegistry;
+
+	// integration
+	@Nullable
+	private Object beanManagerReference;
+	@Nullable
+	private Object validatorFactoryReference;
+	@Nullable
+	private FormatMapper jsonFormatMapper;
+	@Nullable
+	private FormatMapper xmlFormatMapper;
+	private final boolean xmlFormatMapperLegacyFormatEnabled;
+	private final boolean safeModeEnabled;
+
+	// SessionFactory behavior
+	private final boolean jpaBootstrap;
+	@Nullable
+	private String sessionFactoryName;
+	@Nullable
+	private Boolean sessionFactoryNameAlsoJndiName;
+
+	// Session behavior
+	private boolean flushBeforeCompletionEnabled;
+	private boolean autoCloseSessionEnabled;
+	private boolean jtaTransactionAccessEnabled;
+	private boolean allowOutOfTransactionUpdateOperations;
+
+	// (JTA) transaction handling
+	private boolean jtaTrackByThread;
+	private boolean preferUserTransaction;
+
+	// Statistics/Interceptor/observers
+	private boolean statisticsEnabled;
+	@Nonnull
+	private ConfiguredInterceptor configuredInterceptor;
+	@Nullable
+	private StatementObserver statementObserver;
+	@Nullable
+	private StatementInspector statementInspector;
+	@Nullable
+	private final Class<? extends SessionEventListener> autoSessionEventListener;
+	@Nonnull
+	private final List<SessionFactoryObserver> sessionFactoryObserverList = new ArrayList<>();
+
+	// persistence behavior
+	@Nonnull
+	private CustomEntityDirtinessStrategy customEntityDirtinessStrategy;
+	@Nonnull
+	private final List<EntityNameResolver> entityNameResolvers = new ArrayList<>();
+	@Nonnull
+	private EntityNotFoundDelegate entityNotFoundDelegate;
+
+	private boolean identifierRollbackEnabled;
+	private boolean checkNullability;
+	private boolean initializeLazyStateOutsideTransactions;
+	private final boolean bidirectionalAssociationManagementEnabled;
+	private int defaultBatchFetchSize;
+	@Nullable
+	private Integer maximumFetchDepth;
+	private boolean subselectFetchEnabled;
+	private boolean orderUpdatesEnabled;
+	private boolean orderInsertsEnabled;
+	private boolean collectionsInDefaultFetchGroupEnabled = true;
+	private final boolean unownedAssociationTransientCheck;
+	private final boolean passProcedureParameterNames;
+	private final boolean preferJdbcDatetimeTypes;
+
+	@Nonnull
+	private Nulls defaultNullPrecedence;
+	@Nonnull
+	private TemporalTableStrategy temporalTableStrategy;
+	@Nonnull
+	private AuditStrategy auditStrategy;
+
+	// JPA callbacks
+	private final boolean callbacksEnabled;
+
+	// multi-tenancy
+	private boolean multiTenancyEnabled;
+	@Nonnull
+	private final MultiTenancy multiTenancy;
+
+	// Queries
+	@Nullable
+	private SqmFunctionRegistry sqmFunctionRegistry;
+	@Nullable
+	private final HqlTranslator hqlTranslator;
+	@Nullable
+	private final SqmMultiTableMutationStrategy sqmMultiTableMutationStrategy;
+	@Nullable
+	private final SqmMultiTableInsertStrategy sqmMultiTableInsertStrategy;
+	@Nullable
+	private final Constructor<SqmMultiTableMutationStrategy> sqmMultiTableMutationStrategyConstructor;
+	@Nullable
+	private final Constructor<SqmMultiTableInsertStrategy> sqmMultiTableInsertStrategyConstructor;
+	@Nullable
+	private final SqmTranslatorFactory sqmTranslatorFactory;
+	private final Boolean useOfJdbcNamedParametersEnabled;
+	private boolean namedQueryStartupCheckingEnabled;
+	private final boolean preferJavaTimeJdbcTypes;
+	@Nonnull
+	private final DirectJavaTimeJdbcSupport directJavaTimeJdbcSupport;
+	private final boolean preferNativeEnumTypes;
+	private final boolean preferLocaleLanguageTagEnabled;
+	private final int preferredSqlTypeCodeForBoolean;
+	private final int preferredSqlTypeCodeForDuration;
+	private final int preferredSqlTypeCodeForUuid;
+	private final int preferredSqlTypeCodeForInstant;
+	private final int preferredSqlTypeCodeForArray;
+
+	@Nonnull
+	private final TimeZoneStorageStrategy defaultTimeZoneStorageStrategy;
+
+	// Caching
+	private boolean secondLevelCacheEnabled;
+	private boolean queryCacheEnabled;
+	@Nonnull
+	private CacheLayout queryCacheLayout;
+	@Nullable
+	private TimestampsCacheFactory timestampsCacheFactory;
+	@Nullable
+	private String cacheRegionPrefix;
+	private boolean minimalPutsEnabled;
+	private boolean structuredCacheEntriesEnabled;
+	private boolean directReferenceCacheEntriesEnabled;
+	private boolean autoEvictCollectionCache;
+
+	// JDBC Handling
+	private boolean getGeneratedKeysEnabled;
+	private int jdbcBatchSize;
+	@Nullable
+	private Integer jdbcFetchSize;
+	private boolean scrollableResultSetsEnabled;
+	private boolean commentsEnabled;
+	private boolean connectionProviderDisablesAutoCommit;
+	@Nullable
+	private final TimeZone jdbcTimeZone;
+	private final boolean criteriaCopyTreeEnabled;
+	private final boolean criteriaPlanCacheEnabled;
+	private final boolean nativeJdbcParametersIgnored;
+	// These two settings cannot be modified from the builder,
+	// in order to maintain consistency.
+	// Indeed, other components (the schema tools) also make use of these settings,
+	// and THOSE do not have access to session factory options.
+	@Nullable
+	private final String defaultCatalog;
+	@Nullable
+	private final String defaultSchema;
+
+	@Nonnull
+	private PhysicalConnectionHandlingMode connectionHandlingMode;
+	@Nonnull
+	private final ValueHandlingMode criteriaValueHandlingMode;
+	@Nonnull
+	private final CheckHandling finalPersistentFieldsHandling;
+	@Nonnull
+	private final ImmutableEntityUpdateQueryHandlingMode immutableEntityUpdateQueryHandlingMode;
+
+	@Nullable
+	private Map<String, SqmFunctionDescriptor> sqlFunctions;
+
+	@Nonnull
+	private JpaCompliance jpaCompliance;
+
+	private final boolean failOnPaginationOverCollectionFetchEnabled;
+	private final boolean inClauseParameterPaddingEnabled;
+
+	private final boolean portableIntegerDivisionEnabled;
+
+	private final int queryStatisticsMaxSize;
+
+	@Nonnull
+	private final Map<String, Object> defaultSessionProperties;
+	@Nullable
+	private final CacheStoreMode defaultCacheStoreMode;
+	@Nullable
+	private final CacheRetrieveMode defaultCacheRetrieveMode;
+	@Nonnull
+	private final CacheMode initialSessionCacheMode;
+
+	@Nonnull
+	private final FlushMode initialSessionFlushMode;
+	@Nonnull
+	private final LockOptions defaultLockOptions;
+
+	@Deprecated(forRemoval = true)
+	@Nonnull
+	private final GraphParserMode graphParserMode;
+
+
+	public SessionFactoryOptionsBuilder(
+			@Nonnull StandardServiceRegistry serviceRegistry,
+			@Nonnull BootstrapContext context) {
+		this.serviceRegistry = serviceRegistry;
+		jpaBootstrap = context.isJpaBootstrap();
+
+		// we cannot use context.getConfigurationService() here because it might be missing some settings
+		// (the StandardServiceRegistry passed in here does not need to be the bootstrap service registry)
+		final var configurationService = serviceRegistry.requireService( ConfigurationService.class );
+		multiTenancy = serviceRegistry.requireService( MultiTenancy.class );
+
+		final var strategySelector = serviceRegistry.requireService( StrategySelector.class );
+		final var jdbcServices = serviceRegistry.requireService( JdbcServices.class );
+
+		final var dialect = jdbcServices.getJdbcEnvironment().getDialect();
+		directJavaTimeJdbcSupport = dialect.getDirectJavaTimeJdbcSupport();
+
+		final Map<String, Object> settings = new HashMap<>();
+		settings.putAll( map( dialect.getDefaultProperties() ) );
+		settings.putAll( configurationService.getSettings() );
+
+		beanManagerReference = NullnessHelper.coalesceSuppliedValues(
+				() -> settings.get( JAKARTA_CDI_BEAN_MANAGER ),
+				() -> {
+					final Object value = settings.get( CDI_BEAN_MANAGER );
+					if ( value != null ) {
+						DEPRECATION_LOGGER.deprecatedSetting(
+								CDI_BEAN_MANAGER,
+								JAKARTA_CDI_BEAN_MANAGER
+						);
+					}
+					return value;
+				}
+		);
+
+		validatorFactoryReference = settings.getOrDefault(
+				JPA_VALIDATION_FACTORY,
+				settings.get( JAKARTA_VALIDATION_FACTORY )
+		);
+
+		final var formatMapperCreationContext = new FormatMapperCreationContext() {
+			@Override
+			public BootstrapContext getBootstrapContext() {
+				return context;
+			}
+		};
+		jsonFormatMapper = jsonFormatMapper(
+				settings.get( JSON_FORMAT_MAPPER ),
+				!getBoolean( ORACLE_OSON_DISABLED, settings ),
+				strategySelector,
+				formatMapperCreationContext
+		);
+
+		xmlFormatMapper = xmlFormatMapper(
+				settings.get( XML_FORMAT_MAPPER ),
+				strategySelector,
+				xmlFormatMapperLegacyFormatEnabled =
+						context.getMetadataBuildingOptions()
+								.isXmlFormatMapperLegacyFormatEnabled(),
+				formatMapperCreationContext
+		);
+
+		sessionFactoryName = (String) settings.get( SESSION_FACTORY_NAME );
+		sessionFactoryNameAlsoJndiName =
+				configurationService.getSetting( SESSION_FACTORY_NAME_IS_JNDI, BOOLEAN, true );
+		jtaTransactionAccessEnabled =
+				configurationService.getSetting( ALLOW_JTA_TRANSACTION_ACCESS, BOOLEAN, true );
+
+		flushBeforeCompletionEnabled =
+				configurationService.getSetting( FLUSH_BEFORE_COMPLETION, BOOLEAN, true );
+		autoCloseSessionEnabled =
+				configurationService.getSetting( AUTO_CLOSE_SESSION, BOOLEAN, false );
+
+		statisticsEnabled =
+				configurationService.getSetting( GENERATE_STATISTICS, BOOLEAN, false );
+
+		if ( settings.get( INTERCEPTOR ) != null && settings.get( SESSION_SCOPED_INTERCEPTOR ) != null ) {
+			throw new ConflictingInterceptorSettingsException();
+		}
+		configuredInterceptor = determineConfiguredInterceptor( settings, strategySelector );
+
+		statementObserver = interpretStatementObserver( settings );
+
+		statementInspector =
+				strategySelector.resolveStrategy(
+						StatementInspector.class,
+						settings.get( STATEMENT_INSPECTOR )
+				);
+
+
+		autoSessionEventListener = getAutoSessionEventsListener( settings, strategySelector );
+
+		customEntityDirtinessStrategy =
+				strategySelector.resolveDefaultableStrategy(
+						CustomEntityDirtinessStrategy.class,
+						settings.get( CUSTOM_ENTITY_DIRTINESS_STRATEGY ),
+						DefaultCustomEntityDirtinessStrategy.INSTANCE
+				);
+
+		entityNotFoundDelegate = StandardEntityNotFoundDelegate.INSTANCE;
+
+		identifierRollbackEnabled =
+				configurationService.getSetting( USE_IDENTIFIER_ROLLBACK, BOOLEAN, false );
+		checkNullability =
+				configurationService.getSetting( CHECK_NULLABILITY, BOOLEAN, true );
+		initializeLazyStateOutsideTransactions =
+				configurationService.getSetting( ENABLE_LAZY_LOAD_NO_TRANS, BOOLEAN, false );
+		final Object bidirectionalAssociationManagementSetting =
+				settings.get( BIDIRECTIONALITY_MANAGEMENT );
+		if ( bidirectionalAssociationManagementSetting == null ) {
+			bidirectionalAssociationManagementEnabled =
+					getBoolean( ENHANCER_ENABLE_ASSOCIATION_MANAGEMENT, settings, false );
+			if ( settings.containsKey( ENHANCER_ENABLE_ASSOCIATION_MANAGEMENT ) ) {
+				DEPRECATION_LOGGER.deprecatedSetting(
+						ENHANCER_ENABLE_ASSOCIATION_MANAGEMENT,
+						BIDIRECTIONALITY_MANAGEMENT
+				);
+			}
+		}
+		else {
+			bidirectionalAssociationManagementEnabled =
+					getBoolean( BIDIRECTIONALITY_MANAGEMENT, settings, false );
+		}
+		temporalTableStrategy = TemporalHelper.determineTemporalTableStrategy( settings );
+		if ( temporalTableStrategy == TemporalTableStrategy.AUTO ) {
+			temporalTableStrategy = dialect.getTemporalTableSupport().getDefaultTemporalTableStrategy();
+		}
+		auditStrategy = determineAuditStrategy( settings );
+
+		multiTenancyEnabled = MultiTenancy.isMultiTenancyEnabled( serviceRegistry );
+
+		defaultBatchFetchSize = getInt( DEFAULT_BATCH_FETCH_SIZE, settings, -1 );
+		subselectFetchEnabled = getBoolean( USE_SUBSELECT_FETCH, settings );
+		maximumFetchDepth = getInteger( MAX_FETCH_DEPTH, settings );
+
+		defaultNullPrecedence = getDefaultNullPrecedence( settings.get( DEFAULT_NULL_ORDERING ) );
+
+		orderUpdatesEnabled = getBoolean( ORDER_UPDATES, settings );
+		orderInsertsEnabled = getBoolean( ORDER_INSERTS, settings );
+
+		callbacksEnabled = getBoolean( JPA_CALLBACKS_ENABLED, settings, true );
+
+		jtaTrackByThread = configurationService.getSetting( JTA_TRACK_BY_THREAD, BOOLEAN, true );
+
+		final String hqlTranslatorImplFqn =
+				extractPropertyValue( SEMANTIC_QUERY_PRODUCER, settings );
+		hqlTranslator = resolveHqlTranslator( hqlTranslatorImplFqn, serviceRegistry, strategySelector );
+
+		final String sqmTranslatorFactoryImplFqn =
+				extractPropertyValue( SEMANTIC_QUERY_TRANSLATOR, settings );
+		sqmTranslatorFactory = resolveSqmTranslator( sqmTranslatorFactoryImplFqn, strategySelector );
+
+		final String sqmMutationStrategyImplName =
+				extractPropertyValue( QUERY_MULTI_TABLE_MUTATION_STRATEGY, settings );
+		sqmMultiTableMutationStrategy =
+				resolveSqmMutationStrategy( sqmMutationStrategyImplName, serviceRegistry, strategySelector );
+		sqmMultiTableMutationStrategyConstructor =
+				resolveSqmMutationStrategyConstructor( sqmMutationStrategyImplName, strategySelector );
+		final String sqmInsertStrategyImplName =
+				extractPropertyValue( QUERY_MULTI_TABLE_INSERT_STRATEGY, settings );
+		sqmMultiTableInsertStrategy =
+				resolveSqmInsertStrategy( sqmInsertStrategyImplName, serviceRegistry, strategySelector );
+		sqmMultiTableInsertStrategyConstructor =
+				resolveSqmInsertStrategyConstructor( sqmInsertStrategyImplName, strategySelector );
+
+		useOfJdbcNamedParametersEnabled =
+				configurationService.getSetting( CALLABLE_NAMED_PARAMS_ENABLED, BOOLEAN, true );
+
+		namedQueryStartupCheckingEnabled =
+				configurationService.getSetting( QUERY_STARTUP_CHECKING, BOOLEAN, true );
+
+		preferJavaTimeJdbcTypes = MetadataBuildingContext.isPreferJavaTimeJdbcTypesEnabled( configurationService );
+		preferNativeEnumTypes = MetadataBuildingContext.isPreferNativeEnumTypesEnabled( configurationService );
+		preferLocaleLanguageTagEnabled = MetadataBuildingContext.isPreferNativeEnumTypesEnabled( configurationService );
+		preferredSqlTypeCodeForBoolean = ConfigurationHelper.getPreferredSqlTypeCodeForBoolean( serviceRegistry );
+		preferredSqlTypeCodeForDuration = ConfigurationHelper.getPreferredSqlTypeCodeForDuration( serviceRegistry );
+		preferredSqlTypeCodeForUuid = ConfigurationHelper.getPreferredSqlTypeCodeForUuid( serviceRegistry );
+		preferredSqlTypeCodeForInstant = ConfigurationHelper.getPreferredSqlTypeCodeForInstant( serviceRegistry );
+		preferredSqlTypeCodeForArray = ConfigurationHelper.getPreferredSqlTypeCodeForArray( serviceRegistry );
+		defaultTimeZoneStorageStrategy = context.getMetadataBuildingOptions().getDefaultTimeZoneStorage();
+
+		final var regionFactory = serviceRegistry.getService( RegionFactory.class );
+		if ( !(regionFactory instanceof NoCachingRegionFactory) ) {
+			secondLevelCacheEnabled =
+					configurationService.getSetting( USE_SECOND_LEVEL_CACHE, BOOLEAN, true );
+			queryCacheEnabled =
+					configurationService.getSetting( USE_QUERY_CACHE, BOOLEAN, false );
+			cacheRegionPrefix = extractPropertyValue( CACHE_REGION_PREFIX, settings );
+			queryCacheLayout =
+					configurationService.getSetting(
+							QUERY_CACHE_LAYOUT,
+							value -> CacheLayout.valueOf( value.toString().toUpperCase( Locale.ROOT ) ),
+							CacheLayout.FULL
+					);
+			timestampsCacheFactory =
+					strategySelector.resolveDefaultableStrategy(
+							TimestampsCacheFactory.class,
+							settings.get( QUERY_CACHE_FACTORY ), StandardTimestampsCacheFactory.INSTANCE
+					);
+			minimalPutsEnabled =
+					configurationService.getSetting(
+							USE_MINIMAL_PUTS,
+							BOOLEAN,
+							regionFactory.isMinimalPutsEnabledByDefault()
+					);
+			structuredCacheEntriesEnabled =
+					configurationService.getSetting( USE_STRUCTURED_CACHE, BOOLEAN, false );
+			directReferenceCacheEntriesEnabled =
+					configurationService.getSetting( USE_DIRECT_REFERENCE_CACHE_ENTRIES, BOOLEAN, false );
+			autoEvictCollectionCache =
+					configurationService.getSetting( AUTO_EVICT_COLLECTION_CACHE, BOOLEAN, false );
+		}
+		else {
+			secondLevelCacheEnabled = false;
+			queryCacheEnabled = false;
+			queryCacheLayout = CacheLayout.AUTO;
+			timestampsCacheFactory = null;
+			cacheRegionPrefix = null;
+			minimalPutsEnabled = false;
+			structuredCacheEntriesEnabled = false;
+			directReferenceCacheEntriesEnabled = false;
+			autoEvictCollectionCache = false;
+		}
+
+		final var meta = jdbcServices.getJdbcMetadata();
+
+		jdbcBatchSize = disallowBatchUpdates( meta ) ? 0
+				: getInt( STATEMENT_BATCH_SIZE, settings, 1 );
+
+		scrollableResultSetsEnabled =
+				getBoolean( USE_SCROLLABLE_RESULTSET, settings, meta.supportsScrollableResults() );
+		getGeneratedKeysEnabled =
+				getBoolean( USE_GET_GENERATED_KEYS, settings, meta.supportsGetGeneratedKeys() );
+
+		jdbcFetchSize = getInteger( STATEMENT_FETCH_SIZE, settings );
+
+		connectionHandlingMode = interpretConnectionHandlingMode( settings, serviceRegistry );
+
+		connectionProviderDisablesAutoCommit =
+				getBoolean( CONNECTION_PROVIDER_DISABLES_AUTOCOMMIT, settings );
+
+		commentsEnabled = getBoolean( USE_SQL_COMMENTS, settings );
+
+		preferUserTransaction = getBoolean( PREFER_USER_TRANSACTION, settings );
+
+		allowOutOfTransactionUpdateOperations = getBoolean( ALLOW_UPDATE_OUTSIDE_TRANSACTION, settings );
+
+		jdbcTimeZone = getJdbcTimeZone( settings.get( JDBC_TIME_ZONE ) );
+
+		criteriaValueHandlingMode = ValueHandlingMode.interpret( settings.get( CRITERIA_VALUE_HANDLING_MODE ) );
+		criteriaCopyTreeEnabled = getBoolean( CRITERIA_COPY_TREE, settings, jpaBootstrap );
+		criteriaPlanCacheEnabled = getBoolean( CRITERIA_PLAN_CACHE_ENABLED, settings );
+
+		nativeJdbcParametersIgnored = getBoolean( NATIVE_IGNORE_JDBC_PARAMETERS, settings );
+
+		// added the boolean parameter in case we want to define some form of "all" as discussed
+		jpaCompliance = context.getJpaCompliance();
+
+		failOnPaginationOverCollectionFetchEnabled = getBoolean( FAIL_ON_PAGINATION_OVER_COLLECTION_FETCH, settings );
+
+		finalPersistentFieldsHandling =
+				CheckHandling.interpret(
+						settings.get( MappingSettings.FINAL_PERSISTENT_FIELDS ), CheckHandling.WARN );
+
+		immutableEntityUpdateQueryHandlingMode =
+				ImmutableEntityUpdateQueryHandlingMode.interpret(
+						settings.get( IMMUTABLE_ENTITY_UPDATE_QUERY_HANDLING_MODE ) );
+
+		defaultCatalog = getString( DEFAULT_CATALOG, settings );
+		defaultSchema = getString( DEFAULT_SCHEMA, settings );
+
+		inClauseParameterPaddingEnabled = getBoolean( IN_CLAUSE_PARAMETER_PADDING, settings );
+
+		portableIntegerDivisionEnabled = getBoolean( PORTABLE_INTEGER_DIVISION, settings );
+
+		safeModeEnabled = getBoolean( SAFE_MODE_ENABLED, settings );
+
+		queryStatisticsMaxSize =
+				getInt( QUERY_STATISTICS_MAX_SIZE, settings, DEFAULT_QUERY_STATISTICS_MAX_SIZE );
+
+		unownedAssociationTransientCheck =
+				getBoolean( UNOWNED_ASSOCIATION_TRANSIENT_CHECK, settings, isJpaBootstrap() );
+
+		passProcedureParameterNames = getBoolean( QUERY_PASS_PROCEDURE_PARAMETER_NAMES, settings );
+
+		preferJdbcDatetimeTypes = getBoolean( NATIVE_PREFER_JDBC_DATETIME_TYPES, settings );
+
+		defaultSessionProperties = initializeDefaultSessionProperties( configurationService );
+
+		defaultCacheStoreMode = defaultCacheStoreMode( defaultSessionProperties );
+		defaultCacheRetrieveMode = defaultCacheRetrieveMode( defaultSessionProperties );
+		initialSessionCacheMode = interpretCacheMode( defaultCacheStoreMode, defaultCacheRetrieveMode );
+
+		defaultLockOptions = defaultLockOptions( defaultSessionProperties );
+		initialSessionFlushMode = defaultFlushMode( defaultSessionProperties );
+
+		var graphParserModeSetting = settings.get( GraphParserSettings.GRAPH_PARSER_MODE );
+
+		if ( graphParserModeSetting != null ) {
+			DEPRECATION_LOGGER.deprecatedSetting( GraphParserSettings.GRAPH_PARSER_MODE );
+		}
+
+		graphParserMode = GraphParserMode.interpret( graphParserModeSetting );
+	}
+
+	@Nullable
+	private StatementObserver interpretStatementObserver(Map<String, Object> settings) {
+		var setting = settings.get( JdbcSettings.STATEMENT_OBSERVER );
+		if ( setting == null ) {
+			return null;
+		}
+
+		if ( setting instanceof StatementObserver observer ) {
+			return observer;
+		}
+
+		if ( setting instanceof Class<?> impl ) {
+			try {
+				return (StatementObserver) impl.getConstructor().newInstance();
+			}
+			catch (Exception e) {
+				throw new RuntimeException( "Unable to instantiate StatementObserver - " + impl.getName(), e );
+			}
+		}
+
+		try {
+			var namedImpl = Class.forName( setting.toString() );
+			return (StatementObserver) namedImpl.getConstructor().newInstance();
+		}
+		catch (Exception e) {
+			throw new RuntimeException( "Unable to instantiate StatementObserver - " + setting, e );
+		}
+	}
+
+	@Nullable
+	private TimeZone getJdbcTimeZone(@Nullable Object jdbcTimeZoneValue) {
+		if ( jdbcTimeZoneValue instanceof TimeZone timeZone ) {
+			return timeZone;
+		}
+		else if ( jdbcTimeZoneValue instanceof ZoneId zoneId ) {
+			return TimeZone.getTimeZone( zoneId );
+		}
+		else if ( jdbcTimeZoneValue instanceof String string ) {
+			return TimeZone.getTimeZone( ZoneId.of( string ) );
+		}
+		else if ( jdbcTimeZoneValue != null ) {
+			throw new IllegalArgumentException( "Configuration property " + JDBC_TIME_ZONE
+												+ " value [" + jdbcTimeZoneValue + "] is not supported" );
+		}
+		else {
+			return null;
+		}
+	}
+
+	@Nonnull
+	private Nulls getDefaultNullPrecedence(@Nullable Object defaultNullPrecedence) {
+		if ( defaultNullPrecedence instanceof Nulls jpaValue ) {
+			return jpaValue;
+		}
+		else if ( defaultNullPrecedence instanceof String string ) {
+			final var parsed = NullsHelper.parse( string );
+			if ( parsed == null ) {
+				throw new IllegalArgumentException( "Configuration property " + DEFAULT_NULL_ORDERING
+													+ " value '" + defaultNullPrecedence + "' is not recognized" );
+			}
+			return parsed;
+		}
+		else if ( defaultNullPrecedence != null ) {
+			throw new IllegalArgumentException( "Configuration property " + DEFAULT_NULL_ORDERING
+												+ " value [" + defaultNullPrecedence + "] is not recognized" );
+		}
+		else {
+			return Nulls.NONE;
+		}
+	}
+
+	@Nullable
+	private static Class<? extends SessionEventListener> getAutoSessionEventsListener(
+			Map<String, Object> configurationSettings,
+			StrategySelector strategySelector) {
+		// todo : expose this from builder?
+		final String name = (String) configurationSettings.get( AUTO_SESSION_EVENTS_LISTENER );
+		return name == null ? null : strategySelector.selectStrategyImplementor( SessionEventListener.class, name );
+	}
+
+	private static boolean disallowBatchUpdates(JdbcMetadata metadata) {
+		return !metadata.supportsBatchUpdates();
+	}
+
+	private static boolean hasStrategyConstructorSignature(Class<?>[] parameterTypes) {
+		return parameterTypes.length == 2
+			&& parameterTypes[0] == EntityMappingType.class
+			&& parameterTypes[1] == RuntimeModelCreationContext.class;
+	}
+
+	@SuppressWarnings("unchecked")
+	@Nullable
+	private SqmMultiTableMutationStrategy resolveSqmMutationStrategy(
+			@Nullable String strategyName,
+			StandardServiceRegistry serviceRegistry,
+			StrategySelector strategySelector) {
+		if ( strategyName == null ) {
+			return null;
+		}
+
+		return strategySelector.resolveStrategy(
+				SqmMultiTableMutationStrategy.class,
+				strategyName,
+				(SqmMultiTableMutationStrategy) null,
+				strategyClass -> {
+					Constructor<? extends SqmMultiTableMutationStrategy> dialectConstructor = null;
+					Constructor<? extends SqmMultiTableMutationStrategy> emptyConstructor = null;
+					Constructor<SqmMultiTableMutationStrategy> entityBasedConstructor = null;
+					// todo (6.0) : formalize the allowed constructor parameterizations
+					for ( var declaredConstructor : strategyClass.getDeclaredConstructors() ) {
+						final var parameterTypes = declaredConstructor.getParameterTypes();
+						final var constructor =
+								(Constructor<? extends SqmMultiTableMutationStrategy>)
+										declaredConstructor;
+						if ( parameterTypes.length == 1 && parameterTypes[0] == Dialect.class ) {
+							dialectConstructor = constructor;
+							break;
+						}
+						else if ( parameterTypes.length == 0 ) {
+							emptyConstructor = constructor;
+						}
+						else if ( hasStrategyConstructorSignature( parameterTypes ) ) {
+							entityBasedConstructor = (Constructor<SqmMultiTableMutationStrategy>) declaredConstructor;
+						}
+					}
+
+					if ( entityBasedConstructor == null ) {
+						try {
+							if ( dialectConstructor != null ) {
+								return dialectConstructor.newInstance(
+										serviceRegistry.requireService( JdbcServices.class ).getDialect()
+								);
+							}
+							else if ( emptyConstructor != null ) {
+								return emptyConstructor.newInstance();
+							}
+						}
+						catch (Exception e) {
+							throw new StrategySelectionException(
+									"Could not instantiate named strategy class [" + strategyClass.getName() + "]",
+									e
+							);
+						}
+						throw new IllegalArgumentException( "Cannot instantiate the class [" + strategyClass.getName()
+								+ "] because it does not have a constructor that accepts a dialect or an empty constructor" );
+					}
+					else {
+						return null;
+					}
+				}
+		);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Nullable
+	private Constructor<SqmMultiTableMutationStrategy> resolveSqmMutationStrategyConstructor(
+			@Nullable String strategyName,
+			StrategySelector strategySelector) {
+		if ( strategyName != null ) {
+			final var strategyClass =
+					strategySelector.selectStrategyImplementor( SqmMultiTableMutationStrategy.class, strategyName );
+			for ( var declaredConstructor : strategyClass.getDeclaredConstructors() ) {
+				final var parameterTypes = declaredConstructor.getParameterTypes();
+				if ( hasStrategyConstructorSignature( parameterTypes ) ) {
+					return (Constructor<SqmMultiTableMutationStrategy>) declaredConstructor;
+				}
+			}
+		}
+		return null;
+	}
+
+	@SuppressWarnings("unchecked")
+	@Nullable
+	private SqmMultiTableInsertStrategy resolveSqmInsertStrategy(
+			@Nullable String strategyName,
+			StandardServiceRegistry serviceRegistry,
+			StrategySelector strategySelector) {
+		if ( strategyName == null ) {
+			return null;
+		}
+
+		return strategySelector.resolveStrategy(
+				SqmMultiTableInsertStrategy.class,
+				strategyName,
+				(SqmMultiTableInsertStrategy) null,
+				strategyClass -> {
+					Constructor<? extends SqmMultiTableInsertStrategy> dialectConstructor = null;
+					Constructor<? extends SqmMultiTableInsertStrategy> emptyConstructor = null;
+					Constructor<SqmMultiTableInsertStrategy> entityBasedConstructor = null;
+					// todo (6.0) : formalize the allowed constructor parameterizations
+					for ( var declaredConstructor : strategyClass.getDeclaredConstructors() ) {
+						final var parameterTypes = declaredConstructor.getParameterTypes();
+						final var constructor =
+								(Constructor<? extends SqmMultiTableInsertStrategy>)
+										declaredConstructor;
+						if ( parameterTypes.length == 1 && parameterTypes[0] == Dialect.class ) {
+							dialectConstructor = constructor;
+							break;
+						}
+						else if ( parameterTypes.length == 0 ) {
+							emptyConstructor = constructor;
+						}
+						else if ( hasStrategyConstructorSignature( parameterTypes ) ) {
+							entityBasedConstructor = (Constructor<SqmMultiTableInsertStrategy>) declaredConstructor;
+						}
+					}
+
+					if ( entityBasedConstructor == null ) {
+						try {
+							if ( dialectConstructor != null ) {
+								return dialectConstructor.newInstance(
+										serviceRegistry.requireService( JdbcServices.class ).getDialect()
+								);
+							}
+							else if ( emptyConstructor != null ) {
+								return emptyConstructor.newInstance();
+							}
+						}
+						catch (Exception e) {
+							throw new StrategySelectionException(
+									"Could not instantiate named strategy class [" +
+									strategyClass.getName() + "]",
+									e
+							);
+						}
+						throw new IllegalArgumentException(
+								"Cannot instantiate the class [" + strategyClass.getName() + "] because it does not have a constructor that accepts a dialect or an empty constructor" );
+					}
+					else {
+						return null;
+					}
+				}
+		);
+	}
+
+	@SuppressWarnings("unchecked")
+	@Nullable
+	private Constructor<SqmMultiTableInsertStrategy> resolveSqmInsertStrategyConstructor(
+			@Nullable String strategyName,
+			StrategySelector strategySelector) {
+		if ( strategyName != null ) {
+			final var strategyClass =
+					strategySelector.selectStrategyImplementor( SqmMultiTableInsertStrategy.class, strategyName );
+			for ( var declaredConstructor : strategyClass.getDeclaredConstructors() ) {
+				final var parameterTypes = declaredConstructor.getParameterTypes();
+				if ( hasStrategyConstructorSignature( parameterTypes ) ) {
+					return (Constructor<SqmMultiTableInsertStrategy>) declaredConstructor;
+				}
+			}
+		}
+		return null;
+	}
+
+	@Nullable
+	private HqlTranslator resolveHqlTranslator(
+			@Nullable String producerName,
+			StandardServiceRegistry serviceRegistry,
+			StrategySelector strategySelector) {
+		return producerName == null || producerName.isEmpty()
+				? null
+				: strategySelector.<HqlTranslator>resolveDefaultableStrategy(
+						HqlTranslator.class,
+						producerName,
+						() -> (HqlTranslator)
+								serviceRegistry.requireService( ClassLoaderService.class )
+										.classForName( producerName ).newInstance()
+				);
+	}
+
+	@Nullable
+	private SqmTranslatorFactory resolveSqmTranslator(
+			@Nullable String translatorImplFqn,
+			StrategySelector strategySelector) {
+		if ( isEmpty( translatorImplFqn ) ) {
+			return null;
+		}
+		else {
+			return strategySelector.resolveStrategy(
+					SqmTranslatorFactory.class,
+					translatorImplFqn
+			);
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	@Nonnull
+	private static ConfiguredInterceptor determineConfiguredInterceptor(
+			Map<String, Object> configurationSettings,
+			StrategySelector strategySelector) {
+		final Object interceptorSetting = configurationSettings.get( INTERCEPTOR );
+		if ( interceptorSetting instanceof Interceptor instance ) {
+			return ConfiguredInterceptorImpl.ofInstance( instance );
+		}
+		else if ( interceptorSetting != null ) {
+			final Class<? extends Interceptor> clazz =
+					interceptorSetting instanceof Class
+							? (Class<? extends Interceptor>) interceptorSetting
+							: strategySelector.selectStrategyImplementor( Interceptor.class, interceptorSetting.toString() );
+			return ConfiguredInterceptorImpl.ofGlobal( clazz );
+		}
+
+		final Object sessionScopedSetting = configurationSettings.get( SESSION_SCOPED_INTERCEPTOR );
+		if ( sessionScopedSetting instanceof Supplier ) {
+			return ConfiguredInterceptorImpl.ofSupplied( (Supplier<? extends Interceptor>) sessionScopedSetting );
+		}
+		else if ( sessionScopedSetting != null ) {
+			final Class<? extends Interceptor> clazz =
+					sessionScopedSetting instanceof Class
+							? (Class<? extends Interceptor>) sessionScopedSetting
+							: strategySelector.selectStrategyImplementor( Interceptor.class, sessionScopedSetting.toString() );
+			return ConfiguredInterceptorImpl.ofScoped( clazz );
+		}
+
+		return ConfiguredInterceptorImpl.none();
+	}
+
+	@Nonnull
+	private PhysicalConnectionHandlingMode interpretConnectionHandlingMode(
+			Map<String, Object> configurationSettings,
+			StandardServiceRegistry serviceRegistry) {
+		final var specifiedHandlingMode =
+				PhysicalConnectionHandlingMode.interpret( configurationSettings.get( CONNECTION_HANDLING ) );
+		return specifiedHandlingMode != null
+				? specifiedHandlingMode
+				: serviceRegistry.requireService( TransactionCoordinatorBuilder.class )
+						.getDefaultConnectionHandlingMode();
+	}
+
+	@Nullable
+	private static FormatMapper jsonFormatMapper(
+			@Nullable Object setting,
+			boolean osonExtensionEnabled,
+			StrategySelector selector, FormatMapperCreationContext creationContext) {
+		return formatMapper(
+				setting,
+				selector,
+				() -> {
+					// Prefer the OSON Jackson FormatMapper by default if available
+					final var jacksonOsonFormatMapper = osonExtensionEnabled
+							? getOsonJacksonFormatMapperOrNull( creationContext )
+							: null;
+					if ( jacksonOsonFormatMapper != null ) {
+						return jacksonOsonFormatMapper;
+					}
+
+					final var jacksonFormatMapper = getJsonJacksonFormatMapperOrNull( creationContext );
+					if ( jacksonFormatMapper != null ) {
+						return jacksonFormatMapper;
+					}
+
+					final var jackson3FormatMapper = getJsonJackson3FormatMapperOrNull( creationContext );
+					if ( jackson3FormatMapper != null ) {
+						return jackson3FormatMapper;
+					}
+
+					return getJakartaJsonBFormatMapperOrNull();
+				},
+				creationContext
+		);
+	}
+
+	@Nullable
+	private static FormatMapper xmlFormatMapper(@Nullable Object setting, StrategySelector selector, boolean legacyFormat, FormatMapperCreationContext creationContext) {
+		return formatMapper(
+				setting,
+				selector,
+				() -> {
+					final var jacksonFormatMapper = getXMLJacksonFormatMapperOrNull( creationContext );
+					if ( jacksonFormatMapper != null ) {
+						return jacksonFormatMapper;
+					}
+
+					final var jackson3FormatMapper = getXMLJackson3FormatMapperOrNull( creationContext );
+					if ( jackson3FormatMapper != null ) {
+						return jackson3FormatMapper;
+					}
+
+					return legacyFormat
+							? getJaxbLegacyXmlFormatMapperOrNull()
+							: getJaxbXmlFormatMapperOrNull();
+				},
+				creationContext
+		);
+	}
+
+	@Nullable
+	private static FormatMapper formatMapper(
+			@Nullable Object setting,
+			StrategySelector selector,
+			Callable<FormatMapper> defaultResolver, FormatMapperCreationContext creationContext) {
+		return selector.resolveStrategy( FormatMapper.class, setting, defaultResolver, strategyClass -> {
+			try {
+				return strategyClass.getDeclaredConstructor( FormatMapperCreationContext.class )
+						.newInstance( creationContext );
+			}
+			catch (NoSuchMethodException e) {
+				// Ignore
+			}
+			catch (InvocationTargetException | InstantiationException | IllegalAccessException e) {
+				throw new StrategySelectionException(
+						String.format( "Could not instantiate named strategy class [%s]", strategyClass.getName() ),
+						e
+				);
+			}
+			try {
+				return strategyClass.getDeclaredConstructor().newInstance();
+			}
+			catch (Exception e) {
+				throw new StrategySelectionException(
+						String.format( "Could not instantiate named strategy class [%s]", strategyClass.getName() ),
+						e
+				);
+			}
+		} );
+	}
+
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// SessionFactoryOptionsState
+
+	@Override
+	@Nonnull
+	public String getUuid() {
+		return uuid;
+	}
+
+	@Override
+	public boolean isSafeModeEnabled() { return safeModeEnabled; }
+
+	@Override
+	@Nonnull
+	public StandardServiceRegistry getServiceRegistry() {
+		return serviceRegistry;
+	}
+
+	@Override
+	public boolean isJpaBootstrap() {
+		return jpaBootstrap;
+	}
+
+	@Override
+	public boolean isJtaTransactionAccessEnabled() {
+		return jtaTransactionAccessEnabled;
+	}
+
+	@Override
+	public boolean isAllowOutOfTransactionUpdateOperations() {
+		return allowOutOfTransactionUpdateOperations;
+	}
+
+	@Override
+	@Nullable
+	public Object getBeanManagerReference() {
+		return beanManagerReference;
+	}
+
+	@Override
+	@Nullable
+	public Object getValidatorFactoryReference() {
+		return validatorFactoryReference;
+	}
+
+	@Override
+	@Nullable
+	public String getSessionFactoryName() {
+		return sessionFactoryName;
+	}
+
+	@Override
+	@Nullable
+	public Boolean isSessionFactoryNameAlsoJndiName() {
+		return sessionFactoryNameAlsoJndiName;
+	}
+
+	@Override
+	public boolean isFlushBeforeCompletionEnabled() {
+		return flushBeforeCompletionEnabled;
+	}
+
+	@Override
+	public boolean isAutoCloseSessionEnabled() {
+		return autoCloseSessionEnabled;
+	}
+
+	@Override
+	public boolean isStatisticsEnabled() {
+		return statisticsEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public ConfiguredInterceptor getConfiguredInterceptor() {
+		return configuredInterceptor;
+	}
+
+	@Override
+	@Nullable
+	public StatementObserver getStatementObserver() {
+		return statementObserver;
+	}
+
+	@Override
+	@Nullable
+	public HqlTranslator getCustomHqlTranslator() {
+		return hqlTranslator;
+	}
+
+	@Override
+	@Nullable
+	public SqmTranslatorFactory getCustomSqmTranslatorFactory() {
+		return sqmTranslatorFactory;
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableMutationStrategy getCustomSqmMultiTableMutationStrategy() {
+		return sqmMultiTableMutationStrategy;
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableInsertStrategy getCustomSqmMultiTableInsertStrategy() {
+		return sqmMultiTableInsertStrategy;
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableMutationStrategy resolveCustomSqmMultiTableMutationStrategy(
+			@Nonnull EntityMappingType rootEntityDescriptor,
+			@Nonnull RuntimeModelCreationContext creationContext) {
+		if ( sqmMultiTableMutationStrategyConstructor != null ) {
+			try {
+				return sqmMultiTableMutationStrategyConstructor.newInstance( rootEntityDescriptor, creationContext );
+			}
+			catch (Exception e) {
+				throw new StrategySelectionException(
+						String.format(
+								"Could not instantiate named strategy class [%s]",
+								sqmMultiTableMutationStrategyConstructor.getDeclaringClass().getName()
+						),
+						e
+				);
+			}
+		}
+		return null;
+	}
+
+	@Override
+	@Nullable
+	public SqmMultiTableInsertStrategy resolveCustomSqmMultiTableInsertStrategy(
+			@Nonnull EntityMappingType rootEntityDescriptor,
+			@Nonnull RuntimeModelCreationContext creationContext) {
+		if ( sqmMultiTableInsertStrategyConstructor != null ) {
+			try {
+				return sqmMultiTableInsertStrategyConstructor.newInstance( rootEntityDescriptor, creationContext );
+			}
+			catch (Exception e) {
+				throw new StrategySelectionException(
+						String.format(
+								"Could not instantiate named strategy class [%s]",
+								sqmMultiTableInsertStrategyConstructor.getDeclaringClass().getName()
+						),
+						e
+				);
+			}
+		}
+		return null;
+	}
+
+	@Override
+	public boolean isUseOfJdbcNamedParametersEnabled() {
+		return useOfJdbcNamedParametersEnabled;
+	}
+
+	@Override
+	@Nullable
+	public SqmFunctionRegistry getCustomSqmFunctionRegistry() {
+		return sqmFunctionRegistry;
+	}
+
+	@Override
+	@Nullable
+	public StatementInspector getStatementInspector() {
+		return statementInspector;
+	}
+
+	@Override
+	@Nonnull
+	public SessionFactoryObserver[] getSessionFactoryObservers() {
+		return sessionFactoryObserverList.toArray( new SessionFactoryObserver[0] );
+	}
+
+	@Override
+	@Nonnull
+	public SessionEventListener[] buildSessionEventListeners() {
+		if ( StatisticalLoggingSessionEventListener.isLoggingEnabled() ) {
+			return autoSessionEventListener == null
+					? new SessionEventListener[] { statsListener() }
+					: new SessionEventListener[] { statsListener(), instantiateAutoSessionEventListener( autoSessionEventListener ) };
+		}
+		else {
+			return autoSessionEventListener == null
+					? EMPTY_SESSION_EVENT_LISTENERS
+					: new SessionEventListener[] { instantiateAutoSessionEventListener( autoSessionEventListener ) };
+		}
+	}
+
+	@Nonnull
+	private static SessionEventListener instantiateAutoSessionEventListener(
+			@Nonnull Class<? extends SessionEventListener> listenerClass) {
+		try {
+			return listenerClass.getConstructor().newInstance();
+		}
+		catch (Exception e) {
+			throw new HibernateException(
+					"Unable to instantiate specified auto SessionEventListener: " + listenerClass.getName(),
+					e
+			);
+		}
+	}
+
+	private static SessionEventListener statsListener() {
+		return new StatisticalLoggingSessionEventListener();
+	}
+
+	@Override
+	public boolean isIdentifierRollbackEnabled() {
+		return identifierRollbackEnabled;
+	}
+
+	@Override
+	public boolean isCheckNullability() {
+		return checkNullability;
+	}
+
+	@Override
+	public boolean isInitializeLazyStateOutsideTransactionsEnabled() {
+		return initializeLazyStateOutsideTransactions;
+	}
+
+	@Override
+	public boolean isBidirectionalAssociationManagementEnabled() {
+		return bidirectionalAssociationManagementEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public TemporalTableStrategy getTemporalTableStrategy() {
+		return temporalTableStrategy;
+	}
+
+	@Override
+	@Nonnull
+	public AuditStrategy getAuditStrategy() {
+		return auditStrategy;
+	}
+
+	@Override
+	public int getDefaultBatchFetchSize() {
+		return defaultBatchFetchSize;
+	}
+
+	@Override
+	@Nullable
+	public Integer getMaximumFetchDepth() {
+		return maximumFetchDepth;
+	}
+
+	@Override
+	public boolean isSubselectFetchEnabled() {
+		return subselectFetchEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public Nulls getDefaultNullPrecedence() {
+		return defaultNullPrecedence;
+	}
+
+	@Override
+	public boolean isOrderUpdatesEnabled() {
+		return orderUpdatesEnabled;
+	}
+
+	@Override
+	public boolean isOrderInsertsEnabled() {
+		return orderInsertsEnabled;
+	}
+
+	@Override
+	public boolean isMultiTenancyEnabled() {
+		return multiTenancyEnabled || multiTenancy.getTenantDataSourceMapper() != null;
+	}
+
+	@Override
+	@Nullable
+	public TenantSchemaMapper<Object> getTenantSchemaMapper() {
+		return multiTenancy.getTenantSchemaMapper();
+	}
+
+	@Override
+	@Nullable
+	public TenantDataSourceMapper<Object> getTenantDataSourceMapper() {
+		return multiTenancy.getTenantDataSourceMapper();
+	}
+
+	@Override
+	@Nullable
+	public TenantCredentialsMapper<Object> getTenantCredentialsMapper() {
+		return multiTenancy.getTenantCredentialsMapper();
+	}
+
+	@Override
+	@Nullable
+	public CurrentTenantIdentifierResolver<Object> getCurrentTenantIdentifierResolver() {
+		return multiTenancy.getTenantIdentifierResolver();
+	}
+
+	@Override
+	public boolean isJtaTrackByThread() {
+		return jtaTrackByThread;
+	}
+
+	@Override
+	public boolean isNamedQueryStartupCheckingEnabled() {
+		return namedQueryStartupCheckingEnabled;
+	}
+
+	@Override
+	public boolean isSecondLevelCacheEnabled() {
+		return secondLevelCacheEnabled;
+	}
+
+	@Override
+	public boolean isQueryCacheEnabled() {
+		return queryCacheEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public CacheLayout getQueryCacheLayout() {
+		return queryCacheLayout;
+	}
+
+	@Override
+	@Nullable
+	public TimestampsCacheFactory getTimestampsCacheFactory() {
+		return timestampsCacheFactory;
+	}
+
+	@Override
+	@Nullable
+	public String getCacheRegionPrefix() {
+		return cacheRegionPrefix;
+	}
+
+	@Override
+	public boolean isMinimalPutsEnabled() {
+		return minimalPutsEnabled;
+	}
+
+	@Override
+	public boolean isStructuredCacheEntriesEnabled() {
+		return structuredCacheEntriesEnabled;
+	}
+
+	@Override
+	public boolean isDirectReferenceCacheEntriesEnabled() {
+		return directReferenceCacheEntriesEnabled;
+	}
+
+	@Override
+	public boolean isAutoEvictCollectionCache() {
+		return autoEvictCollectionCache;
+	}
+
+	@Override
+	public int getJdbcBatchSize() {
+		return jdbcBatchSize;
+	}
+
+	@Override
+	public boolean isScrollableResultSetsEnabled() {
+		return scrollableResultSetsEnabled;
+	}
+
+	@Override
+	public boolean isGetGeneratedKeysEnabled() {
+		return getGeneratedKeysEnabled;
+	}
+
+	@Override
+	@Nullable
+	public Integer getJdbcFetchSize() {
+		return jdbcFetchSize;
+	}
+
+	@Override
+	@Nonnull
+	public PhysicalConnectionHandlingMode getPhysicalConnectionHandlingMode() {
+		return connectionHandlingMode;
+	}
+
+	@Override
+	public void setCheckNullability(boolean enabled) {
+		checkNullability = enabled;
+	}
+
+	@Override
+	public boolean doesConnectionProviderDisableAutoCommit() {
+		return connectionProviderDisablesAutoCommit;
+	}
+
+	@Override
+	public boolean isCommentsEnabled() {
+		return commentsEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public CustomEntityDirtinessStrategy getCustomEntityDirtinessStrategy() {
+		return customEntityDirtinessStrategy;
+	}
+
+	@Override
+	@Nonnull
+	public EntityNameResolver[] getEntityNameResolvers() {
+		return entityNameResolvers.toArray( new EntityNameResolver[0] );
+	}
+
+	@Override
+	@Nonnull
+	public EntityNotFoundDelegate getEntityNotFoundDelegate() {
+		return entityNotFoundDelegate;
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, SqmFunctionDescriptor> getCustomSqlFunctionMap() {
+		return sqlFunctions == null ? Collections.emptyMap() : sqlFunctions;
+	}
+
+	@Override
+	public boolean isPreferUserTransaction() {
+		return preferUserTransaction;
+	}
+
+	@Override
+	@Nullable
+	public TimeZone getJdbcTimeZone() {
+		return jdbcTimeZone;
+	}
+
+	@Override
+	@Nonnull
+	public ValueHandlingMode getCriteriaValueHandlingMode() {
+		return criteriaValueHandlingMode;
+	}
+
+	@Override
+	public boolean isCriteriaCopyTreeEnabled() {
+		return criteriaCopyTreeEnabled;
+	}
+
+	@Override
+	public boolean isCriteriaPlanCacheEnabled() {
+		return criteriaPlanCacheEnabled;
+	}
+
+	@Override
+	public boolean getNativeJdbcParametersIgnored() {
+		return nativeJdbcParametersIgnored;
+	}
+
+	@Override
+	public CheckHandling getFinalPersistentFieldsHandling() {
+		return finalPersistentFieldsHandling;
+	}
+
+	@Override
+	@Nonnull
+	public ImmutableEntityUpdateQueryHandlingMode getImmutableEntityUpdateQueryHandlingMode() {
+		return immutableEntityUpdateQueryHandlingMode;
+	}
+
+	@Override
+	public boolean allowImmutableEntityUpdate() {
+		return immutableEntityUpdateQueryHandlingMode != ImmutableEntityUpdateQueryHandlingMode.EXCEPTION;
+	}
+
+	@Override
+	@Nullable
+	public String getDefaultCatalog() {
+		return defaultCatalog;
+	}
+
+	@Override
+	@Nullable
+	public String getDefaultSchema() {
+		return defaultSchema;
+	}
+
+	@Override
+	public boolean isFailOnPaginationOverCollectionFetchEnabled() {
+		return failOnPaginationOverCollectionFetchEnabled;
+	}
+
+	@Override
+	public boolean inClauseParameterPaddingEnabled() {
+		return inClauseParameterPaddingEnabled;
+	}
+
+	@Override
+	public boolean isPortableIntegerDivisionEnabled() {
+		return portableIntegerDivisionEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public JpaCompliance getJpaCompliance() {
+		return jpaCompliance;
+	}
+
+	@Override
+	public int getQueryStatisticsMaxSize() {
+		return queryStatisticsMaxSize;
+	}
+
+	@Override
+	public boolean areJPACallbacksEnabled() {
+		return callbacksEnabled;
+	}
+
+	@Override
+	public boolean isCollectionsInDefaultFetchGroupEnabled() {
+		return collectionsInDefaultFetchGroupEnabled;
+	}
+
+	@Override
+	public boolean isUnownedAssociationTransientCheck() {
+		return unownedAssociationTransientCheck;
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForBoolean() {
+		return preferredSqlTypeCodeForBoolean;
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForDuration() {
+		return preferredSqlTypeCodeForDuration;
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForUuid() {
+		return preferredSqlTypeCodeForUuid;
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForInstant() {
+		return preferredSqlTypeCodeForInstant;
+	}
+
+	@Override
+	public int getPreferredSqlTypeCodeForArray() {
+		return preferredSqlTypeCodeForArray;
+	}
+
+	@Override
+	@Nonnull
+	public TimeZoneStorageStrategy getDefaultTimeZoneStorageStrategy() {
+		return defaultTimeZoneStorageStrategy;
+	}
+
+	@Override
+	public boolean isDirectJavaTimeJdbcAccessEnabled(@Nonnull Class<?> javaTimeType) {
+		return preferJavaTimeJdbcTypes && directJavaTimeJdbcSupport.supports( javaTimeType );
+	}
+
+	@Override
+	@Deprecated(since = "8.0")
+	public boolean isPreferJavaTimeJdbcTypesEnabled() {
+		return preferJavaTimeJdbcTypes;
+	}
+
+	@Override
+	public boolean isPreferNativeEnumTypesEnabled() {
+		return preferNativeEnumTypes;
+	}
+
+	@Override
+	public boolean isPreferLocaleLanguageTagEnabled() {
+		return preferLocaleLanguageTagEnabled;
+	}
+
+	@Override
+	@Nonnull
+	public FormatMapper getJsonFormatMapper() {
+		if ( jsonFormatMapper == null ) {
+			throw new HibernateException(
+					"Could not find a FormatMapper for the JSON format, which is required for mapping JSON types. JSON FormatMapper configuration is automatic, but requires that you have either Jackson or a JSONB implementation like Yasson on the class path."
+			);
+		}
+		return jsonFormatMapper;
+	}
+
+	@Override
+	@Nonnull
+	public FormatMapper getXmlFormatMapper() {
+		if ( xmlFormatMapper == null ) {
+			throw new HibernateException(
+					"Could not find a FormatMapper for the XML format, which is required for mapping XML types. XML FormatMapper configuration is automatic, but requires that you have either Jackson XML or a JAXB implementation like Glassfish JAXB on the class path."
+			);
+		}
+		return xmlFormatMapper;
+	}
+
+	@Override
+	public boolean isXmlFormatMapperLegacyFormatEnabled() {
+		return xmlFormatMapperLegacyFormatEnabled;
+	}
+
+	@Override
+	public boolean isPassProcedureParameterNames() {
+		return passProcedureParameterNames;
+	}
+
+	@Override
+	public boolean isPreferJdbcDatetimeTypesInNativeQueriesEnabled() {
+		return preferJdbcDatetimeTypes;
+	}
+
+	// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+	// In-flight mutation access
+
+	public void applyBeanManager(@Nullable Object beanManager) {
+		this.beanManagerReference = beanManager;
+	}
+
+	public void applyValidatorFactory(@Nullable Object validatorFactory) {
+		this.validatorFactoryReference = validatorFactory;
+	}
+
+	public void applyJsonFormatMapper(@Nullable FormatMapper jsonFormatMapper) {
+		this.jsonFormatMapper = jsonFormatMapper;
+	}
+
+	public void applyXmlFormatMapper(@Nullable FormatMapper xmlFormatMapper) {
+		this.xmlFormatMapper = xmlFormatMapper;
+	}
+
+	public void applySessionFactoryName(@Nullable String sessionFactoryName) {
+		this.sessionFactoryName = sessionFactoryName;
+	}
+
+	public void enableSessionFactoryNameAsJndiName(boolean isJndiName) {
+		this.sessionFactoryNameAlsoJndiName = isJndiName;
+	}
+
+	public void enableSessionAutoClosing(boolean autoClosingEnabled) {
+		this.autoCloseSessionEnabled = autoClosingEnabled;
+	}
+
+	public void enableSessionAutoFlushing(boolean flushBeforeCompletionEnabled) {
+		this.flushBeforeCompletionEnabled = flushBeforeCompletionEnabled;
+	}
+
+	public void enableJtaTrackingByThread(boolean enabled) {
+		this.jtaTrackByThread = enabled;
+	}
+
+	public void enablePreferUserTransaction(boolean preferUserTransaction) {
+		this.preferUserTransaction = preferUserTransaction;
+	}
+
+	public void enableStatisticsSupport(boolean enabled) {
+		this.statisticsEnabled = enabled;
+	}
+
+	public void addSessionFactoryObservers(@Nonnull SessionFactoryObserver... observers) {
+		Collections.addAll( sessionFactoryObserverList, observers );
+	}
+
+	public void applyInterceptor(@Nullable Interceptor interceptor) {
+		this.configuredInterceptor = interceptor == null
+				? ConfiguredInterceptorImpl.none()
+				: ConfiguredInterceptorImpl.ofInstance( interceptor );
+	}
+
+	public void applyStatelessInterceptor(@Nonnull Class<? extends Interceptor> statelessInterceptorClass) {
+		this.configuredInterceptor = ConfiguredInterceptorImpl.ofScoped( statelessInterceptorClass );
+	}
+
+	public void applyStatelessInterceptorSupplier(@Nullable Supplier<? extends Interceptor> statelessInterceptorSupplier) {
+		this.configuredInterceptor = statelessInterceptorSupplier == null
+				? ConfiguredInterceptorImpl.none()
+				: ConfiguredInterceptorImpl.ofSupplied( statelessInterceptorSupplier );
+	}
+
+	public void applySqmFunctionRegistry(@Nullable SqmFunctionRegistry sqmFunctionRegistry) {
+		this.sqmFunctionRegistry = sqmFunctionRegistry;
+	}
+
+	public void applyStatementObserver(@Nullable StatementObserver statementObserver) {
+		this.statementObserver = statementObserver;
+	}
+
+	public void applyStatementInspector(@Nullable StatementInspector statementInspector) {
+		this.statementInspector = statementInspector;
+	}
+
+	public void applyCustomEntityDirtinessStrategy(@Nonnull CustomEntityDirtinessStrategy strategy) {
+		this.customEntityDirtinessStrategy = strategy;
+	}
+
+	public void addEntityNameResolvers(@Nonnull EntityNameResolver... entityNameResolvers) {
+		Collections.addAll( this.entityNameResolvers, entityNameResolvers );
+	}
+
+	public void applyEntityNotFoundDelegate(@Nonnull EntityNotFoundDelegate entityNotFoundDelegate) {
+		this.entityNotFoundDelegate = entityNotFoundDelegate;
+	}
+
+	public void enableIdentifierRollbackSupport(boolean enabled) {
+		this.identifierRollbackEnabled = enabled;
+	}
+
+	public void enableNullabilityChecking(boolean enabled) {
+		this.checkNullability = enabled;
+	}
+
+	public void allowLazyInitializationOutsideTransaction(boolean enabled) {
+		this.initializeLazyStateOutsideTransactions = enabled;
+	}
+
+	public void applyTemporalTableStrategy(@Nonnull TemporalTableStrategy strategy) {
+		this.temporalTableStrategy = strategy;
+	}
+
+	public void applyAuditStrategy(@Nonnull AuditStrategy strategy) {
+		this.auditStrategy = strategy;
+	}
+
+	public void applyDefaultBatchFetchSize(int size) {
+		this.defaultBatchFetchSize = size;
+	}
+
+	public void applyMaximumFetchDepth(int depth) {
+		this.maximumFetchDepth = depth;
+	}
+
+	public void applySubselectFetchEnabled(boolean subselectFetchEnabled) {
+		this.subselectFetchEnabled = subselectFetchEnabled;
+	}
+
+	public void applyDefaultNullPrecedence(@Nonnull Nulls nullPrecedence) {
+		this.defaultNullPrecedence = nullPrecedence;
+	}
+
+	public void enableOrderingOfInserts(boolean enabled) {
+		this.orderInsertsEnabled = enabled;
+	}
+
+	public void enableOrderingOfUpdates(boolean enabled) {
+		this.orderUpdatesEnabled = enabled;
+	}
+
+	public void applyMultiTenancy(boolean enabled) {
+		this.multiTenancyEnabled = enabled;
+	}
+
+	public void applyCurrentTenantIdentifierResolver(@Nullable CurrentTenantIdentifierResolver<?> resolver) {
+		multiTenancy.setCurrentTenantIdentifierResolver( resolver );
+	}
+
+	public void applyTenantSchemaMapper(@Nullable TenantSchemaMapper<?> mapper) {
+		multiTenancy.setTenantSchemaMapper( mapper );
+	}
+
+	public void applyTenantCredentialsMapper(@Nullable TenantCredentialsMapper<?> mapper) {
+		multiTenancy.setTenantCredentialsMapper( mapper );
+	}
+
+	public void enableNamedQueryCheckingOnStartup(boolean enabled) {
+		this.namedQueryStartupCheckingEnabled = enabled;
+	}
+
+	public void enableSecondLevelCacheSupport(boolean enabled) {
+		this.secondLevelCacheEnabled = enabled;
+	}
+
+	public void enableQueryCacheSupport(boolean enabled) {
+		this.queryCacheEnabled = enabled;
+	}
+
+	public void applyQueryCacheLayout(@Nonnull CacheLayout queryCacheLayout) {
+		this.queryCacheLayout = queryCacheLayout;
+	}
+
+	public void applyTimestampsCacheFactory(@Nullable TimestampsCacheFactory factory) {
+		this.timestampsCacheFactory = factory;
+	}
+
+	public void applyCacheRegionPrefix(@Nullable String prefix) {
+		this.cacheRegionPrefix = prefix;
+	}
+
+	public void enableMinimalPuts(boolean enabled) {
+		this.minimalPutsEnabled = enabled;
+	}
+
+	public void enabledStructuredCacheEntries(boolean enabled) {
+		this.structuredCacheEntriesEnabled = enabled;
+	}
+
+	public void allowDirectReferenceCacheEntries(boolean enabled) {
+		this.directReferenceCacheEntriesEnabled = enabled;
+	}
+
+	public void enableAutoEvictCollectionCaches(boolean enabled) {
+		this.autoEvictCollectionCache = enabled;
+	}
+
+	public void applyJdbcBatchSize(int size) {
+		this.jdbcBatchSize = size;
+	}
+
+	public void enableScrollableResultSupport(boolean enabled) {
+		this.scrollableResultSetsEnabled = enabled;
+	}
+
+	public void enableGeneratedKeysSupport(boolean enabled) {
+		this.getGeneratedKeysEnabled = enabled;
+	}
+
+	public void applyJdbcFetchSize(int size) {
+		this.jdbcFetchSize = size;
+	}
+
+	public void applyConnectionHandlingMode(@Nonnull PhysicalConnectionHandlingMode mode) {
+		this.connectionHandlingMode = mode;
+	}
+
+	public void applyConnectionProviderDisablesAutoCommit(boolean providerDisablesAutoCommit) {
+		this.connectionProviderDisablesAutoCommit = providerDisablesAutoCommit;
+	}
+
+	public void enableCommentsSupport(boolean enabled) {
+		this.commentsEnabled = enabled;
+	}
+
+	public void applySqlFunction(@Nonnull String registrationName, @Nonnull SqmFunctionDescriptor sqlFunction) {
+		if ( sqlFunctions == null ) {
+			sqlFunctions = new HashMap<>();
+		}
+		sqlFunctions.put( registrationName, sqlFunction );
+	}
+
+	public void allowOutOfTransactionUpdateOperations(boolean allow) {
+		this.allowOutOfTransactionUpdateOperations = allow;
+	}
+
+	public void enableJpaQueryCompliance(boolean enabled) {
+		mutableJpaCompliance().setQueryCompliance( enabled );
+	}
+
+	private MutableJpaCompliance mutableJpaCompliance() {
+		if ( jpaCompliance instanceof MutableJpaCompliance mutableJpaCompliance ) {
+			return mutableJpaCompliance;
+		}
+		else {
+			throw new IllegalStateException( "JpaCompliance is no longer mutable" );
+		}
+	}
+
+	public void enableJpaTransactionCompliance(boolean enabled) {
+		mutableJpaCompliance().setTransactionCompliance( enabled );
+	}
+
+	public void enableJpaClosedCompliance(boolean enabled) {
+		mutableJpaCompliance().setClosedCompliance( enabled );
+	}
+
+	public void enableJpaProxyCompliance(boolean enabled) {
+		mutableJpaCompliance().setProxyCompliance( enabled );
+	}
+
+	public void enableJpaCachingCompliance(boolean enabled) {
+		mutableJpaCompliance().setCachingCompliance( enabled );
+	}
+
+	public void enableJpaOrderByMappingCompliance(boolean enabled) {
+		mutableJpaCompliance().setOrderByMappingCompliance( enabled );
+	}
+
+	@Remove
+	public void enableGeneratorNameScopeCompliance(boolean enabled) {
+		mutableJpaCompliance().setGeneratorNameScopeCompliance( enabled );
+	}
+
+
+	public void enableCollectionInDefaultFetchGroup(boolean enabled) {
+		this.collectionsInDefaultFetchGroupEnabled = enabled;
+	}
+
+	public void disableJtaTransactionAccess() {
+		this.jtaTransactionAccessEnabled = false;
+	}
+
+	@Nonnull
+	public SessionFactoryOptions buildOptions() {
+		if ( jpaCompliance instanceof MutableJpaCompliance mutableJpaCompliance ) {
+			jpaCompliance = mutableJpaCompliance.immutableCopy();
+		}
+		return this;
+	}
+
+	@Override
+	@Nullable
+	public CacheStoreMode getCacheStoreMode(@Nullable Map<String, Object> properties) {
+		return properties == null ? defaultCacheStoreMode : defaultCacheStoreMode( properties );
+	}
+
+	@Override
+	@Nullable
+	public CacheRetrieveMode getCacheRetrieveMode(@Nullable Map<String, Object> properties) {
+		return properties == null ? defaultCacheRetrieveMode : defaultCacheRetrieveMode( properties );
+	}
+
+	@Nullable
+	private static CacheRetrieveMode defaultCacheRetrieveMode(Map<String, Object> settings) {
+		final var cacheRetrieveMode = (CacheRetrieveMode) settings.get( JPA_SHARED_CACHE_RETRIEVE_MODE );
+		return cacheRetrieveMode == null
+				? (CacheRetrieveMode) settings.get( JAKARTA_SHARED_CACHE_RETRIEVE_MODE )
+				: cacheRetrieveMode;
+	}
+
+	@Nullable
+	private static CacheStoreMode defaultCacheStoreMode(Map<String, Object> settings) {
+		final var cacheStoreMode = (CacheStoreMode) settings.get( JPA_SHARED_CACHE_STORE_MODE );
+		return cacheStoreMode == null
+				? (CacheStoreMode) settings.get( JAKARTA_SHARED_CACHE_STORE_MODE )
+				: cacheStoreMode;
+	}
+
+	@Override
+	@Nonnull
+	public CacheMode getInitialSessionCacheMode() {
+		return initialSessionCacheMode;
+	}
+
+	@Override
+	@Nonnull
+	public FlushMode getInitialSessionFlushMode() {
+		return initialSessionFlushMode;
+	}
+
+	@Override
+	@Nonnull
+	public LockOptions getDefaultLockOptions() {
+		return defaultLockOptions;
+	}
+
+	@Nonnull
+	private static FlushMode defaultFlushMode(Map<String, Object> properties) {
+		return getFlushMode( properties.get( HibernateHints.HINT_FLUSH_MODE ), FlushMode.AUTO );
+	}
+
+	@Nonnull
+	private static LockOptions defaultLockOptions(Map<String, Object> defaultSessionProperties) {
+		final var lockOptions = new LockOptions();
+		applyPropertiesToLockOptions( defaultSessionProperties, () -> lockOptions );
+		return lockOptions;
+	}
+
+	@Override
+	@Nonnull
+	public Map<String, Object> getDefaultSessionProperties() {
+		return defaultSessionProperties;
+	}
+
+	@Override
+	@Nonnull
+	public GraphParserMode getGraphParserMode() {
+		return graphParserMode;
+	}
+
+	private Map<String, Object> initializeDefaultSessionProperties(ConfigurationService configurationService) {
+		final HashMap<String, Object> settings = new HashMap<>();
+
+		//Static defaults:
+		settings.putIfAbsent( HibernateHints.HINT_FLUSH_MODE, FlushMode.AUTO );
+		settings.putIfAbsent( JPA_LOCK_SCOPE, PessimisticLockScope.EXTENDED );
+		settings.putIfAbsent( JAKARTA_LOCK_SCOPE, PessimisticLockScope.EXTENDED );
+		settings.putIfAbsent( JPA_LOCK_TIMEOUT, WAIT_FOREVER_MILLI );
+		settings.putIfAbsent( JAKARTA_LOCK_TIMEOUT, WAIT_FOREVER_MILLI );
+		settings.putIfAbsent( JPA_SHARED_CACHE_RETRIEVE_MODE, CacheModeHelper.DEFAULT_RETRIEVE_MODE );
+		settings.putIfAbsent( JAKARTA_SHARED_CACHE_RETRIEVE_MODE, CacheModeHelper.DEFAULT_RETRIEVE_MODE );
+		settings.putIfAbsent( JPA_SHARED_CACHE_STORE_MODE, CacheModeHelper.DEFAULT_STORE_MODE );
+		settings.putIfAbsent( JAKARTA_SHARED_CACHE_STORE_MODE, CacheModeHelper.DEFAULT_STORE_MODE );
+
+		//Defaults defined by SessionFactory configuration:
+		final String[] ENTITY_MANAGER_SPECIFIC_PROPERTIES = {
+				SpecHints.HINT_SPEC_LOCK_SCOPE,
+				SpecHints.HINT_SPEC_LOCK_TIMEOUT,
+				SpecHints.HINT_SPEC_QUERY_TIMEOUT,
+				SpecHints.HINT_SPEC_CACHE_RETRIEVE_MODE,
+				SpecHints.HINT_SPEC_CACHE_STORE_MODE,
+
+				HibernateHints.HINT_FLUSH_MODE,
+
+				LegacySpecHints.HINT_JAVAEE_LOCK_SCOPE,
+				LegacySpecHints.HINT_JAVAEE_LOCK_TIMEOUT,
+				LegacySpecHints.HINT_JAVAEE_CACHE_RETRIEVE_MODE,
+				LegacySpecHints.HINT_JAVAEE_CACHE_STORE_MODE,
+				LegacySpecHints.HINT_JAVAEE_QUERY_TIMEOUT
+		};
+
+		final var configurationServiceSettings = configurationService.getSettings();
+		for ( String key : ENTITY_MANAGER_SPECIFIC_PROPERTIES ) {
+			if ( configurationServiceSettings.containsKey( key ) ) {
+				settings.put( key, configurationServiceSettings.get( key ) );
+			}
+		}
+		return unmodifiableMap( settings );
+	}
+}

@@ -1,0 +1,28 @@
+package org.hibernate.community.dialect.temptable.internal;
+
+import org.hibernate.dialect.temptable.spi.StandardGlobalTemporaryTableStrategy;
+
+/**
+ * Ingres specific global temporary table strategy.
+ *
+ * @author Steve Ebersole
+ */
+public class IngresGlobalTemporaryTableStrategy extends StandardGlobalTemporaryTableStrategy {
+
+	public static final IngresGlobalTemporaryTableStrategy INSTANCE = new IngresGlobalTemporaryTableStrategy();
+
+	@Override
+	public String adjustTemporaryTableName(String desiredTableName) {
+		return "session." + desiredTableName;
+	}
+
+	@Override
+	public String getTemporaryTableCreateOptions() {
+		return "on commit preserve rows with norecovery";
+	}
+
+	@Override
+	public String getTemporaryTableCreateCommand() {
+		return "declare global temporary table";
+	}
+}

@@ -1,0 +1,143 @@
+package org.hibernate.boot.jaxb.mapping.spi;
+
+import java.util.List;
+
+import org.hibernate.boot.internal.LimitedCollectionClassification;
+
+import jakarta.persistence.EnumType;
+import jakarta.persistence.TemporalType;
+
+/**
+ * JAXB binding interface for plural attributes
+ *
+ * @author Brett Meyer
+ */
+public interface JaxbPluralAttribute extends JaxbPersistentAttribute, JaxbLockableAttribute, JaxbStandardAttribute {
+	JaxbPluralFetchModeImpl getFetchMode();
+	void setFetchMode(JaxbPluralFetchModeImpl mode);
+
+	JaxbCollectionUserTypeImpl getCollectionType();
+	void setCollectionType(JaxbCollectionUserTypeImpl value);
+
+	JaxbCollectionIdImpl getCollectionId();
+	void setCollectionId(JaxbCollectionIdImpl id);
+
+	Integer getBatchSize();
+	void setBatchSize(Integer size);
+
+	LimitedCollectionClassification getClassification();
+	void setClassification(LimitedCollectionClassification value);
+
+	String getOrderBy();
+	void setOrderBy(String value);
+
+	JaxbOrderColumnImpl getOrderColumn();
+	void setOrderColumn(JaxbOrderColumnImpl value);
+
+	Integer getListIndexBase();
+	void setListIndexBase(Integer value);
+
+	String getSort();
+	void setSort(String value);
+
+	JaxbPluralAnyMappingImpl.JaxbSortNaturalImpl getSortNatural();
+	void setSortNatural(JaxbPluralAnyMappingImpl.JaxbSortNaturalImpl value);
+
+	JaxbMapKeyImpl getMapKey();
+	void setMapKey(JaxbMapKeyImpl value);
+
+	JaxbMapKeyClassImpl getMapKeyClass();
+	void setMapKeyClass(JaxbMapKeyClassImpl value);
+
+	TemporalType getMapKeyTemporal();
+
+	void setMapKeyTemporal(TemporalType value);
+
+	EnumType getMapKeyEnumerated();
+
+	void setMapKeyEnumerated(EnumType value);
+
+	List<JaxbAttributeOverrideImpl> getMapKeyAttributeOverrides();
+
+	List<JaxbConvertImpl> getMapKeyConverts();
+
+	JaxbMapKeyColumnImpl getMapKeyColumn();
+
+	String getMapKeyFormula();
+
+	void setMapKeyColumn(JaxbMapKeyColumnImpl value);
+
+	JaxbUserTypeImpl getMapKeyType();
+
+	void setMapKeyType(JaxbUserTypeImpl value);
+
+	String getMapKeyJavaType();
+
+	void setMapKeyJavaType(String value);
+
+	String getMapKeyJdbcType();
+
+	void setMapKeyJdbcType(String value);
+
+	Integer getMapKeyJdbcTypeCode();
+
+	void setMapKeyJdbcTypeCode(Integer value);
+
+	String getMapKeyJdbcTypeName();
+
+	void setMapKeyJdbcTypeName(String value);
+
+	List<JaxbMapKeyJoinColumnImpl> getMapKeyJoinColumns();
+
+	JaxbForeignKeyImpl getMapKeyForeignKey();
+
+	void setMapKeyForeignKey(JaxbForeignKeyImpl value);
+
+	Boolean isMutable();
+	void setMutable(Boolean mutable);
+
+	JaxbEmptyTypeImpl getExcludeFromTemporalVersioning();
+	void setExcludeFromTemporalVersioning(JaxbEmptyTypeImpl value);
+
+	JaxbTemporalVersioningImpl getTemporalVersioning();
+	void setTemporalVersioning(JaxbTemporalVersioningImpl value);
+
+	JaxbEmptyTypeImpl getExcludeFromAuditing();
+	void setExcludeFromAuditing(JaxbEmptyTypeImpl value);
+
+	JaxbAuditedImpl getAudited();
+	void setAudited(JaxbAuditedImpl value);
+
+	String getSqlRestriction();
+	void setSqlRestriction(String sqlRestriction);
+
+	JaxbSqlSelectImpl getSqlSelect();
+	void setSqlSelect(JaxbSqlSelectImpl value);
+
+	String getHqlSelect();
+	void setHqlSelect(String value);
+
+	JaxbCustomSqlImpl getSqlInsert();
+	void setSqlInsert(JaxbCustomSqlImpl sqlInsert);
+
+	JaxbCustomSqlImpl getSqlUpdate();
+	void setSqlUpdate(JaxbCustomSqlImpl sqlUpdate);
+
+	JaxbCustomSqlImpl getSqlDelete();
+	void setSqlDelete(JaxbCustomSqlImpl sqlDelete);
+
+	JaxbCustomSqlImpl getSqlDeleteAll();
+	void setSqlDeleteAll(JaxbCustomSqlImpl sqlDeleteAll);
+
+	List<JaxbFilterImpl> getFilters();
+
+	@Override
+	default Boolean isOptional() {
+		return null;
+	}
+
+	@Override
+	default void setOptional(Boolean optional) {
+
+	}
+}

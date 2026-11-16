@@ -1,0 +1,11 @@
+package org.hibernate.action.queue.spi.decompose.collection;
+
+import org.hibernate.Incubating;
+
+/// Marker interface for one-to-many collection decomposers
+///
+/// @author Steve Ebersole
+/// @since 8.0
+@Incubating(since = "8.0", group = "action-queue")
+public interface OneToManyDecomposer extends CollectionDecomposer {
+}

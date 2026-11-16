@@ -1,0 +1,75 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Objects;
+
+import org.hibernate.Incubating;
+import org.hibernate.NonUniqueResultException;
+
+/**
+ * Defines some processing performed on the overall result {@link List}
+ * of a {@link Query} before the result list is returned to the caller.
+ *
+ * @param <T> The result list element type
+ *
+ * @see SelectionQuery#setResultListTransformer
+ * @see SelectionQuery#getResultList
+ * @see SelectionQuery#list
+ * @see TupleTransformer
+ *
+ * @author Steve Ebersole
+ * @author Gavin King
+ *
+ * @since 6.0
+ */
+@Incubating(since = "6.0")
+@FunctionalInterface
+public interface ResultListTransformer<T> {
+	/**
+	 * Here we have an opportunity to perform transformation on the
+	 * query result as a whole. This might be useful to convert from
+	 * one collection type to another or to remove duplicates from the
+	 * result, etc.
+	 *
+	 * @param resultList The result list as would otherwise be returned
+	 *                   by the {@code Query} without the intervention
+	 *                   of this {@code ResultListTransformer}
+	 *
+	 * @return The transformed result.
+	 */
+	@Nonnull
+	List<T> transformList(@Nonnull List<T> resultList);
+
+	/**
+	 * A {@code ResultListTransformer} which collapses a list of results
+	 * into a single result when all results are equal, or throws
+	 * {@link NonUniqueResultException} otherwise.
+	 *
+	 * @param <T> The result list element type
+	 *
+	 * @since 7.3
+	 */
+	@Nonnull
+	static <T> ResultListTransformer<T> uniqueResultTransformer() {
+		return resultList ->
+				switch ( resultList.size() ) {
+					case 0, 1 -> resultList;
+					default -> {
+						final var first = resultList.get( 0 );
+						for ( int i = 1; i < resultList.size(); i++ ) {
+							final T current = resultList.get( i );
+							if ( !Objects.equals( first, current )
+									// also consider case of multiple select items in an Object[]
+									&& !( first instanceof Object[] array
+											&& !Arrays.equals( array, (Object[]) current ) ) ) {
+								throw new NonUniqueResultException( resultList.size() );
+							}
+						}
+						yield List.of( first );
+					}
+				};
+	}
+}

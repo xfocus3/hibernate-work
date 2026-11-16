@@ -1,0 +1,230 @@
+package org.hibernate.mapping;
+
+import java.io.Serializable;
+import java.util.List;
+import java.util.Set;
+
+import org.hibernate.Incubating;
+import org.hibernate.Internal;
+import org.hibernate.MappingException;
+import org.hibernate.Remove;
+import org.hibernate.boot.model.naming.Identifier;
+import org.hibernate.boot.spi.MetadataBuildingContext;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.MetaType;
+import org.hibernate.type.Type;
+import org.hibernate.type.MappingContext;
+
+/**
+ * A mapping model object which represents something that's persisted "by value",
+ * instead of "by reference", that is, anything with no primary key.
+ * <p>
+ * A {@code Value} is essentially a Hibernate {@link Type}, together with zero or
+ * more {@link Column columns}. In the mapping model, a {@code Value} always comes
+ * wrapped in something with higher-level semantics, for example, a property, a
+ * collection, or a class.
+ *
+ * @author Gavin King
+ */
+public interface Value extends Serializable {
+
+	/**
+	 * The number of columns and formulas in the mapping.
+	 */
+	int getColumnSpan();
+
+	/**
+	 * The mapping to columns and formulas.
+	 */
+	List<Selectable> getSelectables();
+
+	/**
+	 * If the mapping involves only columns, return them.
+	 *
+	 * @throws org.hibernate.AssertionFailure if the mapping involves formulas
+	 */
+	List<Column> getColumns();
+
+	/**
+	 * Does the mapping involve at least one column?
+	 *
+	 * @since 7.3
+	 */
+	boolean hasColumns();
+
+	/**
+	 * Same as {@link #getSelectables()} except it returns the PK for the
+	 * non-owning side of a one-to-one association.
+	 */
+	default List<Selectable> getVirtualSelectables() {
+		return getSelectables();
+	}
+
+	/**
+	 * Same as {@link #getColumns()} except it returns the PK for the
+	 * non-owning side of a one-to-one association.
+	 *
+	 * @throws org.hibernate.AssertionFailure if the mapping involves formulas
+	 */
+	default List<Column> getConstraintColumns() {
+		return getColumns();
+	}
+
+	Type getType() throws MappingException;
+
+	@Incubating(since = "6.2")
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	default JdbcMapping getSelectableType(MappingContext mappingContext, int index) throws MappingException {
+		return getType( mappingContext, getType(), index );
+	}
+
+	private JdbcMapping getType(MappingContext factory, Type elementType, int index) {
+		if ( elementType instanceof CompositeType compositeType ) {
+			for ( final var subtype : compositeType.getSubtypes() ) {
+				final int columnSpan =
+						subtype instanceof EntityType entityType
+								? getIdType( entityType ).getColumnSpan( factory )
+								: subtype.getColumnSpan( factory );
+				if ( columnSpan < index ) {
+					index -= columnSpan;
+				}
+				else if ( columnSpan != 0 ) {
+					return getType( factory, subtype, index );
+				}
+			}
+			// Should never happen
+			throw new IllegalStateException( "Type index is past the types column span!" );
+		}
+		else if ( elementType instanceof EntityType entityType ) {
+			return getType( factory, getIdType( entityType ), index );
+		}
+		else if ( elementType instanceof MetaType metaType ) {
+			return (JdbcMapping) metaType.getBaseType();
+		}
+		else {
+			return (JdbcMapping) elementType;
+		}
+	}
+
+	private Type getIdType(EntityType entityType) {
+		final var entityBinding =
+				getBuildingContext().getMetadataCollector()
+						.getEntityBinding( entityType.getAssociatedEntityName() );
+		return entityType.isReferenceToPrimaryKey()
+				? entityBinding.getIdentifier().getType()
+				: entityBinding.getProperty( entityType.getRHSUniqueKeyPropertyName() ).getType();
+	}
+
+	/**
+	 * The fetch style explicitly requested via mapping (e.g.
+	 * {@link org.hibernate.annotations.Fetch @Fetch}), or {@code null}
+	 * if unspecified — in which case the runtime resolves the style
+	 * from metadata such as batch size and proxy presence.
+	 */
+	FetchStyle getFetchStyle();
+
+	Table getTable();
+
+	boolean hasFormula();
+
+	boolean isAlternateUniqueKey();
+
+	boolean isPartitionKey();
+
+	boolean isNullable();
+
+	@Remove
+	void createForeignKey();
+
+	// called when this is the foreign key of a
+	// @OneToOne with a FK, or a @OneToMany with
+	// a join table
+	@Remove
+	void createUniqueKey(MetadataBuildingContext context);
+
+	boolean isSimpleValue();
+
+	boolean isValid(MappingContext mappingContext) throws MappingException;
+
+	void setTypeUsingReflection(String className, String propertyName) throws MappingException;
+
+	Object accept(ValueVisitor visitor);
+
+	boolean isSame(Value other);
+
+	boolean[] getColumnInsertability();
+
+	boolean hasAnyInsertableColumns();
+
+	boolean[] getColumnUpdateability();
+
+	boolean hasAnyUpdatableColumns();
+
+	void setNonUpdatable();
+	void setNonInsertable();
+
+	@Incubating(since = "6.2")
+	@Remove
+	default MetadataBuildingContext getBuildingContext() {
+		throw new UnsupportedOperationException( "Value#getBuildingContext is not implemented by: " + getClass().getName() );
+	}
+
+	@Remove
+	ServiceRegistry getServiceRegistry();
+
+	Value copy();
+
+	boolean isColumnInsertable(int index);
+
+	boolean isColumnUpdateable(int index);
+
+	@Incubating(since = "6.2")
+	default String getExtraCreateTableInfo() {
+		return "";
+	}
+
+	/**
+	 * Checks if this value contains any duplicate column. A column
+	 * is considered duplicate when its {@link Column#getName() name} is
+	 * already contained in the {@code distinctColumn} set.
+	 * <p>
+	 * If a duplicate column is found, a {@link MappingException} is thrown.
+	 *
+	 * @param distinctColumns set containing the names of the columns to check
+	 * @param owner the owner of this value, used just for error reporting
+	 */
+	@Internal
+	default void checkColumnDuplication(Set<QualifiedColumnName> distinctColumns, String owner) {
+		for ( int i = 0; i < getSelectables().size(); i++ ) {
+			if ( getSelectables().get( i ) instanceof Column column
+					&& ( isColumnInsertable( i ) || isColumnUpdateable( i ) ) ) {
+				final var primaryTable = getTable();
+				final Identifier catalog;
+				final Identifier schema;
+				final Identifier table;
+				if ( primaryTable != null ) {
+					catalog = primaryTable.getCatalogIdentifier();
+					schema = primaryTable.getSchemaIdentifier();
+					table = primaryTable.getNameIdentifier();
+				}
+				else {
+					catalog = null;
+					schema = null;
+					table = null;
+				}
+				final var columnName = column.getNameIdentifier( getBuildingContext() );
+				if ( !distinctColumns.add( new QualifiedColumnName( catalog, schema, table, columnName ) ) ){
+					throw new MappingException(
+							"Column '" + column.getName()
+									+ "' is duplicated in mapping for " + owner
+									+ " (use '@Column(insertable=false, updatable=false)' when mapping multiple properties to the same column)"
+					);
+				}
+			}
+		}
+	}
+}

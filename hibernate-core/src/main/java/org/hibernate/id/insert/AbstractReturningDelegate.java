@@ -1,0 +1,136 @@
+package org.hibernate.id.insert;
+
+import org.hibernate.action.queue.spi.plan.FlushOperation;
+import org.hibernate.engine.jdbc.mutation.JdbcValueBindings;
+import org.hibernate.engine.jdbc.mutation.group.PreparedStatementDetails;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.EventType;
+import org.hibernate.generator.values.AbstractGeneratedValuesMutationDelegate;
+import org.hibernate.generator.values.GeneratedValues;
+import org.hibernate.metamodel.mapping.ModelPart;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.sql.spi.mutation.jdbc.PreparableMutationOperation;
+
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import java.util.List;
+
+import static org.hibernate.pretty.MessageHelper.infoString;
+
+/**
+ * Abstract {@link org.hibernate.generator.values.GeneratedValuesMutationDelegate} implementation where
+ * the underlying strategy causes the generated identifier to be returned as
+ * an effect of performing the insert statement.  Thus, there is no need for
+ * an additional sql statement to determine the generated identifier.
+ *
+ * @author Steve Ebersole
+ */
+public abstract class AbstractReturningDelegate
+		extends AbstractGeneratedValuesMutationDelegate
+		implements InsertGeneratedIdentifierDelegate {
+
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	public AbstractReturningDelegate(
+			EntityPersister persister,
+			EventType timing,
+			boolean supportsArbitraryValues,
+			boolean supportsRowId) {
+		super( persister, timing, supportsArbitraryValues, supportsRowId );
+	}
+
+	public AbstractReturningDelegate(
+			EntityPersister persister,
+			EventType timing,
+			boolean supportsArbitraryValues,
+			boolean supportsRowId,
+			List<? extends ModelPart> generatedProperties) {
+		super( persister, timing, supportsArbitraryValues, supportsRowId, generatedProperties );
+	}
+
+	@Override
+	public GeneratedValues performGraphMutation(
+			FlushOperation operation,
+			Object entity,
+			SharedSessionContractImplementor session) {
+		var jdbcOperation = (PreparableMutationOperation) operation.getJdbcOperation();
+		final String sql = jdbcOperation.getSqlString();
+		session.getJdbcServices().getSqlStatementLogger().logStatement( sql );
+
+		final PreparedStatement preparedStatement = prepareStatement( sql, session );
+		try {
+
+			var valueBindings = new org.hibernate.action.queue.spi.bind.JdbcValueBindings(
+					operation.getMutatingTableDescriptor(),
+					jdbcOperation
+			);
+
+			operation.getBindPlan().bindValues( valueBindings, operation, session );
+			valueBindings.beforeStatement( preparedStatement, session );
+			return executeAndExtractReturning( sql, preparedStatement, session, operation );
+		}
+		finally {
+			session.getJdbcCoordinator().getLogicalConnection().getResourceRegistry().release( preparedStatement );
+			session.getJdbcCoordinator().afterStatementExecution();
+		}
+	}
+
+	@Override
+	public GeneratedValues performMutation(
+			PreparedStatementDetails statementDetails,
+			JdbcValueBindings valueBindings,
+			Object entity,
+			SharedSessionContractImplementor session) {
+		final String sql = statementDetails.getSqlString();
+		session.getJdbcServices().getSqlStatementLogger().logStatement( sql );
+		session.getJdbcSessionContext().getStatementObserver().performingSql( sql, -1 );
+		try {
+			valueBindings.beforeStatement( statementDetails );
+			return executeAndExtractReturning( sql, statementDetails.getStatement(), session );
+		}
+		finally {
+			if ( statementDetails.getStatement() != null ) {
+				statementDetails.releaseStatement( session );
+			}
+			valueBindings.afterStatement( statementDetails.getMutatingTableDetails() );
+			session.getJdbcCoordinator().afterStatementExecution();
+		}
+	}
+
+	@Override
+	public final GeneratedValues performInsertReturning(String sql, SharedSessionContractImplementor session, Binder binder) {
+		session.getJdbcServices().getSqlStatementLogger().logStatement( sql );
+		session.getJdbcSessionContext().getStatementObserver().performingSql( sql, -1 );
+		// prepare and execute the insert
+		final var insert = prepareStatement( sql, session );
+		try {
+			binder.bindValues( insert );
+			return executeAndExtractReturning( sql, insert, session );
+		}
+		catch (SQLException sqle) {
+			throw session.getJdbcServices().getSqlExceptionHelper().convert(
+					sqle,
+					"Could not insert: " + infoString( persister ),
+					sql
+			);
+		}
+		finally {
+			final var jdbcCoordinator = session.getJdbcCoordinator();
+			jdbcCoordinator.getLogicalConnection().getResourceRegistry().release( insert );
+			jdbcCoordinator.afterStatementExecution();
+		}
+	}
+
+	protected abstract GeneratedValues executeAndExtractReturning(
+			String sql,
+			PreparedStatement preparedStatement,
+			SharedSessionContractImplementor session);
+
+	/// Graph mutations may use their operation-specific result checker while extracting values.
+	protected GeneratedValues executeAndExtractReturning(
+			String sql,
+			PreparedStatement preparedStatement,
+			SharedSessionContractImplementor session,
+			FlushOperation operation) {
+		return executeAndExtractReturning( sql, preparedStatement, session );
+	}
+}

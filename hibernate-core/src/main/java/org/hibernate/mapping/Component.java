@@ -1,0 +1,963 @@
+package org.hibernate.mapping;
+
+import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+
+import org.hibernate.Internal;
+import org.hibernate.MappingException;
+import org.hibernate.Remove;
+import org.hibernate.boot.model.internal.GeneratorBinder;
+import org.hibernate.boot.model.relational.Database;
+import org.hibernate.boot.model.relational.ExportableProducer;
+import org.hibernate.boot.model.relational.QualifiedName;
+import org.hibernate.boot.model.relational.SqlStringGenerationContext;
+import org.hibernate.boot.model.source.internal.hbm.MappingDocument;
+import org.hibernate.boot.registry.classloading.spi.ClassLoadingException;
+import org.hibernate.boot.spi.MetadataBuildingContext;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.generator.BeforeExecutionGenerator;
+import org.hibernate.generator.Generator;
+import org.hibernate.id.CompositeNestedGeneratedValueGenerator;
+import org.hibernate.id.CompositeNestedGeneratedValueGenerator.GenerationPlan;
+import org.hibernate.id.Configurable;
+import org.hibernate.internal.util.ReflectHelper;
+import org.hibernate.internal.util.collections.ArrayHelper;
+import org.hibernate.internal.util.collections.CollectionHelper;
+import org.hibernate.metamodel.mapping.DiscriminatorType;
+import org.hibernate.metamodel.mapping.internal.EmbeddableDiscriminatorConverter;
+import org.hibernate.metamodel.mapping.internal.DiscriminatorTypeImpl;
+import org.hibernate.metamodel.spi.EmbeddableInstantiator;
+import org.hibernate.persister.entity.DiscriminatorHelper;
+import org.hibernate.models.spi.ClassDetails;
+import org.hibernate.property.access.spi.PropertyAccessorService;
+import org.hibernate.property.access.spi.PropertyValueAccessor;
+import org.hibernate.resource.beans.internal.FallbackBeanInstanceProducer;
+import org.hibernate.type.ComponentType;
+import org.hibernate.type.CompositeType;
+import org.hibernate.type.EmbeddedComponentType;
+import org.hibernate.type.UserComponentType;
+import org.hibernate.type.MappingContext;
+import org.hibernate.usertype.CompositeUserType;
+
+import static java.util.Collections.unmodifiableList;
+import static java.util.stream.Collectors.toList;
+import static org.hibernate.internal.util.StringHelper.qualify;
+import static org.hibernate.mapping.MappingHelper.checkPropertyColumnDuplication;
+import static org.hibernate.mapping.MappingHelper.classForName;
+import static org.hibernate.metamodel.mapping.EntityDiscriminatorMapping.DISCRIMINATOR_ROLE_NAME;
+
+/**
+ * A mapping model object that represents an {@linkplain jakarta.persistence.Embeddable embeddable class}.
+ *
+ * @apiNote The name of this class is historical and unfortunate. It reflects modeling a *composition*
+ *          of state. It has absolutely nothing to do with modularity in software engineering.
+ *
+ * @author Gavin King
+ * @author Steve Ebersole
+ */
+public class Component extends SimpleValue implements AttributeContainer, MetaAttributable, SortableValue {
+
+	private String componentClassName;
+	private boolean embedded;
+	private String parentProperty;
+	private PersistentClass owner;
+	private boolean dynamic;
+	private boolean isKey;
+	private transient Boolean isGeneric;
+	private String roleName;
+	private MappedSuperclass mappedSuperclass;
+	private Value discriminator;
+	private transient DiscriminatorType<?> discriminatorType;
+	private Map<Object, String> discriminatorValues;
+	private Map<String, String> subclassToSuperclass;
+
+	private final ArrayList<Property> properties = new ArrayList<>();
+	private Map<Property, String> propertyDeclaringClasses;
+	private int[] originalPropertyOrder = ArrayHelper.EMPTY_INT_ARRAY;
+	private Map<String,MetaAttribute> metaAttributes;
+
+	private Class<? extends EmbeddableInstantiator> customInstantiator;
+	private Constructor<?> instantiator;
+	private String[] instantiatorPropertyNames;
+
+	// cache the status of the type
+	private transient volatile CompositeType type;
+
+	private AggregateColumn aggregateColumn;
+	private AggregateColumn parentAggregateColumn;
+	private QualifiedName structName;
+	private String[] structColumnNames;
+	private transient Class<?> componentClass;
+	private transient Boolean simpleRecord;
+	private String columnNamingPattern;
+
+	private boolean tableWasExplicit;
+
+	public Component(MetadataBuildingContext metadata, PersistentClass owner) throws MappingException {
+		this( metadata, owner.getTable(), owner );
+	}
+
+	public Component(MetadataBuildingContext metadata, Component component) throws MappingException {
+		this( metadata, component.getTable(), component.getOwner() );
+	}
+
+	public Component(MetadataBuildingContext metadata, Join join) throws MappingException {
+		this( metadata, join.getTable(), join.getPersistentClass() );
+	}
+
+	public Component(MetadataBuildingContext metadata, Collection collection) throws MappingException {
+		this( metadata, collection.getCollectionTable(), collection.getOwner() );
+	}
+
+	public Component(MetadataBuildingContext metadata, Table table, PersistentClass owner) throws MappingException {
+		super( metadata, table );
+		this.owner = owner;
+		metadata.getMetadataCollector().registerComponent( this );
+	}
+
+	private Component(Component original) {
+		super( original );
+		this.properties.addAll( original.properties );
+		this.originalPropertyOrder = original.originalPropertyOrder == null ? null : original.originalPropertyOrder.clone();
+		this.propertyDeclaringClasses = original.propertyDeclaringClasses;
+		this.componentClassName = original.componentClassName;
+		this.componentClass = original.componentClass;
+		this.embedded = original.embedded;
+		this.parentProperty = original.parentProperty;
+		this.owner = original.owner;
+		this.dynamic = original.dynamic;
+		this.isGeneric = original.isGeneric;
+		this.metaAttributes = original.metaAttributes == null ? null : new HashMap<>( original.metaAttributes );
+		this.isKey = original.isKey;
+		this.roleName = original.roleName;
+		this.discriminator = original.discriminator;
+		this.discriminatorValues = original.discriminatorValues;
+		this.subclassToSuperclass = original.subclassToSuperclass;
+		this.customInstantiator = original.customInstantiator;
+		this.type = original.type;
+	}
+
+	@Override
+	public Component copy() {
+		return new Component( this );
+	}
+
+	public int getPropertySpan() {
+		return properties.size();
+	}
+
+	public List<Property> getProperties() {
+		return properties;
+	}
+
+	public void setTable(Table table) {
+		if ( !tableWasExplicit ) {
+			super.setTable( table );
+		}
+
+		// otherwise, ignore it...
+	}
+
+	public void setTable(Table table, boolean wasExplicit) {
+		super.setTable( table );
+		tableWasExplicit = wasExplicit;
+	}
+
+	public boolean wasTableExplicitlyDefined() {
+		return tableWasExplicit;
+	}
+
+	public void addProperty(Property p, ClassDetails declaringClass) {
+		properties.add( p );
+		if ( isPolymorphic() && declaringClass != null ) {
+			if ( propertyDeclaringClasses == null ) {
+				propertyDeclaringClasses = new HashMap<>();
+			}
+			propertyDeclaringClasses.put( p, declaringClass.getName() );
+		}
+	}
+
+	@Override
+	public void addProperty(Property p) {
+		addProperty( p, null );
+	}
+
+	public String getPropertyDeclaringClass(Property p) {
+		if ( propertyDeclaringClasses != null ) {
+			return propertyDeclaringClasses.get( p );
+		}
+		return null;
+	}
+
+	@Override
+	public void addColumn(Column column) {
+		throw new UnsupportedOperationException("Cant add a column to a component");
+	}
+
+	@Override
+	public List<Selectable> getSelectables() {
+		final List<Selectable> selectables = new ArrayList<>( properties.size() + 2 );
+		for ( var property : properties ) {
+			selectables.addAll( property.getSelectables() );
+		}
+		if ( discriminator != null ) {
+			selectables.addAll( discriminator.getSelectables() );
+		}
+		return unmodifiableList( selectables );
+	}
+
+	@Override
+	public List<Column> getColumns() {
+		final List<Column> columns = new ArrayList<>( properties.size() + 2 );
+		for ( var property : properties ) {
+			columns.addAll( property.getValue().getColumns() );
+		}
+		if ( discriminator != null ) {
+			columns.addAll( discriminator.getColumns() );
+		}
+		return unmodifiableList( columns );
+	}
+
+	public boolean isEmbedded() {
+		return embedded;
+	}
+
+	public AggregateColumn getAggregateColumn() {
+		return aggregateColumn;
+	}
+
+	public void setAggregateColumn(AggregateColumn aggregateColumn) {
+		this.aggregateColumn = aggregateColumn;
+		notifyPropertiesAboutAggregateColumn( aggregateColumn, this );
+	}
+
+	@Override
+	public int getColumnSpan() {
+		return getSelectables().size();
+	}
+
+	@Override
+	public boolean hasColumns() {
+		for ( var property : properties ) {
+			if ( property.hasColumns() ) {
+				return true;
+			}
+		}
+		return discriminator != null
+			&& discriminator.hasColumns();
+	}
+
+	public List<Column> getAggregatedColumns() {
+		final List<Column> aggregatedColumns = new ArrayList<>( getPropertySpan() );
+		collectAggregatedColumns( aggregatedColumns, this );
+		return aggregatedColumns;
+	}
+
+	private void collectAggregatedColumns(List<Column> aggregatedColumns, Component component) {
+		for ( var property : component.getProperties() ) {
+			if ( property.getValue() instanceof Component subComponent ) {
+				final var subAggregate = subComponent.getAggregateColumn();
+				if ( subAggregate != null ) {
+					aggregatedColumns.add( subAggregate );
+				}
+				else {
+					collectAggregatedColumns( aggregatedColumns, subComponent );
+				}
+			}
+			else {
+				aggregatedColumns.addAll( property.getValue().getColumns() );
+			}
+		}
+		if ( component.isPolymorphic() ) {
+			aggregatedColumns.addAll( component.getDiscriminator().getColumns() );
+		}
+	}
+
+	private void notifyPropertiesAboutAggregateColumn(AggregateColumn aggregateColumn, Component component) {
+		for ( var property : component.getProperties() ) {
+			// Let the BasicValue of every sub-column know about the aggregate,
+			// which is needed in type resolution
+			final var value = property.getValue();
+			if ( value instanceof BasicValue basicValue ) {
+				assert basicValue.getResolution() == null;
+				basicValue.setAggregateColumn( aggregateColumn );
+			}
+			else if ( value instanceof Component subComponent ) {
+				if ( subComponent.getAggregateColumn() == null ) {
+					subComponent.notifyPropertiesAboutAggregateColumn( aggregateColumn, subComponent );
+				}
+				else {
+					subComponent.setParentAggregateColumn( aggregateColumn );
+				}
+			}
+		}
+		if ( component.isPolymorphic() ) {
+			( (BasicValue) component.getDiscriminator() ).setAggregateColumn( aggregateColumn );
+		}
+	}
+
+	public AggregateColumn getParentAggregateColumn() {
+		return parentAggregateColumn;
+	}
+
+	public void setParentAggregateColumn(AggregateColumn parentAggregateColumn) {
+		this.parentAggregateColumn = parentAggregateColumn;
+	}
+
+	public QualifiedName getStructName() {
+		return structName;
+	}
+
+	public void setStructName(QualifiedName structName) {
+		this.structName = structName;
+	}
+
+	@Override
+	public void checkColumnDuplication(Set<QualifiedColumnName> distinctColumns, String owner) {
+		if ( aggregateColumn == null ) {
+			if ( isPolymorphic() ) {
+				// We can allow different subtypes reusing the same columns
+				// since only one subtype can exist at one time
+				final Map<String, Set<QualifiedColumnName>> distinctColumnsByClass = new HashMap<>();
+				for ( var prop : properties ) {
+					if ( prop.isUpdatable() || prop.isInsertable() ) {
+						final String declaringClass = propertyDeclaringClasses.get( prop );
+						final Set<QualifiedColumnName> set = distinctColumnsByClass.computeIfAbsent(
+								declaringClass,
+								k -> new HashSet<>( distinctColumns )
+						);
+						prop.getValue().checkColumnDuplication( set, owner );
+					}
+				}
+				for ( var columns : distinctColumnsByClass.values() ) {
+					distinctColumns.addAll( columns );
+				}
+			}
+			else {
+				checkPropertyColumnDuplication( distinctColumns, getProperties(), owner );
+			}
+		}
+		else {
+			checkPropertyColumnDuplication( new HashSet<>(), getProperties(), "component '" + getRoleName() + "'" );
+			aggregateColumn.getValue().checkColumnDuplication( distinctColumns, owner );
+		}
+	}
+
+	public String getComponentClassName() {
+		return componentClassName;
+	}
+
+	public Class<?> getComponentClass() throws MappingException {
+		if ( componentClass == null ) {
+			if ( componentClassName == null ) {
+				return null;
+			}
+			else {
+				if ( dynamic ) {
+					return null;
+				}
+				try {
+					componentClass = classForName( componentClassName, getBootstrapContext() );
+				}
+				catch (ClassLoadingException e) {
+					throw new MappingException( "Embeddable class not found: " + componentClassName, e );
+				}
+			}
+		}
+		return componentClass;
+	}
+
+	public PersistentClass getOwner() {
+		return owner;
+	}
+
+	public String getParentProperty() {
+		return parentProperty;
+	}
+
+	/**
+	 * @apiNote This method will be removed in 9.0.
+	 */
+	@Remove
+	public void setComponentClassName(String componentClass) {
+		this.componentClassName = componentClass;
+		if ( this.dynamic ) {
+			this.roleName = componentClassName;
+		}
+		this.componentClass = null;
+		this.simpleRecord = null;
+	}
+
+	public void setEmbedded(boolean embedded) {
+		this.embedded = embedded;
+	}
+
+	public void setOwner(PersistentClass owner) {
+		this.owner = owner;
+	}
+
+	public void setParentProperty(String parentProperty) {
+		this.parentProperty = parentProperty;
+	}
+
+	public boolean isDynamic() {
+		return dynamic;
+	}
+
+	/**
+	 * @apiNote This method will be removed in 9.0.
+	 */
+	@Remove
+	public void setDynamic(boolean dynamic) {
+		this.dynamic = dynamic;
+		if ( dynamic ) {
+			isGeneric = false;
+		}
+	}
+
+	private CompositeUserType<?> createCompositeUserType(Component component) {
+		final var buildingContext = getBuildingContext();
+		final var bootstrapContext = buildingContext.getBootstrapContext();
+		final var clazz = classForName( CompositeUserType.class, component.getTypeName(), bootstrapContext );
+		return buildingContext.getBuildingOptions().isAllowExtensionsInCdi()
+				? bootstrapContext.getManagedBeanRegistry().getBean( clazz ).getBeanInstance()
+				: FallbackBeanInstanceProducer.INSTANCE.produceBeanInstance( clazz );
+	}
+
+	@Override
+	public boolean contains(Property property) {
+		return properties.contains( property );
+	}
+
+	@Override
+	public CompositeType getType() throws MappingException {
+		// Resolve the type of the value once and for all as this operation generates a proxy class
+		// for each invocation.
+		// Unfortunately, there's no better way of doing that as none of the classes are immutable,
+		// and we can't know for sure the current state of the property or the value.
+		CompositeType localType = type;
+
+		if ( localType == null ) {
+			synchronized ( this ) {
+				localType = type;
+				if ( localType == null ) {
+					// Make sure this is sorted which is important especially for synthetic components
+					// Other components should be sorted already
+					sortProperties( true );
+
+					final String typeName = getTypeName();
+					if ( typeName == null ) {
+						localType = isEmbedded()
+								? new EmbeddedComponentType( this, originalPropertyOrder )
+								: new ComponentType( this, originalPropertyOrder );
+					}
+					else {
+						final CompositeUserType<?> compositeUserType = createCompositeUserType( this );
+						localType = new UserComponentType<>( this, originalPropertyOrder, compositeUserType );
+					}
+
+					type = localType;
+				}
+			}
+		}
+
+		return localType;
+	}
+
+	@Override
+	public void setTypeUsingReflection(String className, String propertyName)
+		throws MappingException {
+	}
+
+	@Override
+	public Map<String, MetaAttribute> getMetaAttributes() {
+		return metaAttributes;
+	}
+
+	@Override
+	public MetaAttribute getMetaAttribute(String attributeName) {
+		return metaAttributes==null ? null : metaAttributes.get(attributeName);
+	}
+
+	@Override
+	public void setMetaAttributes(Map<String, MetaAttribute> metas) {
+		this.metaAttributes = metas;
+	}
+
+	@Override
+	public Object accept(ValueVisitor visitor) {
+		return visitor.accept(this);
+	}
+
+	@Override
+	public boolean isSame(SimpleValue other) {
+		return other instanceof Component component && isSame( component );
+	}
+
+	public boolean isSame(Component other) {
+		return super.isSame( other )
+			&& Objects.equals( properties, other.properties )
+			&& Objects.equals( componentClassName, other.componentClassName )
+			&& embedded == other.embedded
+			&& Objects.equals( aggregateColumn, other.aggregateColumn )
+			&& Objects.equals( parentAggregateColumn, other.parentAggregateColumn )
+			&& Objects.equals( structName, other.structName )
+			&& Objects.equals( parentProperty, other.parentProperty )
+			&& Objects.equals( metaAttributes, other.metaAttributes );
+	}
+
+	@Override
+	public boolean[] getColumnInsertability() {
+		final var result = new boolean[getColumnSpan()];
+		int i = 0;
+		for ( var property : getProperties() ) {
+			i += copyFlags( property.getValue().getColumnInsertability(), result, i, property.isInsertable() );
+		}
+		if ( isPolymorphic() ) {
+			i += copyFlags( getDiscriminator().getColumnInsertability(), result, i, true );
+		}
+		assert i == getColumnSpan();
+		return result;
+	}
+
+	private static int copyFlags(boolean[] chunk, boolean[] result, int i, boolean doCopy) {
+		if ( doCopy ) {
+			System.arraycopy( chunk, 0, result, i, chunk.length );
+		}
+		return chunk.length;
+	}
+
+	@Override
+	public boolean hasAnyInsertableColumns() {
+		for ( var property : properties ) {
+			if ( property.getValue().hasAnyInsertableColumns() ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	@Override
+	public boolean[] getColumnUpdateability() {
+		final var result = new boolean[getColumnSpan()];
+		int i = 0;
+		for ( var property : getProperties() ) {
+			i += copyFlags( property.getValue().getColumnUpdateability(), result, i, property.isUpdatable() );
+		}
+		if ( isPolymorphic() ) {
+			i += copyFlags( getDiscriminator().getColumnUpdateability(), result, i, true );
+		}
+		assert i == getColumnSpan();
+		return result;
+	}
+
+	@Override
+	public void setNonUpdatable() {
+		for ( var property : properties ) {
+			property.getValue().setNonUpdatable();
+		}
+		if ( isPolymorphic() ) {
+			getDiscriminator().setNonUpdatable();
+		}
+	}
+
+	@Override
+	public void setNonInsertable() {
+		for ( var property : properties ) {
+			property.getValue().setNonInsertable();
+		}
+		if ( isPolymorphic() ) {
+			getDiscriminator().setNonInsertable();
+		}
+	}
+
+	@Override
+	public boolean hasAnyUpdatableColumns() {
+		for ( var property : properties ) {
+			if ( property.getValue().hasAnyUpdatableColumns() ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public boolean isKey() {
+		return isKey;
+	}
+
+	public void setKey(boolean isKey) {
+		this.isKey = isKey;
+	}
+
+	/**
+	 * Returns the {@link Property} at the specified position in this {@link Component}.
+	 *
+	 * @param index index of the {@link Property} to return
+	 * @return {@link Property}
+	 * @throws IndexOutOfBoundsException - if the index is out of range(index &lt; 0 || index &gt;=
+	 * {@link #getPropertySpan()})
+	 */
+	public Property getProperty(int index) {
+		return properties.get( index );
+	}
+
+	@Override
+	public Property getProperty(String propertyName) throws MappingException {
+		for ( var property : properties ) {
+			if ( property.getName().equals(propertyName) ) {
+				return property;
+			}
+		}
+		throw new MappingException("component: " + componentClassName + " property not found: " + propertyName);
+	}
+
+	public boolean matchesAllProperties(String... propertyNames) {
+		return properties.size() == propertyNames.length &&
+				new HashSet<>(properties.stream().map(Property::getName)
+						.collect(toList()))
+						.containsAll(List.of(propertyNames));
+	}
+
+	public boolean hasProperty(String propertyName) {
+		for ( var property : properties ) {
+			if ( property.getName().equals(propertyName) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public String getRoleName() {
+		return roleName;
+	}
+
+	public void setRoleName(String roleName) {
+		this.roleName = roleName;
+	}
+
+	public MappedSuperclass getMappedSuperclass() {
+		return mappedSuperclass;
+	}
+
+	public void setMappedSuperclass(MappedSuperclass mappedSuperclass) {
+		this.mappedSuperclass = mappedSuperclass;
+	}
+
+	public Value getDiscriminator() {
+		return discriminator;
+	}
+
+	public void setDiscriminator(Value discriminator) {
+		this.discriminator = discriminator;
+	}
+
+	@org.hibernate.SPI(org.hibernate.SPI.Role.USE)
+	public DiscriminatorType<?> getDiscriminatorType() {
+		final var type = discriminatorType;
+		if ( type == null ) {
+			return discriminatorType = buildDiscriminatorType();
+		}
+		return type;
+	}
+
+	private DiscriminatorType<?> buildDiscriminatorType() {
+		return getBuildingContext().getMetadataCollector().resolveEmbeddableDiscriminatorType( getComponentClass(), () -> {
+			final var javaTypeRegistry = getTypeConfiguration().getJavaTypeRegistry();
+			final var domainJavaType = javaTypeRegistry.resolveDescriptor( Class.class );
+			final var discriminatorType = DiscriminatorHelper.getDiscriminatorType( this );
+			final var converter = EmbeddableDiscriminatorConverter.fromValueMappings(
+					qualify( getComponentClassName(), DISCRIMINATOR_ROLE_NAME ),
+					domainJavaType,
+					discriminatorType,
+					getDiscriminatorValues(),
+					getServiceRegistry()
+			);
+			return new DiscriminatorTypeImpl<>( discriminatorType, converter );
+		} );
+	}
+
+	public boolean isPolymorphic() {
+		return discriminator != null;
+	}
+
+	public Map<Object, String> getDiscriminatorValues() {
+		return discriminatorValues;
+	}
+
+	public void setDiscriminatorValues(Map<Object, String> discriminatorValues) {
+		this.discriminatorValues = discriminatorValues;
+	}
+
+	public String getSuperclass(String subclass) {
+		return subclassToSuperclass.get( subclass );
+	}
+
+	public void setSubclassToSuperclass(Map<String, String> subclassToSuperclass) {
+		this.subclassToSuperclass = subclassToSuperclass;
+	}
+
+	@Override
+	public String toString() {
+		return getClass().getSimpleName() + '(' + componentClassName + ')';
+	}
+
+	@Override
+	public Generator createGenerator(Dialect dialect, RootClass rootClass, Property property, GeneratorSettings defaults) {
+		return getCustomIdGeneratorCreator().isAssigned()
+				? GeneratorBinder.buildIdentifierGenerator( getServiceRegistry().requireService( PropertyAccessorService.class ), this, dialect, rootClass, defaults )
+				: super.createGenerator( dialect, rootClass, property, defaults );
+	}
+
+	@Internal
+	public String[] getPropertyNames() {
+		final String[] propertyNames = new String[properties.size()];
+		for ( int i = 0; i < properties.size(); i++ ) {
+			propertyNames[i] = properties.get( i ).getName();
+		}
+		return propertyNames;
+	}
+
+	public void clearProperties() {
+		properties.clear();
+	}
+
+	/**
+	 * Apply a column naming pattern.
+	 *
+	 * @see org.hibernate.annotations.EmbeddedColumnNaming
+	 */
+	public void setColumnNamingPattern(String columnNamingPattern) {
+		this.columnNamingPattern = columnNamingPattern;
+	}
+
+	/**
+	 * Column naming pattern applied to the component
+	 *
+	 * @see org.hibernate.annotations.EmbeddedColumnNaming
+	 */
+	public String getColumnNamingPattern() {
+		return columnNamingPattern;
+	}
+
+	public static class StandardGenerationContextLocator
+			implements CompositeNestedGeneratedValueGenerator.GenerationContextLocator {
+		private final String entityName;
+
+		public StandardGenerationContextLocator(String entityName) {
+			this.entityName = entityName;
+		}
+
+		@Override
+		public Object locateGenerationContext(SharedSessionContractImplementor session, Object incomingObject) {
+			return session.getEntityPersister( entityName, incomingObject ).getIdentifier( incomingObject, session );
+		}
+	}
+
+	@Internal
+	public static class ValueGenerationPlan implements GenerationPlan {
+		private final BeforeExecutionGenerator generator;
+		private final PropertyValueAccessor injector;
+		private final int propertyIndex;
+
+		public ValueGenerationPlan(BeforeExecutionGenerator generator, PropertyValueAccessor injector, int propertyIndex) {
+			this.generator = generator;
+			this.injector = injector;
+			this.propertyIndex = propertyIndex;
+		}
+
+		@Override
+		public PropertyValueAccessor getInjector() {
+			return injector;
+		}
+
+		@Override
+		public int getPropertyIndex() {
+			return propertyIndex;
+		}
+
+		@Override
+		public BeforeExecutionGenerator getGenerator() {
+			return generator;
+		}
+
+		@Override
+		public void registerExportables(Database database) {
+			if ( generator instanceof ExportableProducer exportableProducer ) {
+				exportableProducer.registerExportables( database );
+			}
+		}
+
+		@Override
+		public void initialize(SqlStringGenerationContext context) {
+			if ( generator instanceof Configurable configurable ) {
+				configurable.initialize( context );
+			}
+		}
+	}
+
+	public void prepareForMappingModel() {
+		// This call will initialize the type properly
+		getType();
+	}
+
+	@Override
+	public boolean isValid(MappingContext mappingContext) throws MappingException {
+		if ( !super.isValid( mappingContext ) ) {
+			return false;
+		}
+		if ( instantiatorPropertyNames != null ) {
+			if ( instantiatorPropertyNames.length < properties.size() ) {
+				throw new MappingException( "component type [" + componentClassName + "] specifies " + instantiatorPropertyNames.length + " properties for the instantiator but has " + properties.size() + " properties" );
+			}
+			final HashSet<String> assignedPropertyNames = CollectionHelper.setOfSize( properties.size() );
+			for ( String instantiatorPropertyName : instantiatorPropertyNames ) {
+				if ( getProperty( instantiatorPropertyName ) == null ) {
+					throw new MappingException( "could not find property [" + instantiatorPropertyName + "] defined in the @Instantiator withing component [" + componentClassName + "]" );
+				}
+				assignedPropertyNames.add( instantiatorPropertyName );
+			}
+			if ( assignedPropertyNames.size() != properties.size() ) {
+				final ArrayList<String> missingProperties = new ArrayList<>();
+				for ( var property : properties ) {
+					final String propertyName = property.getName();
+					if ( !assignedPropertyNames.contains( propertyName ) ) {
+						missingProperties.add( propertyName );
+					}
+				}
+				throw new MappingException( "component type [" + componentClassName + "] has " + properties.size() + " properties but the instantiator only assigns " + assignedPropertyNames.size() + " properties. missing properties: " + missingProperties );
+			}
+		}
+		return true;
+	}
+
+	@Override
+	public boolean isSorted() {
+		return originalPropertyOrder != ArrayHelper.EMPTY_INT_ARRAY;
+	}
+
+	@Override
+	public int[] sortProperties() {
+		return sortProperties( false );
+	}
+
+	private int[] sortProperties(boolean forceRetainOriginalOrder) {
+		if ( originalPropertyOrder != ArrayHelper.EMPTY_INT_ARRAY ) {
+			return originalPropertyOrder;
+		}
+		// Don't sort the properties for a simple record
+		if ( isSimpleRecord() ) {
+			return this.originalPropertyOrder = null;
+		}
+		final int[] originalPropertyOrder;
+		// We need to capture the original property order if this is an alternate unique key or embedded component property
+		// to be able to sort the other side of the foreign key accordingly
+		// and also if the source is a XML mapping
+		// because XML mappings might refer to this through the defined order
+		if ( forceRetainOriginalOrder || isAlternateUniqueKey() || isEmbedded()
+				|| getBuildingContext() instanceof MappingDocument ) {
+			final var originalProperties = properties.toArray( new Property[0] );
+			properties.sort( Comparator.comparing( Property::getName ) );
+			originalPropertyOrder = new int[originalProperties.length];
+			for ( int j = 0; j < originalPropertyOrder.length; j++ ) {
+				originalPropertyOrder[j] = properties.indexOf( originalProperties[j] );
+			}
+		}
+		else {
+			properties.sort( Comparator.comparing( Property::getName ) );
+			originalPropertyOrder = null;
+		}
+		return this.originalPropertyOrder = originalPropertyOrder;
+	}
+
+	public void setSimpleRecord(boolean simpleRecord) {
+		this.simpleRecord = simpleRecord;
+	}
+
+	public boolean isSimpleRecord() {
+		Boolean simple = simpleRecord;
+		if ( simple == null ) {
+			// A simple record is given, when the properties match the order of the record component names
+			final var componentClass = resolveComponentClass();
+			if ( customInstantiator != null ) {
+				return simpleRecord = false;
+			}
+			if ( componentClass == null || !componentClass.isRecord() ) {
+				return simpleRecord = false;
+			}
+			final String[] recordComponentNames = ReflectHelper.getRecordComponentNames( componentClass );
+			if ( recordComponentNames.length != properties.size() ) {
+				return simpleRecord = false;
+			}
+			for ( int i = 0; i < recordComponentNames.length; i++ ) {
+				if ( !recordComponentNames[i].equals( properties.get( i ).getName() ) ) {
+					return simpleRecord = false;
+				}
+			}
+			simple = simpleRecord = true;
+		}
+		return simple;
+	}
+
+	private Class<?> resolveComponentClass() {
+		try {
+			return getComponentClass();
+		}
+		catch ( Exception e ) {
+			return null;
+		}
+	}
+
+	public Class<? extends EmbeddableInstantiator> getCustomInstantiator() {
+		return customInstantiator;
+	}
+
+	public void setCustomInstantiator(Class<? extends EmbeddableInstantiator> customInstantiator) {
+		this.customInstantiator = customInstantiator;
+	}
+
+	public Constructor<?> getInstantiator() {
+		return instantiator;
+	}
+
+	public String[] getInstantiatorPropertyNames() {
+		return instantiatorPropertyNames;
+	}
+
+	public void setInstantiator(Constructor<?> instantiator, String[] instantiatorPropertyNames) {
+		this.instantiator = instantiator;
+		this.instantiatorPropertyNames = instantiatorPropertyNames;
+	}
+
+	public String[] getStructColumnNames() {
+		return structColumnNames;
+	}
+
+	public void setStructColumnNames(String[] structColumnNames) {
+		this.structColumnNames = structColumnNames;
+	}
+
+	public boolean isGeneric() {
+		if ( isGeneric == null ) {
+			isGeneric = getComponentClassName() != null
+					&& getComponentClass().getTypeParameters().length > 0;
+		}
+		return isGeneric;
+	}
+
+	public void setGeneric(boolean generic) {
+		isGeneric = generic;
+	}
+
+	public boolean isRecord() {
+		return getComponentClass() != null && getComponentClass().isRecord();
+	}
+}

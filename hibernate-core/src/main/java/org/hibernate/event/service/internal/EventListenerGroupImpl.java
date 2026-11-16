@@ -1,0 +1,368 @@
+package org.hibernate.event.service.internal;
+
+import org.hibernate.event.service.spi.DuplicationStrategy;
+import org.hibernate.event.service.spi.EventActionWithParameter;
+import org.hibernate.event.service.spi.EventListenerGroup;
+import org.hibernate.event.service.spi.EventListenerRegistrationException;
+import org.hibernate.event.spi.EventType;
+import org.hibernate.internal.build.AllowReflection;
+
+import java.lang.reflect.Array;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
+
+import static java.lang.System.arraycopy;
+import static java.util.Arrays.asList;
+import static java.util.Collections.emptyList;
+import static java.util.Collections.singleton;
+import static java.util.concurrent.CompletableFuture.completedFuture;
+import static org.hibernate.event.internal.EventListenerLogging.EVENT_LISTENER_LOGGER;
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+
+/**
+ * Standard EventListenerGroup implementation
+ *
+ * @author Steve Ebersole
+ * @author Sanne Grinovero
+ */
+class EventListenerGroupImpl<T> implements EventListenerGroup<T> {
+
+	private static final DuplicationStrategy DEFAULT_DUPLICATION_STRATEGY =
+			new DuplicationStrategy() {
+				@Override
+				public boolean areMatch(@Nonnull Object listener, @Nonnull Object original) {
+					return listener.getClass().equals( original.getClass() );
+				}
+				@Override
+				@Nonnull
+				public Action getAction() {
+					return Action.ERROR;
+				}
+			};
+	private static final Set<DuplicationStrategy> DEFAULT_DUPLICATION_STRATEGIES =
+			singleton( DEFAULT_DUPLICATION_STRATEGY );
+
+	private static final CompletableFuture<?> COMPLETED = completedFuture( null );
+	@SuppressWarnings("unchecked")
+	private static <R> @Nonnull CompletableFuture<R> nullCompletion() {
+		return (CompletableFuture<R>) COMPLETED;
+	}
+
+	private final EventType<T> eventType;
+	private final boolean isJpaBootstrap;
+
+	//TODO at least the list of listeners should be made constant;
+	//unfortunately a number of external integrations rely on being able to make
+	//changes to listeners at runtime, so this will require some planning.
+	private volatile Set<DuplicationStrategy> duplicationStrategies = DEFAULT_DUPLICATION_STRATEGIES;
+	private volatile T[] listeners = null;
+	private volatile List<T> listenersAsList = emptyList();
+
+	public EventListenerGroupImpl(@Nonnull EventType<T> eventType, boolean isJpaBootstrap) {
+		this.eventType = eventType;
+		this.isJpaBootstrap = isJpaBootstrap;
+	}
+
+	@Override
+	public @Nonnull EventType<T> getEventType() {
+		return eventType;
+	}
+
+	@Override
+	public boolean isEmpty() {
+		return count() <= 0;
+	}
+
+	@Override
+	public int count() {
+		final T[] ls = listeners;
+		return ls == null ? 0 : ls.length;
+	}
+
+	@Override
+	public void clear() {
+		//Odd semantics: we're expected (for backwards compatibility)
+		//               to also clear the default DuplicationStrategy.
+		duplicationStrategies = new LinkedHashSet<>();
+		setListeners( null );
+	}
+
+	// For efficiency reasons we use both a representation as List and as array;
+	// ensure consistency between the two fields by delegating any mutation to both
+	// fields to this method.
+	private synchronized void setListeners(@Nullable T[] newListeners) {
+		listeners = newListeners;
+		listenersAsList = newListeners == null || newListeners.length == 0
+				? emptyList()
+				: asList( newListeners );
+	}
+
+	@Override
+	public void clearListeners() {
+		setListeners( null );
+	}
+
+	@Override
+	public final <U> void fireLazyEventOnEachListener(@Nonnull Supplier<U> eventSupplier, @Nonnull BiConsumer<T,U> actionOnEvent) {
+		final T[] ls = listeners;
+		if ( ls != null && ls.length != 0 ) {
+			final U event = eventSupplier.get();
+			//noinspection ForLoopReplaceableByForEach
+			for ( int i = 0; i < ls.length; i++ ) {
+				actionOnEvent.accept( ls[i], event );
+			}
+		}
+	}
+
+	@Override
+	public final <U> void fireEventOnEachListener(@Nonnull U event, @Nonnull BiConsumer<T,U> actionOnEvent) {
+		final T[] ls = listeners;
+		if ( ls != null ) {
+			//noinspection ForLoopReplaceableByForEach
+			for ( int i = 0; i < ls.length; i++ ) {
+				actionOnEvent.accept( ls[i], event );
+			}
+		}
+	}
+
+	@Override
+	public <U,X> void fireEventOnEachListener(@Nonnull U event, @Nonnull X parameter, @Nonnull EventActionWithParameter<T, U, X> actionOnEvent) {
+		final T[] ls = listeners;
+		if ( ls != null ) {
+			//noinspection ForLoopReplaceableByForEach
+			for ( int i = 0; i < ls.length; i++ ) {
+				actionOnEvent.applyEventToListener( ls[i], event, parameter );
+			}
+		}
+	}
+
+	@Override
+	public <R, U, RL> @Nonnull CompletionStage<R> fireEventOnEachListener(
+			@Nonnull final U event,
+			@Nonnull final Function<RL, Function<U, CompletionStage<R>>> fun) {
+		CompletionStage<R> ret = nullCompletion();
+		final T[] ls = listeners;
+		if ( ls != null ) {
+			for ( T listener : ls ) {
+				//to preserve atomicity of the Session methods
+				//call apply() from within the arg of thenCompose()
+				ret = ret.thenCompose( v -> fun.apply( (RL) listener ).apply( event ) );
+			}
+		}
+		return ret;
+	}
+
+	@Override
+	public <R, U, RL, X> @Nonnull CompletionStage<R> fireEventOnEachListener(
+			@Nonnull U event, @Nonnull X param, @Nonnull Function<RL, BiFunction<U, X, CompletionStage<R>>> fun) {
+		CompletionStage<R> ret = nullCompletion();
+		final T[] ls = listeners;
+		if ( ls != null ) {
+			for ( T listener : ls ) {
+				//to preserve atomicity of the Session methods
+				//call apply() from within the arg of thenCompose()
+				ret = ret.thenCompose( v -> fun.apply( (RL) listener ).apply( event, param ) );
+			}
+		}
+		return ret;
+	}
+
+	@Override
+	public <R, U, RL> @Nonnull CompletionStage<R> fireLazyEventOnEachListener(
+			@Nonnull Supplier<U> eventSupplier,
+			@Nonnull Function<RL, Function<U, CompletionStage<R>>> fun) {
+		CompletionStage<R> ret = nullCompletion();
+		final T[] ls = listeners;
+		if ( ls != null && ls.length != 0 ) {
+			final U event = eventSupplier.get();
+			for ( T listener : ls ) {
+				//to preserve atomicity of the Session methods
+				//call apply() from within the arg of thenCompose()
+				ret = ret.thenCompose( v -> fun.apply( (RL) listener ).apply( event ) );
+			}
+		}
+		return ret;
+	}
+
+	@Override
+	public void addDuplicationStrategy(@Nonnull DuplicationStrategy strategy) {
+		if ( duplicationStrategies == DEFAULT_DUPLICATION_STRATEGIES ) {
+			// At minimum make sure we do not register the same exact listener class multiple times.
+			duplicationStrategies = new LinkedHashSet<>( DEFAULT_DUPLICATION_STRATEGIES );
+		}
+		duplicationStrategies.add( strategy );
+	}
+
+	@Override
+	public void appendListener(@Nonnull T listener) {
+		handleListenerAddition( listener, this::internalAppend );
+	}
+
+	@Override
+	@SafeVarargs
+	public final void appendListeners(@Nonnull T... listeners) {
+		//noinspection ForLoopReplaceableByForEach
+		for ( int i = 0; i < listeners.length; i++ ) {
+			handleListenerAddition( listeners[i], this::internalAppend );
+		}
+	}
+
+	private void internalAppend(@Nonnull T listener) {
+		prepareListener( listener );
+		final T[] listenersRead = listeners;
+		final T[] listenersWrite;
+
+		if ( listenersRead == null ) {
+			listenersWrite = createListenerArrayForWrite( 1 );
+			listenersWrite[0] = listener;
+		}
+		else {
+			final int size = listenersRead.length;
+
+			listenersWrite = createListenerArrayForWrite( size + 1 );
+
+			// first copy the existing listeners
+			arraycopy( listenersRead, 0, listenersWrite, 0, size );
+
+			// and then put the new one after them
+			listenersWrite[size] = listener;
+		}
+		setListeners( listenersWrite );
+	}
+
+	@Override
+	public void prependListener(@Nonnull T listener) {
+		handleListenerAddition( listener, this::internalPrepend );
+	}
+
+	@Override
+	@SafeVarargs
+	public final void prependListeners(@Nonnull T... listeners) {
+		//noinspection ForLoopReplaceableByForEach
+		for ( int i = 0; i < listeners.length; i++ ) {
+			handleListenerAddition( listeners[i], this::internalPrepend );
+		}
+	}
+
+	private void internalPrepend(@Nonnull T listener) {
+		prepareListener( listener );
+		final T[] listenersRead = listeners;
+		final T[] listenersWrite;
+
+		if ( listenersRead == null ) {
+			listenersWrite = createListenerArrayForWrite( 1 );
+			listenersWrite[0] = listener;
+		}
+		else {
+			final int size = listenersRead.length;
+
+			listenersWrite = createListenerArrayForWrite( size + 1 );
+
+			// put the new one first
+			listenersWrite[0] = listener;
+
+			// and copy the rest after it
+			arraycopy( listenersRead, 0, listenersWrite, 1, size );
+		}
+		setListeners( listenersWrite );
+	}
+
+	private void handleListenerAddition(@Nonnull T listener, @Nonnull Consumer<T> additionHandler) {
+		final T[] listenersRead = listeners;
+		if ( listenersRead == null ) {
+			additionHandler.accept( listener );
+			return;
+		}
+		int size = listenersRead.length;
+
+		final T[] listenersWrite = createListenerArrayForWrite( size );
+		arraycopy( listenersRead, 0, listenersWrite, 0, size );
+
+		final boolean traceEnabled = EVENT_LISTENER_LOGGER.isTraceEnabled();
+
+		for ( DuplicationStrategy strategy : duplicationStrategies ) {
+
+			// for each strategy, see if the strategy indicates that any of the existing
+			//		listeners match the listener being added.  If so, we want to apply that
+			//		strategy's action.  Control it returned immediately after applying the action
+			//		on match - meaning no further strategies are checked...
+
+			for ( int i = 0; i < size; i++ ) {
+				final T existingListener = listenersRead[i];
+				if ( traceEnabled ) {
+					EVENT_LISTENER_LOGGER.checkingListenerMatch( listener, existingListener );
+				}
+
+				if ( strategy.areMatch( listener,  existingListener ) ) {
+					if ( traceEnabled ) {
+						EVENT_LISTENER_LOGGER.listenerMatchFound( listener, existingListener );
+					}
+
+					final DuplicationStrategy.Action action = strategy.getAction();
+					switch (action) {
+						case ERROR:
+							throw new EventListenerRegistrationException( "Duplicate event listener found" );
+						case KEEP_ORIGINAL:
+							if ( traceEnabled ) {
+								EVENT_LISTENER_LOGGER.skippingListenerRegistration( action, listener );
+							}
+							return;
+						case REPLACE_ORIGINAL:
+							if ( traceEnabled ) {
+								EVENT_LISTENER_LOGGER.replacingListenerRegistration( action, existingListener, listener );
+							}
+							prepareListener( listener );
+							listenersWrite[i] = listener;
+					}
+
+					// we've found a match - we should return: the match action has already been applied at this point
+					// apply all pending changes:
+					setListeners( listenersWrite );
+					return;
+				}
+			}
+		}
+
+		// we did not find any match, add it
+		checkAgainstBaseInterface( listener );
+		additionHandler.accept( listener );
+	}
+
+	@SuppressWarnings("unchecked")
+	@AllowReflection // Possible array types are registered in org.hibernate.graalvm.internal.StaticClassLists.typesNeedingArrayCopy
+	@Nonnull
+	private T[] createListenerArrayForWrite(int len) {
+		return (T[]) Array.newInstance( eventType.baseListenerInterface(), len );
+	}
+
+	private void prepareListener(@Nonnull T listener) {
+		checkAgainstBaseInterface( listener );
+	}
+
+	private void checkAgainstBaseInterface(@Nonnull T listener) {
+		if ( !eventType.baseListenerInterface().isInstance( listener ) ) {
+			throw new EventListenerRegistrationException( "Listener did not implement expected interface ["
+					+ eventType.baseListenerInterface().getName() + "]" );
+		}
+	}
+
+	/**
+	 * Implementation note: should be final for performance reasons.
+	 * @deprecated this is not the most efficient way for iterating the event listeners.
+	 * See {@link #fireEventOnEachListener(Object, BiConsumer)} and co. for better alternatives.
+	 */
+	@Override
+	@Deprecated
+	public final @Nonnull Iterable<T> listeners() {
+		return listenersAsList;
+	}
+}

@@ -1,0 +1,31 @@
+package org.hibernate.orm.test.dialect.unit.sequence;
+
+import org.hibernate.dialect.DB2iDialect;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.testing.orm.junit.RequiresDialect;
+
+import org.hibernate.testing.orm.junit.JiraKey;
+
+
+/**
+ * @author Andrea Boriero
+ */
+@JiraKey(value = "HHH-11470")
+@RequiresDialect(DB2iDialect.class)
+public class DB2iSequenceInformationExtractorTest extends AbstractSequenceInformationExtractorTest {
+
+	@Override
+	public Dialect getDialect() {
+		return new DB2iDialect();
+	}
+
+	@Override
+	public boolean expectsSequenceMetadata() {
+		return false;
+	}
+
+	@Override
+	public String expectedQuerySequencesString() {
+		return null;
+	}
+}

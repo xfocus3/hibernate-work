@@ -1,0 +1,21 @@
+package org.hibernate.query;
+
+import jakarta.annotation.Nonnull;
+
+import org.hibernate.HibernateException;
+
+/**
+ * Indicates an attempt to find an unknown query parameter or an attempt to
+ * bind a value to an unknown query parameter
+ *
+ * @see Query#getParameter
+ * @see Query#setParameter
+ * @see Query#setParameterList
+ *
+ * @author Steve Ebersole
+ */
+public class UnknownParameterException extends HibernateException {
+	public UnknownParameterException(@Nonnull String message) {
+		super( message );
+	}
+}

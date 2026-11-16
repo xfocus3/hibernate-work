@@ -1,0 +1,22 @@
+package org.hibernate.query.sqm.produce.function.internal;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.metamodel.mapping.MappingModelExpressible;
+import org.hibernate.query.sqm.produce.function.FunctionArgumentTypeResolver;
+import org.hibernate.query.sqm.sql.spi.SqmToSqlAstConverter;
+import org.hibernate.query.sqm.tree.spi.SqmTypedNode;
+import org.hibernate.query.sqm.tree.spi.expression.SqmFunction;
+
+import java.util.List;
+
+@FunctionalInterface
+public interface AbstractFunctionArgumentTypeResolver extends FunctionArgumentTypeResolver {
+	@Override
+	@SuppressWarnings("removal")
+	default @Nullable MappingModelExpressible<?> resolveFunctionArgumentType(SqmFunction<?> function, int argumentIndex, SqmToSqlAstConverter converter) {
+		return resolveFunctionArgumentType( function.getArguments(), argumentIndex, converter );
+	}
+
+	@Override
+	@Nullable MappingModelExpressible<?> resolveFunctionArgumentType(List<? extends SqmTypedNode<?>> arguments, int argumentIndex, SqmToSqlAstConverter converter);
+}

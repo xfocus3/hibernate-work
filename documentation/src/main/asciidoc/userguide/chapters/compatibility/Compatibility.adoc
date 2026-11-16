@@ -1,0 +1,44 @@
+[[compatibility]]
+== Compatibility
+
+[[compatibility-dependencies]]
+=== Dependencies
+
+Hibernate {majorMinorVersion} requires the following dependencies (among others):
+
+.Compatible versions of dependencies
+[cols="h,^1", stripes=none]
+|===============
+| h|Version
+|Java Runtime
+|{javaCompatibleVersions}
+|https://jakarta.ee/specifications/persistence/[Jakarta Persistence]
+|{jakartaJpaVersion}
+|JDBC (bundled with the Java Runtime)
+|{jdbcVersion}
+|===============
+
+[TIP]
+====
+Find more information for all versions of Hibernate on our
+https://hibernate.org/orm/releases/#compatibility-matrix[compatibility matrix].
+
+The https://hibernate.org/community/compatibility-policy/[compatibility policy] may also be of interest.
+====
+
+If you get Hibernate from Maven Central, it is recommended to import either `hibernate-platform`
+or `hibernate-bom` as part of your dependency management to keep artifact versions aligned.
+
+* `hibernate-platform` manages versions of Hibernate ORM modules and their key third-party dependencies.
+* `hibernate-bom` manages versions of Hibernate ORM modules only.
+
+See link:{doc-quick-start-url}#platform[Platform and BOM] in the Getting Started Guide
+for full details and examples.
+
+[[compatibility-database]]
+=== Database
+
+Hibernate {majorMinorVersion}'s compatibility with a given database and version
+depends on the dialect being used.
+
+Refer to the link:{doc-dialect-url}[Dialects] guide for details about both dialects and supported databases.

@@ -1,0 +1,1470 @@
+package org.hibernate.engine.spi;
+
+import static org.hibernate.internal.util.NullnessUtil.castNonNull;
+
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import org.hibernate.AssertionFailure;
+import org.hibernate.HibernateException;
+import org.hibernate.Internal;
+import org.hibernate.PropertyValueException;
+import org.hibernate.Session;
+import org.hibernate.action.internal.AbstractEntityInsertAction;
+import org.hibernate.action.internal.BulkOperationCleanupAction;
+import org.hibernate.action.internal.CollectionAction;
+import org.hibernate.action.internal.CollectionRecreateAction;
+import org.hibernate.action.internal.CollectionRemoveAction;
+import org.hibernate.action.internal.CollectionUpdateAction;
+import org.hibernate.action.internal.EntityActionVetoException;
+import org.hibernate.action.internal.EntityDeleteAction;
+import org.hibernate.action.internal.EntityIdentityInsertAction;
+import org.hibernate.action.internal.EntityInsertAction;
+import org.hibernate.action.internal.EntityUpdateAction;
+import org.hibernate.action.internal.OrphanRemovalAction;
+import org.hibernate.action.internal.QueuedOperationCollectionAction;
+import org.hibernate.action.internal.UnresolvedEntityInsertActions;
+import org.hibernate.action.queue.spi.ActionQueueCheckpoint;
+import org.hibernate.action.queue.spi.CollectionMutationInput;
+import org.hibernate.action.queue.spi.CollectionTransition;
+import org.hibernate.action.spi.BeforeTransactionCompletionProcess;
+import org.hibernate.action.spi.Executable;
+import org.hibernate.boot.spi.SessionFactoryOptions;
+import org.hibernate.engine.internal.TransactionCompletionCallbacksImpl;
+import org.hibernate.engine.internal.FlushProcessingContext;
+import org.hibernate.event.spi.EventSource;
+import org.hibernate.internal.util.NullnessUtil;
+import org.hibernate.metamodel.mapping.internal.EntityCollectionPart;
+import org.hibernate.type.CollectionType;
+import org.hibernate.type.ComponentType;
+import org.hibernate.type.EntityType;
+import org.hibernate.type.ForeignKeyDirection;
+import org.hibernate.type.Type;
+
+import jakarta.annotation.Nullable;
+
+import static java.lang.System.arraycopy;
+import static org.hibernate.action.internal.ActionLogging.ACTION_LOGGER;
+import static org.hibernate.action.queue.internal.CollectionMutationActionLowering.lower;
+import static org.hibernate.proxy.HibernateProxy.extractLazyInitializer;
+
+/**
+ * Legacy implementation of the action queue.
+ * <p>
+ * The {@code ActionQueueLegacy} holds the DML operations queued as part of a
+ * session's transactional-write-behind semantics. The DML operations are
+ * queued here until a flush forces them to be executed against the database.
+ * <p>
+ * This is the legacy implementation. The new, currently incubating, implementation is
+ * {@link org.hibernate.action.queue.internal.GraphBasedActionQueue}.
+ *
+ * @apiNote This class is logically part of the {@linkplain Executable action}
+ *          subsystem and so it would more naturally belong in the package
+ *          {@link org.hibernate.action.spi}. It is located here for purely
+ *          historical reasons.
+ *
+ * @author Steve Ebersole
+ * @author Gail Badner
+ * @author Anton Marsden
+ */
+@Internal
+public class ActionQueueLegacy implements org.hibernate.action.queue.spi.ActionQueue {
+
+	private final SessionImplementor session;
+
+	private UnresolvedEntityInsertActions unresolvedInsertions;
+	// NOTE: ExecutableList fields must be instantiated via ListProvider#init
+	//       or #getOrInit to ensure that they are instantiated consistently.
+
+	// Object insertions, updates, and deletions have list semantics because
+	// they must happen in the right order to respect referential integrity
+	private ExecutableList<AbstractEntityInsertAction> insertions;
+	private ExecutableList<EntityDeleteAction> deletions;
+	private ExecutableList<EntityUpdateAction> updates;
+
+	// Actually the semantics of the next three are really "Bag"
+	// Note that, unlike objects, collection insertions, updates,
+	// deletions are not really remembered between flushes. We
+	// just re-use the same Lists for convenience.
+	private ExecutableList<CollectionRecreateAction> collectionCreations;
+	private ExecutableList<CollectionUpdateAction> collectionUpdates;
+	private ExecutableList<QueuedOperationCollectionAction> collectionQueuedOps;
+	private ExecutableList<CollectionRemoveAction> collectionRemovals;
+	private ExecutableList<CollectionRemoveAction> orphanCollectionRemovals;
+	private final List<CollectionMutationInput> collectionMutationInputs = new ArrayList<>();
+	private final List<CollectionMutationInput> durableCollectionMutationInputs = new ArrayList<>();
+
+	// TODO: The removeOrphan concept is a temporary "hack" for HHH-6484.
+	//       This should be removed once action/task ordering is improved.
+	private ExecutableList<OrphanRemovalAction> orphanRemovals;
+
+
+	private transient boolean isTransactionCoordinatorShared;
+	private TransactionCompletionCallbacksImplementor transactionCompletionCallbacks;
+
+	// Extract this as a constant to perform efficient iterations:
+	// method values() otherwise allocates a new array on each invocation.
+	private static final OrderedActions[] ORDERED_OPERATIONS = OrderedActions.values();
+
+	// The order of these operations is very important
+	private enum OrderedActions {
+		OrphanCollectionRemoveAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.orphanCollectionRemovals;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.orphanCollectionRemovals == null ) {
+					instance.orphanCollectionRemovals = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		OrphanRemovalAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.orphanRemovals;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.orphanRemovals == null ) {
+					instance.orphanRemovals = new ExecutableList<>( false );
+				}
+			}
+		},
+		EntityInsertAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.insertions;
+			}
+			@Override
+			public void ensureInitialized(final ActionQueueLegacy instance) {
+				if ( instance.insertions == null ) {
+					//Special case of initialization
+					instance.insertions = instance.isOrderInsertsEnabled()
+							? new ExecutableList<>( InsertActionSorter.INSTANCE )
+							: new ExecutableList<>( false );
+				}
+			}
+		},
+		EntityUpdateAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.updates;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.updates == null ) {
+					instance.updates = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		QueuedOperationCollectionAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.collectionQueuedOps;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.collectionQueuedOps == null ) {
+					instance.collectionQueuedOps = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		CollectionRemoveAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.collectionRemovals;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.collectionRemovals == null ) {
+					instance.collectionRemovals = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		CollectionUpdateAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.collectionUpdates;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.collectionUpdates == null ) {
+					instance.collectionUpdates = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		CollectionRecreateAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.collectionCreations;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.collectionCreations == null ) {
+					instance.collectionCreations = new ExecutableList<>( instance.isOrderUpdatesEnabled() );
+				}
+			}
+		},
+		EntityDeleteAction {
+			@Override
+			public ExecutableList<?> getActions(ActionQueueLegacy instance) {
+				return instance.deletions;
+			}
+			@Override
+			public void ensureInitialized(ActionQueueLegacy instance) {
+				if ( instance.deletions == null ) {
+					instance.deletions = new ExecutableList<>( false );
+				}
+			}
+		};
+
+		public abstract ExecutableList<?> getActions(ActionQueueLegacy instance);
+		@NullnessUtil.Initializer
+		public abstract void ensureInitialized(ActionQueueLegacy instance);
+	}
+
+	/**
+	 * Constructs an action queue bound to the given session.
+	 *
+	 * @param session The session "owning" this queue.
+	 */
+	@SuppressWarnings( "NullAway" )
+	public ActionQueueLegacy(SessionImplementor session) {
+		this.session = session;
+		isTransactionCoordinatorShared = false;
+		transactionCompletionCallbacks = new TransactionCompletionCallbacksImpl( session );
+	}
+
+	public void clear() {
+		collectionMutationInputs.clear();
+		durableCollectionMutationInputs.clear();
+		for ( var value : ORDERED_OPERATIONS ) {
+			final var queue = value.getActions( this );
+			if ( queue != null ) {
+				queue.clear();
+			}
+		}
+		if ( unresolvedInsertions != null ) {
+			unresolvedInsertions.clear();
+		}
+	}
+
+	/**
+	 * Adds an entity insert action
+	 *
+	 * @param action The action representing the entity insertion
+	 */
+	public void addAction(EntityInsertAction action) {
+		ACTION_LOGGER.addingEntityInsertAction( action.getEntityName() );
+		addInsertAction( action );
+	}
+
+	private void addInsertAction(AbstractEntityInsertAction insert) {
+		if ( insert.isEarlyInsert() ) {
+			// For early inserts, must execute inserts before finding non-nullable transient entities.
+			// TODO: find out why this is necessary
+			ACTION_LOGGER.executingInsertsBeforeFindingNonNullableTransientEntitiesForEarlyInsert( insert );
+			executeInserts();
+		}
+		final var nonNullableTransientDependencies = insert.findNonNullableTransientEntities();
+		if ( nonNullableTransientDependencies == null ) {
+			ACTION_LOGGER.addingInsertWithNoNonNullableTransientEntities( insert );
+			addResolvedEntityInsertAction( insert );
+		}
+		else {
+			if ( ACTION_LOGGER.isTraceEnabled() ) {
+				ACTION_LOGGER.addingInsertWithNonNullableTransientEntities(
+						insert,
+						nonNullableTransientDependencies.toLoggableString( insert.getSession() )
+				);
+			}
+			if ( unresolvedInsertions == null ) {
+				unresolvedInsertions = new UnresolvedEntityInsertActions();
+			}
+			unresolvedInsertions.addUnresolvedEntityInsertAction( insert, nonNullableTransientDependencies );
+		}
+	}
+
+	private void addResolvedEntityInsertAction(AbstractEntityInsertAction insert) {
+		if ( insert.isEarlyInsert() ) {
+			ACTION_LOGGER.executingInsertionsBeforeResolvedEarlyInsert();
+			executeInserts();
+			ACTION_LOGGER.executingIdentityInsertImmediately();
+			execute( insert );
+		}
+		else {
+			ACTION_LOGGER.addingResolvedNonEarlyInsertAction();
+			OrderedActions.EntityInsertAction.ensureInitialized( this );
+			insertions.add( insert );
+		}
+		if ( !insert.isVeto() ) {
+			insert.makeEntityManaged();
+			if ( unresolvedInsertions != null ) {
+				for ( var resolvedAction :
+						unresolvedInsertions.resolveDependentActions( insert.getInstance(), session ) ) {
+					addResolvedEntityInsertAction( resolvedAction );
+				}
+			}
+		}
+		else {
+			throw new EntityActionVetoException( insert );
+		}
+	}
+
+	/**
+	 * Adds an entity (IDENTITY) insert action
+	 *
+	 * @param action The action representing the entity insertion
+	 */
+	public void addAction(EntityIdentityInsertAction action) {
+		ACTION_LOGGER.addingEntityIdentityInsertAction( action.getEntityName() );
+		addInsertAction( action );
+	}
+
+	/**
+	 * Adds an entity delete action
+	 *
+	 * @param action The action representing the entity deletion
+	 */
+	public void addAction(EntityDeleteAction action) {
+		OrderedActions.EntityDeleteAction.ensureInitialized( this );
+		deletions.add( action );
+	}
+
+	/**
+	 * Adds an orphan removal action
+	 *
+	 * @param action The action representing the orphan removal
+	 */
+	public void addAction(final OrphanRemovalAction action) {
+		OrderedActions.OrphanRemovalAction.ensureInitialized( this );
+		orphanRemovals.add( action );
+	}
+
+	/**
+	 * Adds an entity update action
+	 *
+	 * @param action The action representing the entity update
+	 */
+	public void addAction(final EntityUpdateAction action) {
+		OrderedActions.EntityUpdateAction.ensureInitialized( this );
+		updates.add( action );
+	}
+
+	@Override
+	public void addCollectionMutation(CollectionMutationInput input) {
+		if ( isDurableCollectionMutation( input ) ) {
+			durableCollectionMutationInputs.add( input );
+		}
+		else {
+			collectionMutationInputs.add( input );
+		}
+	}
+
+	private boolean isDurableCollectionMutation(CollectionMutationInput input) {
+		return !(session.getPersistenceContextInternal().getCollectionFlushActionTracker()
+				instanceof FlushProcessingContext)
+				|| isOrphanCollectionRemoval( input );
+	}
+
+	private boolean isOrphanCollectionRemoval(CollectionMutationInput input) {
+		if ( input.transition() != CollectionTransition.REMOVE
+				&& input.transition() != CollectionTransition.REMOVE_AND_CREATE ) {
+			return false;
+		}
+		Object affectedOwner = input.affectedOwner();
+		if ( affectedOwner == null && input.collection() != null ) {
+			affectedOwner = session.getPersistenceContextInternal()
+					.getLoadedCollectionOwnerOrNull( input.collection() );
+		}
+		if ( affectedOwner == null ) {
+			return false;
+		}
+		final var entry = session.getPersistenceContextInternal().getEntry( affectedOwner );
+		if ( entry == null || !entry.getStatus().isDeletedOrGone() ) {
+			return false;
+		}
+		if ( orphanRemovals != null ) {
+			for ( var orphanRemoval : orphanRemovals ) {
+				if ( orphanRemoval.getInstance() == affectedOwner ) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Adds a collection (re)create action
+	 *
+	 * @param action The action representing the (re)creation of a collection
+	 */
+	private void addCollectionAction(final CollectionRecreateAction action) {
+		OrderedActions.CollectionRecreateAction.ensureInitialized( this );
+		collectionCreations.add( action );
+	}
+
+	/**
+	 * Adds a collection remove action
+	 *
+	 * @param action The action representing the removal of a collection
+	 */
+	private void addCollectionAction(final CollectionRemoveAction action) {
+		if ( orphanRemovals != null && action.getAffectedOwner() != null
+				&& session.getPersistenceContextInternal()
+						.getEntry( action.getAffectedOwner() )
+						.getStatus()
+						.isDeletedOrGone() ) {
+			// We need to check if this collection's owner is an orphan being removed,
+			// which case we should remove the collection first to avoid constraint violations
+			for ( var orphanRemoval : orphanRemovals ) {
+				if ( orphanRemoval.getInstance() == action.getAffectedOwner() ) {
+					OrderedActions.OrphanCollectionRemoveAction.ensureInitialized( this );
+					orphanCollectionRemovals.add( action );
+					return;
+				}
+			}
+		}
+		OrderedActions.CollectionRemoveAction.ensureInitialized( this );
+		collectionRemovals.add( action );
+	}
+
+	/**
+	 * Adds a collection update action
+	 *
+	 * @param action The action representing the update of a collection
+	 */
+	private void addCollectionAction(final CollectionUpdateAction action) {
+		OrderedActions.CollectionUpdateAction.ensureInitialized( this );
+		collectionUpdates.add( action );
+	}
+
+	/**
+	 * Adds an action relating to a collection queued operation (extra lazy).
+	 *
+	 * @param action The action representing the queued operation
+	 */
+	private void addCollectionAction(QueuedOperationCollectionAction action) {
+		OrderedActions.QueuedOperationCollectionAction.ensureInitialized( this );
+		this.collectionQueuedOps.add( action );
+	}
+
+	/**
+	 * Adds an action defining a cleanup relating to a bulk operation (HQL/JPQL or Criteria based update/delete)
+	 *
+	 * @param action The action representing the queued operation
+	 */
+	public void addAction(BulkOperationCleanupAction action) {
+		registerCleanupActions( action );
+	}
+
+	private void registerCleanupActions(Executable executable) {
+		final var beforeCompletionCallback = executable.getBeforeTransactionCompletionProcess();
+		if ( beforeCompletionCallback != null ) {
+			transactionCompletionCallbacks.registerCallback( beforeCompletionCallback );
+		}
+		if ( getSessionFactoryOptions().isQueryCacheEnabled() ) {
+			invalidateSpaces( executable.getPropertySpaces() );
+		}
+		final var afterCompletionCallback = executable.getAfterTransactionCompletionProcess();
+		if ( afterCompletionCallback != null ) {
+			transactionCompletionCallbacks.registerCallback( afterCompletionCallback );
+		}
+	}
+
+	/**
+	 * Are there unresolved entity insert actions that depend on non-nullable associations with a transient entity?
+	 *
+	 * @return true, if there are unresolved entity insert actions that depend on non-nullable associations with a
+	 * transient entity; false, otherwise
+	 */
+	public boolean hasUnresolvedEntityInsertActions() {
+		return unresolvedInsertions != null && !unresolvedInsertions.isEmpty();
+	}
+
+	/**
+	 * Throws {@link PropertyValueException} if there are any unresolved entity insert actions that depend
+	 * on non-nullable associations with a transient entity. This method should be called on completion of an operation
+	 * (after all cascades are completed) that saves an entity.
+	 *
+	 * @throws PropertyValueException if there are any unresolved entity insert actions;
+	 * {@link PropertyValueException#getEntityName()} and
+	 * {@link PropertyValueException#getPropertyName()} will return the entity name and property value for
+	 * the first unresolved entity insert action.
+	 */
+	public void checkNoUnresolvedActionsAfterOperation() throws PropertyValueException {
+		if ( unresolvedInsertions != null ) {
+			unresolvedInsertions.checkNoUnresolvedActionsAfterOperation();
+		}
+	}
+
+	@Override
+	public void registerCallback(BeforeCompletionCallback process) {
+		transactionCompletionCallbacks.registerCallback( process );
+	}
+
+	@Override
+	public void registerCallback(AfterCompletionCallback process) {
+		transactionCompletionCallbacks.registerCallback( process );
+	}
+
+	/**
+	 * Perform all currently queued entity-insertion actions.
+	 *
+	 * @throws HibernateException error executing queued insertion actions.
+	 */
+	public void executeInserts() throws HibernateException {
+		if ( insertions != null && !insertions.isEmpty() ) {
+			executeActions( insertions );
+		}
+	}
+
+	/**
+	 * Perform all currently queued actions.
+	 *
+	 * @throws HibernateException error executing queued actions.
+	 */
+	public void executeActions() throws HibernateException {
+		checkNoUnresolvedActionsAfterOperation();
+
+		for ( var action : ORDERED_OPERATIONS ) {
+			executeActions( action.getActions( this ) );
+		}
+	}
+
+	/**
+	 * Prepares the internal action queues for execution.
+	 *
+	 * @throws HibernateException error preparing actions.
+	 */
+	public void prepareActions() throws HibernateException {
+		prepareDeferredOwnerPreUpdates();
+		prepareCollectionMutationInputs();
+		prepareOwnerUpdateCallbacks();
+		prepareActions( collectionRemovals );
+		prepareActions( collectionUpdates );
+		prepareActions( collectionCreations );
+		prepareActions( collectionQueuedOps );
+	}
+
+	private void prepareDeferredOwnerPreUpdates() {
+		boolean collectionRefreshRequired = false;
+		if ( updates != null ) {
+			for ( var action : updates ) {
+				collectionRefreshRequired |= action.prepareDeferredOwnerPreUpdate();
+			}
+		}
+		if ( collectionRefreshRequired ) {
+			collectionMutationInputs.clear();
+			final var tracker = session.getPersistenceContextInternal().getCollectionFlushActionTracker();
+			if ( tracker instanceof FlushProcessingContext flushProcessingContext ) {
+				flushProcessingContext.refreshCollectionMutationInputs();
+			}
+		}
+	}
+
+	private void prepareCollectionMutationInputs() {
+		if ( collectionMutationInputs.isEmpty() && durableCollectionMutationInputs.isEmpty() ) {
+			return;
+		}
+		final var inputs = new ArrayList<CollectionMutationInput>(
+				collectionMutationInputs.size() + durableCollectionMutationInputs.size()
+		);
+		inputs.addAll( durableCollectionMutationInputs );
+		inputs.addAll( collectionMutationInputs );
+		lower( inputs, (EventSource) session, this::addPreparedCollectionAction );
+		collectionMutationInputs.clear();
+		durableCollectionMutationInputs.clear();
+		sortCollectionActions();
+	}
+
+	private void addPreparedCollectionAction(CollectionAction action) {
+		if ( action instanceof CollectionRemoveAction remove ) {
+			addCollectionAction( remove );
+		}
+		else if ( action instanceof CollectionUpdateAction update ) {
+			addCollectionAction( update );
+		}
+		else if ( action instanceof CollectionRecreateAction recreate ) {
+			addCollectionAction( recreate );
+		}
+		else if ( action instanceof QueuedOperationCollectionAction queuedOperations ) {
+			addCollectionAction( queuedOperations );
+		}
+		else {
+			throw new AssertionFailure( "Unexpected prepared collection action " + action );
+		}
+	}
+
+	private void prepareOwnerUpdateCallbacks() {
+		final var tracker = session.getPersistenceContextInternal().getCollectionFlushActionTracker();
+		if ( !(tracker instanceof FlushProcessingContext flushProcessingContext) ) {
+			return;
+		}
+		if ( updates != null ) {
+			for ( var action : updates ) {
+				flushProcessingContext.registerOwnerEntityUpdate( action.getInstance(), action.getPersister() );
+			}
+		}
+		registerOwnerCollectionMutations( orphanCollectionRemovals, flushProcessingContext );
+		registerOwnerCollectionMutations( collectionRemovals, flushProcessingContext );
+		registerOwnerCollectionMutations( collectionUpdates, flushProcessingContext );
+		registerOwnerCollectionMutations( collectionCreations, flushProcessingContext );
+		flushProcessingContext.sealOwnerUpdateCallbacks();
+	}
+
+	private static void registerOwnerCollectionMutations(
+			@Nullable ExecutableList<? extends org.hibernate.action.internal.CollectionAction> actions,
+			FlushProcessingContext flushProcessingContext) {
+		if ( actions != null ) {
+			for ( var action : actions ) {
+				final Object affectedOwner;
+				if ( action instanceof CollectionRecreateAction recreate ) {
+					affectedOwner = recreate.getAffectedOwner();
+				}
+				else if ( action instanceof CollectionRemoveAction remove ) {
+					affectedOwner = remove.getAffectedOwner();
+				}
+				else if ( action instanceof CollectionUpdateAction update ) {
+					affectedOwner = update.getAffectedOwner();
+				}
+				else {
+					throw new AssertionFailure( "Unexpected collection action " + action );
+				}
+				flushProcessingContext.registerOwnerCollectionMutation(
+						affectedOwner,
+						action.getPersister().isInverse()
+				);
+			}
+		}
+	}
+
+	private void prepareActions(@Nullable ExecutableList<?> queue) throws HibernateException {
+		if ( queue != null ) {
+			for ( var executable : queue ) {
+				executable.beforeExecutions();
+			}
+		}
+	}
+
+	/**
+	 * Performs cleanup of any held cache soft locks.
+	 *
+	 * @param success Was the transaction successful.
+	 */
+	public void afterTransactionCompletion(boolean success) {
+		if ( !isTransactionCoordinatorShared ) {
+			// Execute completion actions only in transaction owner (aka parent session).
+			transactionCompletionCallbacks.afterTransactionCompletion( success );
+		}
+	}
+
+	@Internal
+	public void executePendingBulkOperationCleanUpActions() {
+		if ( !isTransactionCoordinatorShared && transactionCompletionCallbacks != null ) {
+			// Execute completion actions only in transaction owner (aka parent session).
+			transactionCompletionCallbacks.executePendingBulkOperationCleanUpActions();
+		}
+	}
+
+	/**
+	 * Execute any registered {@link BeforeTransactionCompletionProcess}
+	 */
+	public void beforeTransactionCompletion() {
+		if ( !isTransactionCoordinatorShared ) {
+			// Execute completion actions only in transaction owner (aka parent session).
+			transactionCompletionCallbacks.beforeTransactionCompletion();
+			// Make sure to always execute pending batches before the transaction completes.
+			// One such pending batch could be the pessimistic version increment for an entity
+			session.getJdbcCoordinator().executeBatch();
+		}
+	}
+
+	@Override
+	public void setAuditChangesetContext(Object changelog, Session changesetSession) {
+		session.getAuditWorkQueue().setChangesetContext( changelog, changesetSession );
+	}
+
+	/**
+	 * Check whether any insertion or deletion actions are currently queued.
+	 *
+	 * @return {@code true} if insertions or deletions are currently queued; {@code false} otherwise.
+	 */
+	public boolean areInsertionsOrDeletionsQueued() {
+		return insertions != null && !insertions.isEmpty()
+			|| hasUnresolvedEntityInsertActions()
+			|| deletions != null && !deletions.isEmpty()
+			|| orphanRemovals != null && !orphanRemovals.isEmpty();
+	}
+
+	/**
+	 * Check whether the given tables/query-spaces are to be executed against given the currently queued actions.
+	 *
+	 * @param tables The table/query-spaces to check.
+	 *
+	 * @return {@code true} if we contain pending actions against any of the given tables; {@code false} otherwise.
+	 */
+	public boolean areTablesToBeUpdated(Set<? extends Serializable> tables) {
+		if ( tables.isEmpty() ) {
+			return false;
+		}
+		if ( collectionInputsAffect( tables ) ) {
+			return true;
+		}
+		for ( var action : ORDERED_OPERATIONS ) {
+			final var queue = action.getActions( this );
+			if ( areTablesToBeUpdated( queue, tables ) ) {
+				return true;
+			}
+		}
+		return unresolvedInsertions != null
+			&& areTablesToBeUpdated( unresolvedInsertions, tables );
+	}
+
+	private boolean collectionInputsAffect(Set<? extends Serializable> tables) {
+		return collectionInputsAffect( collectionMutationInputs, tables )
+				|| collectionInputsAffect( durableCollectionMutationInputs, tables );
+	}
+
+	private static boolean collectionInputsAffect(
+			List<CollectionMutationInput> inputs,
+			Set<? extends Serializable> tables) {
+		for ( var input : inputs ) {
+			final var affectedSpace = input.findAffectedQuerySpace( tables );
+			if ( affectedSpace != null ) {
+				ACTION_LOGGER.changesMustBeFlushedToSpace( affectedSpace );
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean areTablesToBeUpdated(@Nullable ExecutableList<?> queue, Set<? extends Serializable> tableSpaces) {
+		if ( queue != null && !queue.isEmpty() ) {
+			for ( var actionSpace : queue.getQuerySpaces() ) {
+				if ( tableSpaces.contains( actionSpace ) ) {
+					ACTION_LOGGER.changesMustBeFlushedToSpace( actionSpace );
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean areTablesToBeUpdated(UnresolvedEntityInsertActions actions, Set<? extends Serializable> tableSpaces) {
+		for ( var action : actions.getDependentEntityInsertActions() ) {
+			for ( var space : action.getPropertySpaces() ) {
+				if ( tableSpaces.contains( space ) ) {
+					ACTION_LOGGER.changesMustBeFlushedToSpace( space );
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Perform {@link Executable#execute()} on each element of the list
+	 *
+	 * @param queue The list of Executable elements to be performed
+	 *
+	 */
+	private <E extends ComparableExecutable> void executeActions(@Nullable ExecutableList<E> queue)
+			throws HibernateException {
+		if ( queue != null && !queue.isEmpty() ) {
+			// todo : consider ways to improve the double iteration of Executables here:
+			//		1) we explicitly iterate list here to perform Executable#execute()
+			//		2) ExecutableList#getQuerySpaces also iterates the Executables to collect query spaces.
+			try {
+				for ( var executable : queue ) {
+					try {
+						executable.execute();
+					}
+					finally {
+						final var beforeCompletionProcess = executable.getBeforeTransactionCompletionProcess();
+						if ( beforeCompletionProcess != null ) {
+							transactionCompletionCallbacks.registerCallback( beforeCompletionProcess );
+						}
+						final var afterCompletionProcess = executable.getAfterTransactionCompletionProcess();
+						if ( afterCompletionProcess != null ) {
+							transactionCompletionCallbacks.registerCallback( afterCompletionProcess );
+						}
+					}
+				}
+			}
+			finally {
+				if ( getSessionFactoryOptions().isQueryCacheEnabled() ) {
+					// Strictly speaking, only a subset of the list may have been processed if a RuntimeException occurs.
+					// We still invalidate all spaces. I don't see this as a big deal - after all, RuntimeExceptions are
+					// unexpected.
+					invalidateSpaces( queue.getQuerySpaces().toArray( new String[0] ) );
+				}
+			}
+
+			queue.clear();
+			session.getJdbcCoordinator().executeBatch();
+		}
+	}
+
+	/**
+	 * @param executable The action to execute
+	 */
+	public <E extends Executable & Comparable<?>> void execute(E executable) {
+		try {
+			executable.execute();
+		}
+		finally {
+			registerCleanupActions( executable );
+		}
+	}
+
+	/**
+	 * This method is now called once per execution of an ExecutableList or once for execution of an Execution.
+	 *
+	 * @param spaces The spaces to invalidate
+	 */
+	private void invalidateSpaces(@Nullable String[] spaces) {
+		if ( spaces != null && spaces.length > 0 ) {
+			for ( var space : spaces ) {
+				transactionCompletionCallbacks.addSpaceToInvalidate( space );
+			}
+			// Performance win: If we are processing an ExecutableList, this will only be called once
+			session.getFactory().getCache().getTimestampsCache().preInvalidate( spaces, session );
+		}
+	}
+
+	/**
+	 * Returns a string representation of the object.
+	 *
+	 * @return a string representation of the object.
+	 */
+	@Override
+	public String toString() {
+		return "ActionQueue[insertions=" + toString( insertions )
+				+ " updates=" + toString( updates )
+				+ " deletions=" + toString( deletions )
+				+ " orphanRemovals=" + toString( orphanRemovals )
+				+ " collectionCreations=" + toString( collectionCreations )
+				+ " collectionRemovals=" + toString( collectionRemovals )
+				+ " collectionUpdates=" + toString( collectionUpdates )
+				+ " collectionQueuedOps=" + toString( collectionQueuedOps )
+				+ " unresolvedInsertDependencies=" + unresolvedInsertions
+				+ "]";
+	}
+
+	private static String toString(@Nullable ExecutableList<?> queue) {
+		return queue == null ? "ExecutableList{size=0}" : queue.toString();
+	}
+
+	public int numberOfCollectionRemovals() {
+		final int removals = collectionRemovals == null ? 0 : collectionRemovals.size();
+		final int orphanRemovals = orphanCollectionRemovals == null ? 0 : orphanCollectionRemovals.size();
+		return removals + orphanRemovals + countInputs( CollectionTransition.REMOVE );
+	}
+
+	public int numberOfCollectionUpdates() {
+		return (collectionUpdates == null ? 0 : collectionUpdates.size())
+				+ countInputs( CollectionTransition.UPDATE );
+	}
+
+	public int numberOfCollectionCreations() {
+		return (collectionCreations == null ? 0 : collectionCreations.size())
+				+ countInputs( CollectionTransition.CREATE );
+	}
+
+	private int countInputs(CollectionTransition kind) {
+		return countInputs( collectionMutationInputs, kind )
+				+ countInputs( durableCollectionMutationInputs, kind );
+	}
+
+	private static int countInputs(List<CollectionMutationInput> inputs, CollectionTransition kind) {
+		int count = 0;
+		for ( var input : inputs ) {
+			if ( input.transition() == kind
+					|| input.transition() == CollectionTransition.REMOVE_AND_CREATE
+						&& (kind == CollectionTransition.REMOVE || kind == CollectionTransition.CREATE) ) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	public int numberOfDeletions() {
+		final int deletes = deletions == null ? 0 : deletions.size();
+		final int orphans = orphanRemovals == null ? 0 : orphanRemovals.size();
+		return deletes + orphans;
+	}
+
+	public int numberOfUpdates() {
+		return updates == null ? 0 : updates.size();
+	}
+
+	public int numberOfInsertions() {
+		return insertions == null ? 0 : insertions.size();
+	}
+
+	public TransactionCompletionCallbacksImplementor getTransactionCompletionCallbacks() {
+		return transactionCompletionCallbacks.forSharing();
+	}
+
+	/**
+	 * Bind transaction completion processes to make them shared between primary and secondary session.
+	 * Transaction completion processes are always executed by transaction owner (primary session),
+	 * but can be registered using secondary session too.
+	 *
+	 * @param callbacks Transaction completion callbacks.
+	 * @param isTransactionCoordinatorShared Flag indicating shared transaction context.
+	 */
+	public void setTransactionCompletionCallbacks(
+			TransactionCompletionCallbacksImplementor callbacks,
+			boolean isTransactionCoordinatorShared) {
+		this.isTransactionCoordinatorShared = isTransactionCoordinatorShared;
+		this.transactionCompletionCallbacks = callbacks;
+	}
+
+	public void sortCollectionActions() {
+		if ( isOrderUpdatesEnabled() ) {
+			// sort the updates by fk
+			if ( collectionCreations != null ) {
+				collectionCreations.sort();
+			}
+			if ( collectionUpdates != null ) {
+				collectionUpdates.sort();
+			}
+			if ( collectionQueuedOps != null ) {
+				collectionQueuedOps.sort();
+			}
+			if ( collectionRemovals != null ) {
+				collectionRemovals.sort();
+			}
+		}
+	}
+
+	public void sortActions() {
+		if ( isOrderUpdatesEnabled() && updates != null ) {
+			// sort the updates by pk
+			updates.sort();
+		}
+		if ( isOrderInsertsEnabled() && insertions != null ) {
+			insertions.sort();
+		}
+	}
+
+	private SessionFactoryOptions getSessionFactoryOptions() {
+		return session.getFactory().getSessionFactoryOptions();
+	}
+
+	private boolean isOrderUpdatesEnabled() {
+		return getSessionFactoryOptions().isOrderUpdatesEnabled();
+	}
+
+	private boolean isOrderInsertsEnabled() {
+		return getSessionFactoryOptions().isOrderInsertsEnabled();
+	}
+
+	@Override
+	public ActionQueueCheckpoint checkpoint() {
+		return new LegacyCheckpoint(
+				this,
+				size( updates ),
+				collectionMutationInputs.size(),
+				size( collectionQueuedOps ),
+				size( collectionRemovals ),
+				size( collectionUpdates ),
+				size( collectionCreations )
+		);
+	}
+
+	@Override
+	public void restore(ActionQueueCheckpoint checkpoint) {
+		if ( !( checkpoint instanceof LegacyCheckpoint legacyCheckpoint )
+				|| legacyCheckpoint.owner() != this ) {
+			throw new IllegalArgumentException( "Checkpoint was not created by this action queue" );
+		}
+		trimToSize( updates, legacyCheckpoint.updatesSize() );
+		trimToSize( collectionMutationInputs, legacyCheckpoint.collectionMutationInputsSize() );
+		trimToSize( collectionQueuedOps, legacyCheckpoint.collectionQueuedOpsSize() );
+		trimToSize( collectionRemovals, legacyCheckpoint.collectionRemovalsSize() );
+		trimToSize( collectionUpdates, legacyCheckpoint.collectionUpdatesSize() );
+		trimToSize( collectionCreations, legacyCheckpoint.collectionCreationsSize() );
+	}
+
+	private static int size(@Nullable ExecutableList<?> actions) {
+		return actions == null ? 0 : actions.size();
+	}
+
+	private static void trimToSize(@Nullable ExecutableList<?> actions, int checkpointSize) {
+		if ( actions != null && actions.size() > checkpointSize ) {
+			actions.removeLastN( actions.size() - checkpointSize );
+		}
+	}
+
+	private static void trimToSize(List<?> actions, int checkpointSize) {
+		if ( actions.size() > checkpointSize ) {
+			actions.subList( checkpointSize, actions.size() ).clear();
+		}
+	}
+
+	private record LegacyCheckpoint(
+			ActionQueueLegacy owner,
+			int updatesSize,
+			int collectionMutationInputsSize,
+			int collectionQueuedOpsSize,
+			int collectionRemovalsSize,
+			int collectionUpdatesSize,
+			int collectionCreationsSize) implements ActionQueueCheckpoint {
+	}
+
+	public boolean hasAfterTransactionActions() {
+		return !isTransactionCoordinatorShared
+			&& transactionCompletionCallbacks.hasAfterCompletionCallbacks();
+	}
+
+	public boolean hasBeforeTransactionActions() {
+		return !isTransactionCoordinatorShared
+			&& transactionCompletionCallbacks.hasBeforeCompletionCallbacks();
+	}
+
+	public boolean hasAnyQueuedActions() {
+		return hasUnresolvedEntityInsertActions()
+			|| !collectionMutationInputs.isEmpty()
+			|| !durableCollectionMutationInputs.isEmpty()
+			|| nonempty( updates )
+			|| nonempty( insertions )
+			|| nonempty( deletions )
+			|| nonempty( collectionUpdates )
+			|| nonempty( collectionQueuedOps )
+			|| nonempty( collectionRemovals )
+			|| nonempty( collectionCreations )
+			|| nonempty( orphanRemovals )
+			|| nonempty( orphanCollectionRemovals );
+	}
+
+	private boolean nonempty(@Nullable ExecutableList<?> queue) {
+		return queue != null && !queue.isEmpty();
+	}
+
+	public void unScheduleUnloadedDeletion(Object newEntity) {
+		final var entityPersister = session.getEntityPersister( null, newEntity );
+		final Object identifier = entityPersister.getIdentifier( newEntity, session );
+		if ( deletions != null ) {
+			for ( int i = 0; i < deletions.size(); i++ ) {
+				final var action = deletions.get( i );
+				if ( action.getInstance() == null
+						&& action.getEntityName().equals( entityPersister.getEntityName() )
+						&& entityPersister.getIdentifierMapping().areEqual( action.getId(), identifier, session ) ) {
+					session.getPersistenceContextInternal()
+							.removeDeletedUnloadedEntityKey( session.generateEntityKey( castNonNull( identifier ), entityPersister ) );
+					deletions.remove( i );
+					return;
+				}
+			}
+		}
+		throw new AssertionFailure( "Unable to perform un-delete for unloaded entity delete " + entityPersister.getEntityName() );
+	}
+
+	public void unScheduleDeletion(EntityEntry entry, Object rescuedEntity) {
+		final var lazyInitializer = extractLazyInitializer( rescuedEntity );
+		if ( lazyInitializer != null && !lazyInitializer.isUninitialized() ) {
+			rescuedEntity = lazyInitializer.getImplementation( session );
+		}
+		if ( deletions != null ) {
+			for ( int i = 0; i < deletions.size(); i++ ) {
+				final var action = deletions.get( i );
+				if ( action.getInstance() == rescuedEntity ) {
+					deletions.remove( i );
+					return;
+				}
+			}
+		}
+		if ( orphanRemovals != null ) {
+			for ( int i = 0; i < orphanRemovals.size(); i++ ) {
+				final var action = orphanRemovals.get( i );
+				if ( action.getInstance() == rescuedEntity ) {
+					orphanRemovals.remove( i );
+					return;
+				}
+			}
+		}
+		throw new AssertionFailure( "Unable to perform un-delete for instance " + entry.getEntityName() );
+	}
+
+	/**
+	 * Used by the owning session to explicitly control serialization of the action queue
+	 *
+	 * @param oos The stream to which the action queue should get written
+	 * @throws IOException Indicates an error writing to the stream
+	 */
+	public void serialize(ObjectOutputStream oos) throws IOException {
+		ACTION_LOGGER.serializingActionQueue();
+		if ( unresolvedInsertions == null ) {
+			unresolvedInsertions = new UnresolvedEntityInsertActions();
+		}
+		unresolvedInsertions.serialize( oos );
+
+		for ( var action : ORDERED_OPERATIONS ) {
+			final var queue = action.getActions( this );
+			if ( queue == null ) {
+				oos.writeBoolean( false );
+			}
+			else {
+				oos.writeBoolean( true );
+				queue.writeExternal( oos );
+			}
+		}
+	}
+
+	/**
+	 * Used by the owning session to explicitly control deserialization of the action queue.
+	 *
+	 * @param ois The stream from which to read the action queue
+	 * @param session The session to which the action queue belongs
+	 * @return The deserialized action queue
+	 * @throws IOException indicates a problem reading from the stream
+	 * @throws ClassNotFoundException Generally means we were unable to locate user classes.
+	 */
+	public static ActionQueueLegacy deserialize(ObjectInputStream ois, EventSource session)
+			throws IOException, ClassNotFoundException {
+		final boolean traceEnabled = ACTION_LOGGER.isTraceEnabled();
+		if ( traceEnabled ) {
+			ACTION_LOGGER.deserializingActionQueue();
+		}
+		final var actionQueue = new ActionQueueLegacy( session );
+		actionQueue.unresolvedInsertions = UnresolvedEntityInsertActions.deserialize( ois, session );
+		for ( var action : ORDERED_OPERATIONS ) {
+			final boolean notNull = ois.readBoolean();
+			if ( notNull ) {
+				var queue = action.getActions( actionQueue );
+				if ( queue == null ) {
+					// trying hard to avoid generic initializations mess
+					action.ensureInitialized( actionQueue );
+					queue = action.getActions( actionQueue );
+				}
+				queue.readExternal( ois );
+				if ( traceEnabled ) {
+					ACTION_LOGGER.deserializedEntries( queue.size() );
+				}
+				queue.afterDeserialize( session );
+			}
+		}
+		return actionQueue;
+	}
+
+	/**
+	 * Order the {@link #insertions} queue such that we group inserts against the same entity together (without
+	 * violating constraints). The original order is generated by cascade order, which in turn is based on the
+	 * directionality of foreign-keys. So even though we will be changing the ordering here, we need to make absolutely
+	 * certain that we do not circumvent this FK ordering to the extent of causing constraint violations.
+	 * <p>
+	 * The algorithm first discovers the transitive incoming dependencies for every insert action
+	 * and groups all inserts by the entity name.
+	 * Finally, it schedules these groups one by one, as long as all the dependencies of the groups are fulfilled.
+	 * </p>
+	 * The implementation will only produce an optimal insert order for the insert groups that can be perfectly scheduled serially.
+	 * Scheduling serially means, that there is an order which doesn't violate the FK constraint dependencies.
+	 * The inserts of insert groups which can't be scheduled, are going to be inserted in the original order.
+	 */
+	// Used by Hibernate Reactive
+	public static class InsertActionSorter implements ExecutableList.Sorter<AbstractEntityInsertAction> {
+		/**
+		 * Singleton access
+		 */
+		public static final InsertActionSorter INSTANCE = new InsertActionSorter();
+
+		private static class InsertInfo {
+			private final AbstractEntityInsertAction insertAction;
+			// Inserts in this set must be executed before this insert
+			private @Nullable Set<InsertInfo> transitiveIncomingDependencies;
+			// Child dependencies of i.e. one-to-many or inverse one-to-one
+			// It's necessary to have this for unidirectional associations, to propagate incoming dependencies
+			private @Nullable Set<InsertInfo> outgoingDependencies;
+			// The current index of the insert info within an insert schedule
+			private int index;
+
+			private InsertInfo(AbstractEntityInsertAction insertAction, int index) {
+				this.insertAction = insertAction;
+				this.index = index;
+			}
+
+			private void buildDirectDependencies(IdentityHashMap<Object, InsertInfo> insertInfosByEntity) {
+				final Object[] propertyValues = insertAction.getState();
+				final Type[] propertyTypes = insertAction.getPersister().getPropertyTypes();
+				for ( int i = 0, propertyTypesLength = propertyTypes.length; i < propertyTypesLength; i++ ) {
+					addDirectDependency( propertyTypes[i], propertyValues[i], insertInfosByEntity );
+				}
+			}
+
+			private void propagateChildDependencies() {
+				if ( outgoingDependencies != null ) {
+					for ( var childDependency : outgoingDependencies ) {
+						if ( childDependency.transitiveIncomingDependencies == null ) {
+							childDependency.transitiveIncomingDependencies = new HashSet<>();
+						}
+						childDependency.transitiveIncomingDependencies.add( this );
+					}
+				}
+			}
+
+			private void buildTransitiveDependencies(Set<InsertInfo> visited) {
+				if ( transitiveIncomingDependencies != null ) {
+					visited.addAll( transitiveIncomingDependencies );
+					for ( var insertInfo : transitiveIncomingDependencies.toArray( new InsertInfo[0] ) ) {
+						insertInfo.addTransitiveDependencies(this.transitiveIncomingDependencies, visited);
+					}
+					visited.clear();
+				}
+			}
+
+			private void addTransitiveDependencies(Set<InsertInfo> origin, Set<InsertInfo> visited) {
+				if ( transitiveIncomingDependencies != null ) {
+					for ( var insertInfo : transitiveIncomingDependencies ) {
+						if ( visited.add( insertInfo ) ) {
+							origin.add( insertInfo );
+							insertInfo.addTransitiveDependencies( origin, visited );
+						}
+					}
+				}
+			}
+
+			private void addDirectDependency(Type type, @Nullable Object value, IdentityHashMap<Object, InsertInfo> insertInfosByEntity) {
+				if ( value != null ) {
+					if ( type instanceof EntityType entityType ) {
+						final var insertInfo = insertInfosByEntity.get( value );
+						if ( insertInfo != null ) {
+							if ( entityType.isOneToOne()
+									&& entityType.getForeignKeyDirection() == ForeignKeyDirection.TO_PARENT ) {
+								if ( !entityType.isReferenceToPrimaryKey() ) {
+									if ( outgoingDependencies == null ) {
+										outgoingDependencies = new HashSet<>();
+									}
+									outgoingDependencies.add( insertInfo );
+								}
+							}
+							else {
+								if ( transitiveIncomingDependencies == null ) {
+									transitiveIncomingDependencies = new HashSet<>();
+								}
+								transitiveIncomingDependencies.add( insertInfo );
+							}
+						}
+					}
+					else if ( type instanceof CollectionType collectionType ) {
+						final var pluralAttributeMapping =
+								insertAction.getSession().getFactory().getMappingMetamodel()
+										.getCollectionDescriptor( collectionType.getRole() )
+										.getAttributeMapping();
+						// We only care about mappedBy one-to-many associations, because for these,
+						// the elements depend on the collection owner
+						if ( pluralAttributeMapping.getCollectionDescriptor().isOneToMany()
+								&& pluralAttributeMapping.getElementDescriptor() instanceof EntityCollectionPart ) {
+							final var elementsIterator = collectionType.getElementsIterator( value );
+							while ( elementsIterator.hasNext() ) {
+								final Object element = elementsIterator.next();
+								final InsertInfo insertInfo = insertInfosByEntity.get( element );
+								if ( insertInfo != null ) {
+									if ( outgoingDependencies == null ) {
+										outgoingDependencies = new HashSet<>();
+									}
+									outgoingDependencies.add( insertInfo );
+								}
+							}
+						}
+					}
+					else if ( type instanceof ComponentType compositeType ) {
+						// Support recursive checks of composite type properties for associations and collections.
+						final var session = insertAction.getSession();
+						final Object[] componentValues = compositeType.getPropertyValues( value, session );
+						for ( int j = 0; j < componentValues.length; ++j ) {
+							final Type componentValueType = compositeType.getSubtypes()[j];
+							final Object componentValue = componentValues[j];
+							addDirectDependency( componentValueType, componentValue, insertInfosByEntity );
+						}
+					}
+				}
+			}
+
+			@Override
+			public boolean equals(@Nullable Object object) {
+				return this == object
+					|| object instanceof InsertInfo that
+						&& insertAction.equals( that.insertAction );
+			}
+
+			@Override
+			public int hashCode() {
+				return insertAction.hashCode();
+			}
+
+			@Override
+			public String toString() {
+				return "InsertInfo{" +
+					"insertAction=" + insertAction +
+					'}';
+			}
+		}
+
+		public InsertActionSorter() {
+		}
+
+		/**
+		 * Sort the insert actions.
+		 */
+		public void sort(List<AbstractEntityInsertAction> insertions) {
+			final int insertInfoCount = insertions.size();
+			// Build up dependency metadata for insert actions
+			final InsertInfo[] insertInfos = new InsertInfo[insertInfoCount];
+			// A map of all insert infos keyed by the entity instance
+			// This is needed to discover insert infos for direct dependencies
+			final IdentityHashMap<Object, InsertInfo> insertInfosByEntity =
+					new IdentityHashMap<>( insertInfos.length );
+			// Construct insert infos and build a map for that, keyed by entity instance
+			for (int i = 0; i < insertInfoCount; i++) {
+				final var insertAction = insertions.get(i);
+				final var insertInfo = new InsertInfo( insertAction, i );
+				insertInfosByEntity.put( insertAction.getInstance(), insertInfo );
+				insertInfos[i] = insertInfo;
+			}
+			// First we must discover the direct dependencies
+			for (int i = 0; i < insertInfoCount; i++) {
+				insertInfos[i].buildDirectDependencies( insertInfosByEntity );
+			}
+			// Then we can propagate child dependencies to the insert infos incoming dependencies
+			for (int i = 0; i < insertInfoCount; i++) {
+				insertInfos[i].propagateChildDependencies();
+			}
+			// Finally, we add all the transitive incoming dependencies
+			// and then group insert infos into EntityInsertGroup keyed by entity name
+			final Set<InsertInfo> visited = new HashSet<>();
+			final Map<String, EntityInsertGroup> insertInfosByEntityName = new LinkedHashMap<>();
+			for (int i = 0; i < insertInfoCount; i++) {
+				final InsertInfo insertInfo = insertInfos[i];
+				insertInfo.buildTransitiveDependencies( visited );
+
+				final String entityName = insertInfo.insertAction.getPersister().getEntityName();
+				var entityInsertGroup = insertInfosByEntityName.get( entityName );
+				if (entityInsertGroup == null) {
+					entityInsertGroup = new EntityInsertGroup( entityName );
+					insertInfosByEntityName.put( entityName, entityInsertGroup );
+				}
+				entityInsertGroup.add( insertInfo );
+			}
+			// Now we can go through the EntityInsertGroups and schedule all the ones
+			// for which we have already scheduled all the dependentEntityNames
+			final Set<String> scheduledEntityNames = new HashSet<>( insertInfosByEntityName.size() );
+			int schedulePosition = 0;
+			int lastScheduleSize;
+			do {
+				lastScheduleSize = scheduledEntityNames.size();
+				final var iterator = insertInfosByEntityName.values().iterator();
+				while ( iterator.hasNext() ) {
+					final var insertGroup = iterator.next();
+					if ( scheduledEntityNames.containsAll( insertGroup.dependentEntityNames) ) {
+						schedulePosition = schedule( insertInfos, insertGroup.insertInfos, schedulePosition );
+						scheduledEntityNames.add( insertGroup.entityName );
+						iterator.remove();
+					}
+				}
+				// we try to schedule entity groups over and over again, until we can't schedule any further
+			}
+			while ( lastScheduleSize != scheduledEntityNames.size() );
+			if ( !insertInfosByEntityName.isEmpty() ) {
+				ACTION_LOGGER.batchCouldNotBeSorted( insertions.size() );
+			}
+			insertions.clear();
+			for ( var insertInfo : insertInfos ) {
+				insertions.add( insertInfo.insertAction );
+			}
+		}
+
+		private int schedule(InsertInfo [] insertInfos, List<InsertInfo> insertInfosToSchedule, int schedulePosition) {
+			final InsertInfo[] newInsertInfos = new InsertInfo[insertInfos.length];
+			// The bitset is there to quickly query if an index is already scheduled
+			final BitSet bitSet = new BitSet( insertInfos.length );
+			// Remember the smallest index of the insertInfosToSchedule to check if we actually need to reorder anything
+			int smallestScheduledIndex = -1;
+			// The biggestScheduledIndex is needed as upper bound for shifting elements that were replaced by insertInfosToSchedule
+			int biggestScheduledIndex = -1;
+			for ( int i = 0; i < insertInfosToSchedule.size(); i++ ) {
+				final int index = insertInfosToSchedule.get(i).index;
+				bitSet.set(index);
+				smallestScheduledIndex = Math.min( smallestScheduledIndex, index );
+				biggestScheduledIndex = Math.max( biggestScheduledIndex, index );
+			}
+			final int nextSchedulePosition = schedulePosition + insertInfosToSchedule.size();
+			if ( smallestScheduledIndex == schedulePosition && biggestScheduledIndex == nextSchedulePosition ) {
+				// In this case, the order is already correct and we can skip some copying
+				return nextSchedulePosition;
+			}
+			// The index to which we start to shift elements that appear within the range of [schedulePosition, nextSchedulePosition)
+			int shiftSchedulePosition = nextSchedulePosition;
+			for (int i = 0; i < insertInfosToSchedule.size(); i++) {
+				final var insertInfoToSchedule = insertInfosToSchedule.get(i);
+				final int targetSchedulePosition = schedulePosition + i;
+				newInsertInfos[targetSchedulePosition] = insertInfoToSchedule;
+				insertInfoToSchedule.index = targetSchedulePosition;
+				final var oldInsertInfo = insertInfos[targetSchedulePosition];
+				// Move the insert info previously located at the target schedule position to the current shift position
+				if ( !bitSet.get( targetSchedulePosition ) ) {
+					oldInsertInfo.index = shiftSchedulePosition;
+					// Also set this index in the bitset to skip copying the value later, as it is considered scheduled
+					bitSet.set( targetSchedulePosition );
+					newInsertInfos[shiftSchedulePosition++]= oldInsertInfo;
+				}
+			}
+			// We have to shift all the elements up to the biggestMovedIndex + 1
+			biggestScheduledIndex++;
+			for ( int i = bitSet.nextClearBit(schedulePosition); i < biggestScheduledIndex; i++ ) {
+				// Only copy the old insert info over if it wasn't already scheduled
+				if ( !bitSet.get(i) ) {
+					final var insertInfo = insertInfos[i];
+					insertInfo.index = shiftSchedulePosition;
+					newInsertInfos[shiftSchedulePosition++] = insertInfo;
+				}
+			}
+			// Copy over the newly reordered array part into the main array
+			arraycopy( newInsertInfos, schedulePosition, insertInfos, schedulePosition,
+					biggestScheduledIndex - schedulePosition );
+			return nextSchedulePosition;
+		}
+
+		public static class EntityInsertGroup {
+			private final String entityName;
+			private final List<InsertInfo> insertInfos = new ArrayList<>();
+			private final Set<String> dependentEntityNames = new HashSet<>();
+
+			public EntityInsertGroup(String entityName) {
+				this.entityName = entityName;
+			}
+
+			public void add(InsertInfo insertInfo) {
+				insertInfos.add(insertInfo);
+				if ( insertInfo.transitiveIncomingDependencies != null ) {
+					for ( var dependency : insertInfo.transitiveIncomingDependencies ) {
+						dependentEntityNames.add( dependency.insertAction.getEntityName() );
+					}
+				}
+			}
+
+			@Override
+			public String toString() {
+				return "EntityInsertGroup{" +
+					"entityName='" + entityName + '\'' +
+					'}';
+			}
+		}
+
+	}
+
+}

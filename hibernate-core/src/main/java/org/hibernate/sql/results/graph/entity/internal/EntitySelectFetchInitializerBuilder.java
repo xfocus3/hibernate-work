@@ -1,0 +1,180 @@
+package org.hibernate.sql.results.graph.entity.internal;
+
+import org.hibernate.FetchMethod;
+import org.hibernate.engine.FetchStyle;
+import org.hibernate.engine.spi.FetchOptions;
+import org.hibernate.metamodel.internal.StandardEmbeddableInstantiator;
+import org.hibernate.metamodel.mapping.EntityValuedModelPart;
+import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
+import org.hibernate.persister.entity.EntityPersister;
+import org.hibernate.spi.NavigablePath;
+import org.hibernate.sql.results.graph.AssemblerCreationState;
+import org.hibernate.sql.results.graph.DomainResult;
+import org.hibernate.sql.results.graph.InitializerParent;
+import org.hibernate.sql.results.graph.entity.EntityInitializer;
+
+import static org.hibernate.sql.results.graph.entity.internal.EntitySelectFetchInitializerBuilder.BatchMode.BATCH_INITIALIZE;
+import static org.hibernate.sql.results.graph.entity.internal.EntitySelectFetchInitializerBuilder.BatchMode.BATCH_LOAD;
+import static org.hibernate.sql.results.graph.entity.internal.EntitySelectFetchInitializerBuilder.BatchMode.NONE;
+
+public class EntitySelectFetchInitializerBuilder {
+
+	public static EntityInitializer<?> createInitializer(
+			InitializerParent<?> parent,
+			ToOneAttributeMapping fetchedAttribute,
+			EntityPersister entityPersister,
+			DomainResult<?> keyResult,
+			NavigablePath navigablePath,
+			boolean selectByUniqueKey,
+			boolean affectedByFilter,
+			FetchOptions fetchOptions,
+			AssemblerCreationState creationState) {
+		if ( selectByUniqueKey ) {
+			return new EntitySelectFetchByUniqueKeyInitializer(
+					parent,
+					fetchedAttribute,
+					navigablePath,
+					entityPersister,
+					keyResult,
+					affectedByFilter,
+					fetchOptions,
+					creationState
+			);
+		}
+		if ( !parent.isEntityInitializer() && parent.findOwningEntityInitializer() == null
+				// Native SQL cannot supply the additional visibility selection. Resolve it before
+				// storing the owning entity's nullness information and cache entry.
+				|| affectedByFilter && !(keyResult instanceof RestrictedForeignKeyResult<?>) ) {
+			// Batch initializers require an owning parent initializer
+			return new EntitySelectFetchInitializer<>(
+					parent,
+					fetchedAttribute,
+					navigablePath,
+					entityPersister,
+					keyResult,
+					affectedByFilter,
+					fetchOptions,
+					creationState
+			);
+		}
+		switch ( determineBatchMode( entityPersister, parent, fetchedAttribute, fetchOptions, creationState ) ) {
+			case NONE:
+				return new EntitySelectFetchInitializer<>(
+						parent,
+						fetchedAttribute,
+						navigablePath,
+						entityPersister,
+						keyResult,
+						affectedByFilter,
+						fetchOptions,
+						creationState
+				);
+			case BATCH_LOAD:
+				if ( parent.isEmbeddableInitializer() ) {
+					return new BatchEntityInsideEmbeddableSelectFetchInitializer(
+							parent,
+							fetchedAttribute,
+							navigablePath,
+							entityPersister,
+							keyResult,
+							affectedByFilter,
+							fetchOptions,
+							creationState
+					);
+				}
+				else {
+					return new BatchEntitySelectFetchInitializer(
+							parent,
+							fetchedAttribute,
+							navigablePath,
+							entityPersister,
+							keyResult,
+							affectedByFilter,
+							fetchOptions,
+							creationState
+					);
+				}
+			case BATCH_INITIALIZE:
+				return new BatchInitializeEntitySelectFetchInitializer(
+						parent,
+						fetchedAttribute,
+						navigablePath,
+						entityPersister,
+						keyResult,
+						affectedByFilter,
+						fetchOptions,
+						creationState
+				);
+		}
+		throw new IllegalStateException( "Should be unreachable" );
+	}
+
+	private static BatchMode determineBatchMode(
+			EntityPersister entityPersister,
+			InitializerParent<?> parent,
+			ToOneAttributeMapping fetchedAttribute,
+			FetchOptions fetchOptions,
+			AssemblerCreationState creationState) {
+		final var batchSize = fetchOptions.batchSize();
+		if ( batchSize != null && batchSize <= 1 ) {
+			return NONE;
+		}
+		else if ( fetchOptions.fetchMethod() == FetchMethod.BY_SUBQUERY
+				|| fetchedAttribute.getMappedFetchOptions().getStyle() == FetchStyle.SUBSELECT ) {
+			return BATCH_LOAD;
+		}
+		else if ( batchSize == null && !entityPersister.isBatchLoadable() ) {
+			return NONE;
+		}
+		else if ( creationState.isDynamicInstantiation() ) {
+			return canBatchInitializeBeUsed( entityPersister )
+					? BATCH_INITIALIZE
+					: NONE;
+		}
+		while ( parent.isEmbeddableInitializer() ) {
+			final var initializedPart = parent.asEmbeddableInitializer().getInitializedPart();
+			// For entity identifier mappings we can't batch load,
+			// because the entity identifier needs the instance in the resolveKey phase,
+			// but batch loading is inherently executed out of order
+			if ( initializedPart.isEntityIdentifierMapping()
+					// todo: check if the virtual check is necessary
+					|| initializedPart.isVirtual()
+					|| initializedPart.getMappedType().isPolymorphic()
+					// If the parent embeddable has a custom instantiator,
+					// we can't inject entities later through setValues()
+					|| !( initializedPart.getMappedType().getRepresentationStrategy().getInstantiator()
+								instanceof StandardEmbeddableInstantiator ) ) {
+				return entityPersister.hasSubclasses() ? NONE : BATCH_INITIALIZE;
+			}
+			parent = parent.getParent();
+			if ( parent == null ) {
+				break;
+			}
+		}
+		if ( parent != null ) {
+			assert parent.getInitializedPart() instanceof EntityValuedModelPart;
+			final var parentPersister = parent.asEntityInitializer().getEntityDescriptor();
+			final var cacheAccess = parentPersister.getCacheAccessStrategy();
+			if ( cacheAccess != null ) {
+				// Do batch initialization instead of batch loading if the parent entity is cacheable
+				// to avoid putting entity state into the cache at a point when the association is not yet set
+				return canBatchInitializeBeUsed( entityPersister )
+						? BATCH_INITIALIZE
+						: NONE;
+			}
+		}
+		return BATCH_LOAD;
+	}
+
+	private static boolean canBatchInitializeBeUsed(EntityPersister entityPersister) {
+		//  we need to create a Proxy in order to use batch initialize
+		return entityPersister.getRepresentationStrategy().getProxyFactory() != null;
+	}
+
+	enum BatchMode {
+		NONE,
+		BATCH_LOAD,
+		BATCH_INITIALIZE
+	}
+
+}

@@ -1,0 +1,202 @@
+package org.hibernate.type;
+
+import org.hibernate.SPI;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.Incubating;
+import org.hibernate.boot.MetadataBuilder;
+import org.hibernate.boot.model.TypeContributions;
+import org.hibernate.dialect.Dialect;
+import org.hibernate.engine.spi.SessionFactoryImplementor;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.spi.IndexedConsumer;
+import org.hibernate.metamodel.mapping.BasicValuedMapping;
+import org.hibernate.metamodel.mapping.JdbcMapping;
+import org.hibernate.metamodel.mapping.MappingType;
+import org.hibernate.metamodel.model.domain.BasicDomainType;
+import org.hibernate.query.sqm.tree.spi.domain.SqmDomainType;
+import org.hibernate.type.descriptor.ValueBinder;
+import org.hibernate.type.descriptor.ValueExtractor;
+import org.hibernate.type.descriptor.converter.spi.BasicValueConverter;
+import org.hibernate.type.descriptor.java.JavaType;
+import org.hibernate.type.descriptor.jdbc.JdbcLiteralFormatter;
+
+import static org.hibernate.SPI.Role.IMPLEMENT;
+import static org.hibernate.SPI.Role.SUPPLY;
+import static org.hibernate.SPI.Role.USE;
+
+/// Describes a basic value mapping which combines its Java and JDBC type
+/// descriptors with the runtime mapping contracts required by Hibernate.
+///
+/// Implement this contract to provide a custom basic type, then supply the
+/// implementation through one of the linked bootstrap registration points.
+///
+/// @see TypeContributions#contributeType(BasicType)
+/// @see TypeContributions#contributeType(BasicType, String...)
+/// @see BasicTypeRegistry#register(BasicType)
+/// @see BasicTypeRegistry#register(BasicType, String)
+/// @see BasicTypeRegistry#register(BasicType, String...)
+/// @see MetadataBuilder#applyBasicType(BasicType)
+/// @see MetadataBuilder#applyBasicType(BasicType, String...)
+///
+/// @author Steve Ebersole
+@SPI({ USE, IMPLEMENT, SUPPLY })
+public interface BasicType<T>
+		extends Type, BasicDomainType<T>, MappingType, BasicValuedMapping, JdbcMapping, SqmDomainType<T> {
+	/**
+	 * Get the names under which this type should be registered in the type registry.
+	 *
+	 * @return The keys under which to register this type.
+	 */
+	String[] getRegistrationKeys();
+
+	@Override
+	@Nonnull
+	default Class<T> getJavaType() {
+		return BasicDomainType.super.getJavaType();
+	}
+
+	@Nonnull
+	@Override
+	default MappingType getMappedType() {
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	default JavaType<T> getJavaTypeDescriptor() {
+		return getMappedJavaType();
+	}
+
+	@Nonnull
+	@Override
+	default JavaType<T> getExpressibleJavaType() {
+		return getJavaTypeDescriptor();
+	}
+
+	@Override
+	default int forEachJdbcType(@Nonnull IndexedConsumer<JdbcMapping> action) {
+		action.accept( 0, this );
+		return 1;
+	}
+
+	@Nonnull
+	@Override
+	default JdbcMapping getJdbcMapping() {
+		return this;
+	}
+
+	@Override
+	default int getJdbcTypeCount() {
+		return 1;
+	}
+
+	@Nonnull
+	@Override
+	default JdbcMapping getJdbcMapping(int index) {
+		if ( index != 0 ) {
+			throw new IndexOutOfBoundsException( index );
+		}
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	default JdbcMapping getSingleJdbcMapping() {
+		return this;
+	}
+
+	@Nonnull
+	@Override
+	default JavaType<T> getMappedJavaType() {
+		return getJavaTypeDescriptor();
+	}
+
+	@Nullable
+	@Override
+	@Incubating(since = "6.1")
+	default BasicValueConverter<T, ?> getValueConverter() {
+		return null;
+	}
+
+	@Nonnull
+	@Override
+	default ValueExtractor<T> getJdbcValueExtractor() {
+		return getJdbcType().getExtractor( this.getMappedJavaType() );
+	}
+
+	@Nonnull
+	@Override
+	default ValueBinder<T> getJdbcValueBinder() {
+		return getJdbcType().getBinder( this.getMappedJavaType() );
+	}
+
+	@Nullable
+	@Override
+	default JdbcLiteralFormatter<T> getJdbcLiteralFormatter() {
+		return getJdbcType().getJdbcLiteralFormatter( getMappedJavaType() );
+	}
+
+	@Override
+	default int forEachJdbcType(int offset, @Nonnull IndexedConsumer<JdbcMapping> action) {
+		action.accept( offset, getJdbcMapping() );
+		return getJdbcTypeCount();
+	}
+
+	@Override
+	default @Nullable SqmDomainType<T> getSqmType() {
+		return this;
+	}
+
+	@Nullable
+	@Override
+	default Object disassemble(@Nullable Object value, @Nullable SharedSessionContractImplementor session) {
+		return value;
+	}
+
+	@Override
+	default <X, Y> int forEachDisassembledJdbcValue(
+			@Nullable Object value,
+			int offset,
+			@Nullable X x,
+			@Nullable Y y,
+			@Nonnull JdbcValuesBiConsumer<X, Y> valuesConsumer,
+			@Nullable SharedSessionContractImplementor session) {
+		valuesConsumer.consume( offset, x, y, value, getJdbcMapping() );
+		return getJdbcTypeCount();
+	}
+
+	/**
+	 * The check constraint that should be added to the column
+	 * definition in generated DDL.
+	 *
+	 * @param columnName the name of the column
+	 * @param dialect the SQL {@link Dialect}
+	 * @return a check constraint condition or null
+	 * @since 6.2
+	 */
+	@Incubating(since = "6.2")
+	default String getCheckCondition(String columnName, Dialect dialect) {
+		String checkCondition = getJdbcType().getCheckCondition(
+				columnName,
+				getMappedJavaType(),
+				getValueConverter(),
+				dialect
+		);
+		if ( checkCondition == null ) {
+			checkCondition = getMappedJavaType().getCheckCondition(
+					columnName,
+					getJdbcType(),
+					getValueConverter(),
+					dialect
+			);
+		}
+		return checkCondition;
+	}
+
+	@Override
+	default int compare(@Nullable Object x, @Nullable Object y, SessionFactoryImplementor sessionFactory) {
+		return compare( x, y );
+	}
+}

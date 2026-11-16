@@ -1,0 +1,52 @@
+package org.hibernate.query.criteria;
+
+import jakarta.annotation.Nonnull;
+import jakarta.persistence.criteria.Nulls;
+import org.hibernate.Incubating;
+import org.hibernate.query.SortDirection;
+
+/**
+ * Represents the search order for a recursive CTE (common table expression).
+ *
+ * @see JpaCteCriteria
+ */
+@Incubating(since = "6.3")
+public interface JpaSearchOrder extends JpaCriteriaNode {
+	/**
+	 * Return the sort direction.
+	 */
+	@Nonnull
+	SortDirection getSortOrder();
+
+	/**
+	 * Set the precedence of nulls for this search order element
+	 */
+	@Nonnull
+	JpaSearchOrder nullPrecedence(@Nonnull Nulls precedence);
+
+	/**
+	 * The precedence for nulls for this search order element
+	 */
+	@Nonnull
+	Nulls getNullPrecedence();
+
+	/**
+	 * Whether ascending ordering is in effect.
+	 * @return boolean indicating whether ordering is ascending
+	 */
+	boolean isAscending();
+
+	/**
+	 * Switch the ordering.
+	 * @return a new <code>Order</code> instance with the reversed ordering
+	 */
+	@Nonnull
+	JpaSearchOrder reverse();
+
+	/**
+	 * Return the CTE attribute that is used for ordering.
+	 * @return CTE attribute used for ordering
+	 */
+	@Nonnull
+	JpaCteCriteriaAttribute getAttribute();
+}

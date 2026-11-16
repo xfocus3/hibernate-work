@@ -1,0 +1,192 @@
+package org.hibernate.tool.schema.extract.internal;
+
+import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.Map;
+
+import jakarta.annotation.Nonnull;
+import jakarta.annotation.Nullable;
+import org.hibernate.boot.model.naming.Identifier;
+import org.hibernate.boot.model.relational.Namespace;
+import org.hibernate.boot.model.relational.QualifiedSequenceName;
+import org.hibernate.boot.model.relational.QualifiedTableName;
+import org.hibernate.boot.model.relational.SqlStringGenerationContext;
+import org.hibernate.engine.jdbc.env.spi.JdbcEnvironment;
+import org.hibernate.resource.transaction.spi.DdlTransactionIsolator;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.tool.schema.extract.spi.DatabaseInformation;
+import org.hibernate.tool.schema.extract.spi.ExtractionContext;
+import org.hibernate.tool.schema.extract.spi.ForeignKeyInformation;
+import org.hibernate.tool.schema.extract.spi.IndexInformation;
+import org.hibernate.tool.schema.extract.spi.InformationExtractor;
+import org.hibernate.tool.schema.extract.spi.NameSpaceTablesInformation;
+import org.hibernate.tool.schema.extract.spi.PrimaryKeyInformation;
+import org.hibernate.tool.schema.extract.spi.SchemaExtractionException;
+import org.hibernate.tool.schema.extract.spi.SequenceInformation;
+import org.hibernate.tool.schema.extract.spi.TableInformation;
+import org.hibernate.tool.schema.spi.SchemaManagementTool;
+
+/**
+ * @author Steve Ebersole
+ */
+public class DatabaseInformationImpl
+		implements DatabaseInformation, ExtractionContext.DatabaseObjectAccess {
+	protected final JdbcEnvironment jdbcEnvironment;
+	protected final SqlStringGenerationContext context;
+	protected final ExtractionContext extractionContext;
+	protected final InformationExtractor extractor;
+
+	private final Map<QualifiedSequenceName, SequenceInformation> sequenceInformationMap = new HashMap<>();
+
+	public DatabaseInformationImpl(
+			ServiceRegistry serviceRegistry,
+			JdbcEnvironment jdbcEnvironment,
+			SqlStringGenerationContext context,
+			DdlTransactionIsolator ddlTransactionIsolator,
+			SchemaManagementTool tool) throws SQLException {
+		this.jdbcEnvironment = jdbcEnvironment;
+		this.context = context;
+		final var extractionTool = tool.getExtractionTool();
+		extractionContext =
+				extractionTool.createExtractionContext(
+						serviceRegistry,
+						jdbcEnvironment,
+						context,
+						ddlTransactionIsolator,
+						this
+				);
+		extractor = extractionTool.createInformationExtractor( extractionContext );
+		// because we do not have defined a way to locate sequence info by name
+		initializeSequences();
+	}
+
+	private static QualifiedSequenceName unqualifiedSequenceName(QualifiedSequenceName sequenceName) {
+		return new QualifiedSequenceName( null, null, sequenceName.getSequenceName() );
+	}
+
+	private void initializeSequences() throws SQLException {
+		final var sequences =
+				jdbcEnvironment.getDialect().getSequenceInformationExtractor()
+						.extractMetadata( extractionContext );
+		for ( var sequenceInformation : sequences ) {
+			sequenceInformationMap.put(
+					// for now, follow the legacy behavior of storing just the
+					// unqualified sequence name.
+					unqualifiedSequenceName( sequenceInformation.getSequenceName() ),
+					sequenceInformation
+			);
+		}
+	}
+
+	@Override
+	public boolean catalogExists(@Nonnull Identifier catalog) {
+		return extractor.catalogExists( context.catalogWithDefault( catalog ) );
+	}
+
+	@Override
+	public boolean schemaExists(@Nonnull Namespace.Name namespace) {
+		return extractor.schemaExists( context.catalogWithDefault( namespace.catalog() ),
+				context.schemaWithDefault( namespace.schema() ) );
+	}
+
+	@Override
+	public @Nullable TableInformation getTableInformation(
+			@Nullable Identifier catalogName,
+			@Nullable Identifier schemaName,
+			@Nonnull Identifier tableName) {
+		return getTableInformation( new QualifiedTableName( catalogName, schemaName, tableName ) );
+	}
+
+	@Override
+	public @Nullable TableInformation getTableInformation(
+			@Nonnull Namespace.Name namespace,
+			@Nonnull Identifier tableName) {
+		return getTableInformation( new QualifiedTableName( namespace, tableName ) );
+	}
+
+	@Override
+	public @Nullable TableInformation getTableInformation(@Nonnull QualifiedTableName tableName) {
+		if ( tableName.getObjectName() == null ) {
+			throw new IllegalArgumentException( "Passed table name cannot be null" );
+		}
+		return extractor.getTable(
+				context.catalogWithDefault( tableName.getCatalogName() ),
+				context.schemaWithDefault( tableName.getSchemaName() ),
+				tableName.getTableName()
+		);
+	}
+
+	@Override
+	public @Nonnull NameSpaceTablesInformation getTablesInformation(@Nonnull Namespace namespace) {
+		return extractor.getTables( context.catalogWithDefault( namespace.getPhysicalName().catalog() ),
+				context.schemaWithDefault( namespace.getPhysicalName().schema() ) );
+	}
+
+	@Override
+	public @Nullable SequenceInformation getSequenceInformation(
+			@Nullable Identifier catalogName,
+			@Nullable Identifier schemaName,
+			@Nonnull Identifier sequenceName) {
+		return getSequenceInformation( new QualifiedSequenceName( catalogName, schemaName, sequenceName ) );
+	}
+
+	@Override
+	public @Nullable SequenceInformation getSequenceInformation(
+			@Nonnull Namespace.Name schemaName,
+			@Nonnull Identifier sequenceName) {
+		return getSequenceInformation( new QualifiedSequenceName( schemaName, sequenceName ) );
+	}
+
+	@Override
+	public @Nullable SequenceInformation getSequenceInformation(@Nonnull QualifiedSequenceName sequenceName) {
+		return locateSequenceInformation( sequenceName );
+	}
+
+	@Override
+	public void cleanup() {
+		extractionContext.cleanup();
+	}
+
+	@Override
+	public @Nullable TableInformation locateTableInformation(@Nonnull QualifiedTableName tableName) {
+		return getTableInformation( tableName );
+	}
+
+	@Override
+	public @Nullable SequenceInformation locateSequenceInformation(@Nonnull QualifiedSequenceName sequenceName) {
+		// again, follow legacy behavior
+		if ( sequenceName.getCatalogName() != null || sequenceName.getSchemaName() != null ) {
+			sequenceName = unqualifiedSequenceName( sequenceName );
+		}
+		return sequenceInformationMap.get( sequenceName );
+	}
+
+	@Override
+	public @Nullable PrimaryKeyInformation locatePrimaryKeyInformation(@Nonnull QualifiedTableName tableName) {
+		return extractor.getPrimaryKey( locateNonNullTableInformation( tableName ) );
+	}
+
+	@Override
+	public @Nonnull Iterable<ForeignKeyInformation> locateForeignKeyInformation(
+			@Nonnull QualifiedTableName tableName) {
+		return extractor.getForeignKeys( locateNonNullTableInformation( tableName ) );
+	}
+
+	@Override
+	public @Nonnull Iterable<IndexInformation> locateIndexesInformation(@Nonnull QualifiedTableName tableName) {
+		return extractor.getIndexes( locateNonNullTableInformation( tableName ) );
+	}
+
+	private TableInformation locateNonNullTableInformation(QualifiedTableName tableName) {
+		final TableInformation tableInformation = locateTableInformation( tableName );
+		if ( tableInformation == null ) {
+			throw new SchemaExtractionException( "Could not locate table information for " + tableName );
+		}
+		return tableInformation;
+	}
+
+	@Override
+	public boolean isCaching() {
+		return false;
+	}
+}

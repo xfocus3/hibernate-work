@@ -1,0 +1,237 @@
+package org.hibernate.boot.jaxb.internal;
+
+import java.util.function.Function;
+import java.util.function.Supplier;
+import javax.xml.namespace.QName;
+import javax.xml.stream.XMLEventFactory;
+import javax.xml.stream.XMLEventReader;
+import javax.xml.stream.events.StartElement;
+
+import org.hibernate.Internal;
+import org.hibernate.boot.ResourceStreamLocator;
+import org.hibernate.boot.UnsupportedOrmXsdVersionException;
+import org.hibernate.boot.jaxb.Origin;
+import org.hibernate.boot.jaxb.hbm.spi.JaxbHbmHibernateMapping;
+import org.hibernate.boot.jaxb.hbm.transform.UnsupportedFeatureHandling;
+import org.hibernate.boot.jaxb.internal.stax.AbstractEventReader;
+import org.hibernate.boot.jaxb.internal.stax.HbmEventReader;
+import org.hibernate.boot.jaxb.internal.stax.MappingEventReader;
+import org.hibernate.boot.jaxb.mapping.spi.JaxbEntityMappingsImpl;
+import org.hibernate.boot.jaxb.spi.Binding;
+import org.hibernate.boot.jaxb.spi.JaxbBindableMappingDescriptor;
+import org.hibernate.boot.registry.classloading.spi.ClassLoaderService;
+import org.hibernate.boot.xsd.MappingXsdSupport;
+import org.hibernate.cfg.MappingSettings;
+import org.hibernate.engine.config.spi.ConfigurationService;
+import org.hibernate.internal.util.config.ConfigurationException;
+import org.hibernate.service.ServiceRegistry;
+import org.hibernate.service.spi.ServiceRegistryImplementor;
+
+
+import jakarta.xml.bind.JAXBContext;
+import jakarta.xml.bind.JAXBException;
+import jakarta.annotation.Nullable;
+
+import static org.hibernate.boot.jaxb.JaxbLogger.JAXB_LOGGER;
+import static org.hibernate.cfg.AvailableSettings.VALIDATE_XML;
+import static org.hibernate.engine.config.spi.StandardConverters.BOOLEAN;
+
+/**
+ * Responsible for coordinating binding of mapping XML documents into
+ * JAXB representations, producing {@link Binding} references.
+ *
+ * @author Steve Ebersole
+ */
+public class MappingBinder extends AbstractBinder<JaxbBindableMappingDescriptor> {
+
+	private final XMLEventFactory xmlEventFactory = XMLEventFactory.newInstance();
+
+	private final Supplier<Options> optionsAccess;
+
+	/**
+	 * Null when this binder was not given access to Hibernate settings (e.g. built
+	 * directly with an {@link Options} instance), in which case the XML-security-related
+	 * setting {@link #isDtdAndExternalEntitiesAllowed()} falls back to its secure default.
+	 */
+	private final @Nullable Function<String, Object> settingsAccess;
+
+	private JAXBContext hbmJaxbContext;
+	private JAXBContext entityMappingsJaxbContext;
+
+	public interface Options {
+		boolean validateMappings();
+	}
+
+	public static final Options VALIDATING = new Options() {
+		@Override
+		public boolean validateMappings() {
+			return true;
+		}
+	};
+
+	public static final Options NON_VALIDATING = new Options() {
+		@Override
+		public boolean validateMappings() {
+			return true;
+		}
+	};
+
+	/**
+	 * Full constructor
+	 */
+	public MappingBinder(
+			ResourceStreamLocator resourceStreamLocator,
+			Supplier<Options> optionsAccess,
+			Supplier<UnsupportedFeatureHandling> unsupportedHandlingAccess) {
+		super( resourceStreamLocator );
+		this.optionsAccess = optionsAccess;
+		this.settingsAccess = null;
+	}
+
+	/**
+	 * Full non-lazy constructor
+	 */
+	private MappingBinder(
+			ResourceStreamLocator resourceStreamLocator,
+			Options options,
+			UnsupportedFeatureHandling unsupportedHandling) {
+		this( resourceStreamLocator, () -> options, () -> unsupportedHandling );
+	}
+
+	public MappingBinder(
+			ResourceStreamLocator resourceStreamLocator,
+			@Nullable Function<String, Object> settingsAccess) {
+		super( resourceStreamLocator == null
+				? MappingBinder.class.getClassLoader()::getResourceAsStream
+				: resourceStreamLocator );
+
+		this.settingsAccess = settingsAccess;
+		if ( settingsAccess == null ) {
+			this.optionsAccess = () -> VALIDATING;
+		}
+		else {
+			this.optionsAccess = () -> (Options) () -> {
+				final Object setting = settingsAccess.apply( VALIDATE_XML );
+				return setting == null || BOOLEAN.convert( setting );
+			};
+		}
+	}
+
+	public MappingBinder(ServiceRegistry serviceRegistry) {
+		this(
+				serviceRegistry.getService( ClassLoaderService.class ),
+				(settingName) -> {
+					final var configurationService =
+							serviceRegistry instanceof ServiceRegistryImplementor serviceRegistryImplementor
+									? serviceRegistryImplementor.fromRegistryOrChildren( ConfigurationService.class )
+									: serviceRegistry.getService( ConfigurationService.class );
+					return configurationService == null ? null : configurationService.getSettings().get( settingName );
+				}
+		);
+	}
+
+	/**
+	 * Constructor used by the Gradle plugin
+	 */
+	public MappingBinder(ResourceStreamLocator resourceStreamLocator, UnsupportedFeatureHandling unsupportedHandling) {
+		this(
+				resourceStreamLocator,
+				new Options() {
+					@Override
+					public boolean validateMappings() {
+						return false;
+					}
+				},
+				unsupportedHandling
+		);
+	}
+
+	/**
+	 * Constructor used everywhere else
+	 */
+	public MappingBinder(ResourceStreamLocator resourceStreamLocator, Options options) {
+		this( resourceStreamLocator, options, UnsupportedFeatureHandling.ERROR );
+	}
+
+	@Override
+	public boolean isValidationEnabled() {
+		return optionsAccess.get().validateMappings();
+	}
+
+	@Override
+	public boolean isDtdAndExternalEntitiesAllowed() {
+		return readBooleanSetting( MappingSettings.XML_ALLOW_DTD_AND_EXTERNAL_ENTITIES );
+	}
+
+	private boolean readBooleanSetting(String settingName) {
+		if ( settingsAccess == null ) {
+			return false;
+		}
+		final Object setting = settingsAccess.apply( settingName );
+		return setting != null && BOOLEAN.convert( setting );
+	}
+
+	@Override
+	protected <X extends JaxbBindableMappingDescriptor> Binding<X> doBind(
+			XMLEventReader staxEventReader,
+			StartElement rootElementStartEvent,
+			Origin origin) {
+		final String rootElementLocalName = rootElementStartEvent.getName().getLocalPart();
+		if ( "hibernate-mapping".equals( rootElementLocalName ) ) {
+			JAXB_LOGGER.performingJaxbBindingOfHbmXmlDocument( origin.toString() );
+			final var hbmBindings = jaxb(
+					new HbmEventReader( staxEventReader, xmlEventFactory ),
+					MappingXsdSupport.INSTANCE.hbmXsd().getSchema(),
+					hbmJaxbContext(),
+					origin
+			);
+
+			//noinspection unchecked
+			return new Binding<>( (X) hbmBindings, origin );
+		}
+		else {
+			assert "entity-mappings".equals( rootElementLocalName );
+			try {
+				JAXB_LOGGER.performingJaxbBindingOfOrmXmlDocument( origin.toString() );
+				final var bindingRoot = jaxb(
+						new MappingEventReader( staxEventReader, xmlEventFactory ),
+						MappingXsdSupport.latestDescriptor().getSchema(),
+						mappingJaxbContext(),
+						origin
+				);
+
+				//noinspection unchecked
+				final var version = rootElementStartEvent.getAttributeByName( new QName( "version" ) );
+				return new Binding<>( (X) bindingRoot, origin, version == null ? null : version.getValue() );
+			}
+			catch (AbstractEventReader.BadVersionException e) {
+				throw new UnsupportedOrmXsdVersionException( e.getRequestedVersion(), origin );
+			}
+		}
+	}
+
+	private JAXBContext hbmJaxbContext() {
+		if ( hbmJaxbContext == null ) {
+			try {
+				hbmJaxbContext = JAXBContext.newInstance( JaxbHbmHibernateMapping.class );
+			}
+			catch (JAXBException e) {
+				throw new ConfigurationException( "Unable to build hbm.xml JAXBContext", e );
+			}
+		}
+		return hbmJaxbContext;
+	}
+
+	@Internal
+	public JAXBContext mappingJaxbContext() {
+		if ( entityMappingsJaxbContext == null ) {
+			try {
+				entityMappingsJaxbContext = JAXBContext.newInstance( JaxbEntityMappingsImpl.class );
+			}
+			catch (JAXBException e) {
+				throw new ConfigurationException( "Unable to build orm.xml JAXBContext", e );
+			}
+		}
+		return entityMappingsJaxbContext;
+	}
+}

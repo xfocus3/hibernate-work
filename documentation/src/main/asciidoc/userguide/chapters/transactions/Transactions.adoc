@@ -1,0 +1,397 @@
+[[transactions]]
+== Transactions
+:example-dir-transaction: {core-project-dir}/src/test/java/org/hibernate/orm/test/transactions
+
+[[transactions-physical]]
+=== Transaction boundaries and ownership
+
+A _database transaction_, a _persistence context_, and an application _unit of work_ have different boundaries.
+A database transaction groups database operations for commit or rollback.
+A persistence context maintains managed entity instances and may span several transactions.
+An application unit of work may use one transaction, or form a longer conversation comprising several independently committed transactions.
+See <<pc,Persistence Context>> for persistence-context lifecycle and <<long-conversations,Conversations spanning multiple transactions>> for conversations.
+
+Choose transaction demarcation according to who owns completion:
+
+[cols="1,2,2",options="header"]
+|===
+|Model |Transaction owner |Application responsibilities
+|Resource-local
+|Application code or a transaction helper
+|Begin and complete the transaction, or let the helper do so.
+|Application-demarcated JTA
+|Application code using a permitted JTA demarcation API
+|Use `UserTransaction` where the environment permits it; Hibernate participates in the JTA transaction.
+|Externally demarcated JTA
+|A container or framework
+|Perform work within the supplied boundary. Do not call `begin()`, `commit()`, or `rollback()` to complete someone else's transaction.
+|===
+
+Persistence-context ownership is a separate decision.
+Close an application-managed `EntityManager` or `Session` when its unit of work ends.
+Do not close an injected container-managed `EntityManager`; its container owns that lifecycle.
+Framework-managed contexts follow the framework's lifecycle contract.
+See <<bootstrap-standardized-container,Container-managed bootstrap>> for container bootstrap.
+
+Use short, deliberate transactions and avoid holding database locks across user think time.
+Executing ordinary database writes and transactional locking requires an appropriate active transaction.
+Some reads are permitted without explicit application demarcation, but a transaction provides a deliberate boundary for related work.
+JDBC auto-commit still uses database transactions: each statement completes its own transaction.
+
+A persistence context reuses the managed instance for a given entity identity.
+This does not guarantee repeatable query membership, scalar results, or a particular database isolation level.
+A query may observe database changes while an already managed entity retains its earlier state.
+See <<locking,Locking>> for isolation and locking, and <<caching,Caching>> for shared-cache behavior.
+
+_Transactional write-behind_ means deferring entity changes until <<flushing,flush>> executes the pending database work.
+Flush does not commit the transaction, and write-behind is distinct from keeping the transaction short.
+See <<batch,Batching>> for flush intervals and transaction chunk sizes in large workloads.
+
+[[transactions-api]]
+=== Resource-local transactions and helpers
+
+Use link:{jpaJavadocUrlPrefix}EntityTransaction.html[`EntityTransaction`] to demarcate a resource-local transaction.
+Obtain it from `EntityManager.getTransaction()`, begin the transaction, perform the work, and commit.
+If the work or commit fails, roll back if the transaction is still active and propagate the failure.
+The following helper accepts application work and closes the context it creates:
+
+[[transactions-api-jdbc-example]]
+.Manual resource-local transaction
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-api-jdbc-example]
+----
+====
+
+The rollback attempt preserves the original exception if cleanup also fails.
+After rollback, discard the affected persistence context; rollback does not restore Java object state.
+See <<transactions-completion,Completion, failures, timeouts, and concurrency>> for failure handling.
+
+==== Transaction helpers
+
+Jakarta Persistence provides `EntityManagerFactory.runInTransaction()` and `callInTransaction()` for application-owned work.
+Hibernate creates a context, begins its transaction, invokes the supplied work, attempts to commit when the work returns normally, and closes the context.
+A runtime exception from the work or commit is propagated, with rollback attempted if the transaction remains active.
+`callInTransaction()` returns the work's result if the commit attempt returns normally.
+Do not treat a normal return as proof of commit if the work marked the transaction rollback-only.
+See <<transactions-compliance,transaction compliance>> for the rollback-only completion rules.
+Do not begin or complete the helper's transaction inside the supplied work.
+
+[[transactions-api-helper-example]]
+.Using standard transaction helpers
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-api-helper-example]
+----
+====
+
+An entity returned by `callInTransaction()` becomes detached when the helper closes its context if the entity was managed by that context.
+Hibernate's `SessionFactory.inTransaction()` and `fromTransaction()` provide corresponding helpers whose work receives a `Session`.
+These helpers manage their own context and transaction; do not use them to take over a container-owned JTA boundary or assume nested transaction semantics.
+See link:{doc-javadoc-url}org/hibernate/SessionFactory.html[`SessionFactory`] for the available overloads.
+
+Hibernate's link:{doc-javadoc-url}org/hibernate/Transaction.html[`Transaction`] extends `EntityTransaction` with timeout, completion-status, and callback operations.
+Use it when those provider-specific capabilities are needed.
+Its availability for JTA depends on the access and compliance settings described in <<transactions-jta-access,Transaction access and Jakarta Persistence compliance>>.
+
+==== Auto-commit and connection configuration
+
+Hibernate's JDBC coordinator disables auto-commit when beginning a transaction unless the connection provider is declared to supply connections with auto-commit already disabled.
+Connection-provider capabilities determine whether `hibernate.connection.autocommit` is honored; configuring a `DataSource` usually requires configuring the data source itself.
+
+[IMPORTANT]
+====
+`hibernate.connection.provider_disables_autocommit=true` declares that supplied connections already have auto-commit disabled.
+It does not disable auto-commit.
+Set it only when that contract is satisfied; an incorrect declaration can allow SQL to execute outside the intended transaction boundary.
+====
+
+See link:{doc-javadoc-url}org/hibernate/cfg/JdbcSettings.html[`JdbcSettings`] for these settings and their provider-specific applicability.
+
+[[transactions-jta]]
+=== JTA participation and configuration
+
+==== Externally demarcated transactions
+
+In a container or framework that owns JTA transaction boundaries, application code participates in the active transaction.
+It does not duplicate the owner's demarcation calls.
+The following application-managed context joins an externally started transaction and performs work without completing it:
+
+[[transactions-api-cmt-example]]
+.Participating in an externally owned JTA transaction
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-api-cmt-example]
+----
+====
+
+The test starts and completes the transaction outside this included code, simulating an external boundary.
+It is not a Jakarta EE container test.
+The example closes its application-managed context; code using an injected container-managed `EntityManager` must leave closure to the container.
+
+A synchronized JTA persistence context joins the active transaction automatically.
+For an application-managed context, use `createEntityManager(SynchronizationType.UNSYNCHRONIZED)` when participation should be explicit.
+Such a context does not flush its changes to the transaction until it joins.
+Use `joinTransaction()` to join and `isJoinedToTransaction()` to check participation.
+Joining requires an active JTA transaction and does not transfer ownership of completion.
+Participation lasts for that transaction: if an unsynchronized context is retained, explicitly join each subsequent transaction in which it should participate.
+`SynchronizationType` is for JTA contexts, not resource-local contexts.
+
+[[transactions-jta-joining-example]]
+.Explicitly joining an unsynchronized persistence context
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-jta-joining-example]
+----
+====
+
+==== Application-demarcated transactions
+
+When the environment permits application demarcation, obtain its `jakarta.transaction.UserTransaction` and own the begin/commit/rollback boundary.
+An application-managed JTA context participates in that transaction:
+
+[[transactions-api-bmt-example]]
+.Application-demarcated JTA transaction
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-api-bmt-example]
+----
+====
+
+The example assumes that no JTA transaction is already active and that the application is permitted to demarcate one.
+If a container or framework owns the boundary, use its transaction facilities instead.
+The `UserTransaction` variable comes from the environment; the test supplies a testing implementation.
+
+[[transactions-jta-access]]
+==== Transaction access and Jakarta Persistence compliance
+
+Portable Jakarta Persistence applications should not use `EntityManager.getTransaction()` with a JTA entity manager.
+Use JTA or the container/framework's transaction facilities for demarcation.
+
+Hibernate can expose its `Transaction` in JTA environments as an extension, but that is controlled by  `hibernate.jta.allowTransactionAccess` and `hibernate.jpa.compliance.transaction`.
+For a JTA context, the effective settings interact as follows:
+
+[cols="1,1,2",options="header"]
+|===
+|`hibernate.jpa.compliance.transaction` |`hibernate.jta.allowTransactionAccess` |`getTransaction()`
+|`true` |`false` |Throws `IllegalStateException`.
+|`true` |`true` |Allowed as a Hibernate extension; transaction operations retain the compliance checks.
+|`false` |Either value |Allowed as a Hibernate extension.
+|===
+
+See <<transactions-compliance,transaction compliance>> for details on `hibernate.jpa.compliance.transaction`.
+
+Neither setting changes transaction ownership.
+Permission to access a JTA `Transaction` does not authorize application code to complete a container-owned transaction.
+Defaults depend on bootstrap and compliance configuration; prefer the portable ownership model over relying on those defaults.
+See link:{doc-javadoc-url}org/hibernate/cfg/TransactionSettings.html[`TransactionSettings`] for the JTA access setting.
+
+[[transactions-physical-jtaplatform]]
+==== Coordinator and platform selection
+
+`hibernate.transaction.coordinator_class` selects the transaction coordinator:
+
+`jdbc`:: Coordinates transactions through `java.sql.Connection`; the default for native bootstrap.
+`jta`:: Coordinates participation in JTA transactions.
+
+For Jakarta Persistence bootstrap, the default follows the persistence unit's transaction type.
+For native bootstrap using JTA, explicitly select `jta`.
+See <<bootstrap,Bootstrap>> for bootstrap and persistence-unit configuration.
+
+JTA integration uses link:{doc-spi-url}org/hibernate/engine/transaction/jta/platform/spi/JtaPlatform.html[`JtaPlatform`]
+to access `jakarta.transaction.TransactionManager` and `UserTransaction`, inspect status, and register synchronizations.
+Hibernate attempts platform discovery; specify `hibernate.transaction.jta.platform` when discovery is insufficient or a custom platform is required.
+Supported aliases include `Atomikos`, `Narayana`, `WildFlyStandAlone`, `JBossAS`, `GlassFish`, `Payara`, `Resin`, `Weblogic`, `WebSphere`, and `WebSphereLiberty`.
+Platform implementations may use <<jndi,JNDI>> to locate transaction services.
+
+[[transactions-completion]]
+=== Completion, failures, timeouts, and concurrency
+
+==== Completion and failures
+
+`EntityTransaction.isActive()` checks whether a resource-local transaction is active; `getRollbackOnly()` checks whether it has been marked for rollback.
+Hibernate considers a rollback-only transaction active until completion.
+Marking it rollback-only does not immediately roll it back.
+Use the transaction owner's facilities to mark externally owned work for rollback.
+
+Hibernate's `Transaction.isComplete()`, `wasSuccessful()`, and `wasFailure()` provide completion checks.
+Prefer these public helpers to inspecting the SPI `TransactionStatus` through `getStatus()`.
+
+[[transactions-compliance]]
+The `hibernate.jpa.compliance.transaction` setting controls whether Hibernate's `Transaction` follows Jakarta Persistence's `EntityTransaction` rules.
+It governs transaction behavior for resource-local contexts and for JTA contexts where transaction access is permitted.
+
+For example, enabling transaction compliance changes these operations:
+
+* Calling `begin()` when a JTA transaction is already active throws `IllegalStateException`, instead of leaving the existing transaction active without starting another one.
+Resource-local transactions reject a second `begin()` even with compliance disabled.
+* Calling `getRollbackOnly()` or `setRollbackOnly()` on an inactive transaction throws `IllegalStateException`.
+With compliance disabled, `getRollbackOnly()` returns `false` and `setRollbackOnly()` has no effect.
+* Committing a rollback-only JDBC transaction rolls it back and throws `RollbackException`.
+With compliance disabled, it rolls back without throwing that exception; see <<transactions-api,Resource-local transactions and helpers>> for the effect on transaction helpers.
+
+Transaction compliance defaults to `false`, independently of bootstrap style.
+The `hibernate.jpa.compliance` setting supplies its default; an explicit
+`hibernate.jpa.compliance.transaction` value overrides it.
+See <<portability-compliance,Jakarta Persistence compliance settings>> for the shared default
+and individual flags, and
+<<transactions-jta-access,Transaction access and Jakarta Persistence compliance>> for its interaction with JTA transaction access.
+
+After a persistence failure or transaction rollback in stateful work, discard the affected persistence context and assume its entity state may differ from the database.
+Rollback does not undo Java object changes.
+Retry an appropriate unit of work with a fresh context; consider external side effects and whether the operation is safe to repeat.
+A failed unit of work does not require shutting down the application.
+See <<pc-exception-handling,Exception handling>> for exception handling in the <<pc,Persistence Context chapter>>.
+Stateless processing has different context semantics; see <<batch,Batching>>.
+In particular, a stateless exception does not automatically mark the transaction rollback-only, but the database may still abort it.
+Distinguish that behavior from stateful exception conversion and recovery; see <<locking-failures,locking failures>>.
+
+==== Completion callbacks
+
+`Transaction.runBeforeCompletion()` and `runAfterCompletion()` register Hibernate transaction callbacks.
+Inside an active transaction, this example records callbacks in the `events` and `outcomes` collections:
+
+[[transactions-callbacks-example]]
+.Observing transaction completion
+====
+[source,java,indent=0]
+----
+include::{example-dir-transaction}/TransactionsTest.java[tags=transactions-callbacks-example]
+----
+====
+
+A before-completion callback does not guarantee successful commit, and it is not a callback for every rollback path.
+The after-completion callback runs after transaction completion and receives the translated completion status.
+The status may be `null` when the outcome is unknown.
+Confirmed JDBC and JTA rollbacks are reported as `TransactionStatus.ROLLED_BACK`.
+Use callbacks for completion-related bookkeeping; do not assume they offer a suitable transaction for additional database work.
+
+Hibernate aggregates local callbacks per transaction coordinator.
+Multiple sessions/coordinators and contextual-session cleanup may register additional JTA synchronizations.
+There is no global promise of one synchronization per JTA transaction or ordering across all participants.
+
+[[transactions-timeouts]]
+==== Timeouts
+
+Set Hibernate's `Transaction.setTimeout()` in seconds before beginning the transaction.
+For JDBC transactions, Hibernate applies the remaining transaction time to JDBC statement timeouts and detects exhausted time when preparing statements.
+This is not a timer that interrupts arbitrary application work at an exact instant; enforcement also depends on the JDBC driver.
+For JTA, timeout enforcement belongs to the transaction manager.
+Changing the configured timeout during an active transaction does not promise to change its existing deadline.
+
+A transaction timeout is distinct from a query timeout or a lock timeout.
+Query timeouts constrain query execution, while lock timeouts constrain waiting for a lock, subject to database/driver support.
+Neither a lock timeout nor a query timeout establishes a portable deadline for all statements in a follow-on acquisition phase.
+See <<query-execution,Query execution>> and <<locking-jpa-query-hints,Jakarta Persistence locking hints>> for those controls.
+
+[[transactions-concurrency]]
+==== Isolation and concurrency declarations
+
+`hibernate.connection.isolation` configures connection isolation only for connection providers that support that setting.
+When using a `DataSource`, configure isolation through the data source or transaction environment as appropriate.
+Hibernate does not add isolation by locking Java objects in memory.
+See <<locking,Locking>> for database concurrency and locking.
+
+`hibernate.transaction.concurrency` declares the transaction concurrency characteristics Hibernate should expect.
+It does not change connection isolation or database settings.
+A named profile supplies facts used during concurrency validation; observed contradictions can cause bootstrap to fail.
+A supplied `TransactionConcurrency` instance bypasses automatic derivation, probing, and validation, so the caller is responsible for its accuracy.
+Without a declaration, facts that cannot be determined remain unknown.
+See link:{doc-javadoc-url}org/hibernate/cfg/TransactionSettings.html#TRANSACTION_CONCURRENCY[`hibernate.transaction.concurrency`] for supported values.
+
+[[architecture-current-session]]
+=== Contextual sessions and lifecycle
+
+`SessionFactory.getCurrentSession()` looks up the session for a configured scope.
+Select the built-in context using `hibernate.current_session_context_class`:
+
+[cols="1,2,2",options="header"]
+|===
+|Context |Scope |Lifecycle owner
+|`jta`
+|An active JTA transaction
+|Hibernate opens a session on first lookup and arranges flushing/closure and removal from the context on transaction completion.
+|`thread`
+|The current thread
+|The built-in context can open a session and arranges cleanup on transaction completion. Its generated sessions require a transaction for ordinary work.
+|`managed`
+|A session explicitly bound to the current thread
+|Application/integration code opens, binds, unbinds, and closes the session. The context does not open, flush, or close it.
+|===
+
+`ManagedSessionContext.bind()` and `unbind()` establish and remove a binding; unbinding does not close the session.
+Always remove a binding when its scope ends, including failure paths.
+A request interceptor or `jakarta.servlet.Filter` can own this lifecycle.
+Frameworks may provide their own context management independently of these built-in contexts.
+
+If no context is configured, Hibernate selects the JTA context only when it can access a transaction manager through the `JtaPlatform`.
+The presence of a platform alone does not establish that access.
+For a custom context, implement link:{doc-spi-url}org/hibernate/context/spi/CurrentSessionContext.html[`CurrentSessionContext`].
+
+Contextual lookup is not equivalent to injection of a container-managed `EntityManager` and does not make a session thread-safe.
+An `EntityManager` or `Session` must be accessed by only one thread at a time.
+
+Close query streams and scroll results explicitly, preferably with try-with-resources.
+Their resources may outlive an individual statement, and connection-release behavior is not a substitute for closing them.
+See <<hql-api-incremental,Incremental query execution>> for incremental query execution and resource handling.
+
+[[transactions-patterns]]
+=== Request-scoped work and longer conversations
+
+[[session-per-operation]]
+==== Session-per-operation anti-pattern
+
+Opening a separate stateful context for every database call fragments a related unit of work and loses managed identity across those calls.
+Group related operations under deliberate context and transaction boundaries.
+Auto-commit after every statement also splits the work into independently completed database transactions.
+Choose boundaries for the application operation rather than assuming that each call should open its own context and transaction.
+
+[[session-per-request]]
+==== Session-per-request pattern
+
+A request-scoped context provides managed identity across the database work for one request.
+An application-owned request often opens a context, begins a transaction, performs work, completes the transaction, and closes the context.
+A container or framework may instead own those boundaries.
+A request need not perform database work, and context lifetime does not always equal transaction lifetime.
+
+Use contextual sessions when a well-defined scope helps participating components share the appropriate session.
+The JTA context follows transaction completion; the managed context can follow an externally managed request scope.
+Choose the scope and lifecycle owner explicitly instead of relying on `getCurrentSession()` alone to define the unit of work.
+
+[[long-conversations]]
+==== Conversations spanning multiple transactions
+
+A conversation may load data in one request, allow a user to edit it, and save changes in a later request.
+Do not keep a database transaction open across that user think time: long-held connections and locks consume resources and increase contention.
+Each database transaction completes independently; the conversation is not globally atomic simply because only its last transaction writes data.
+Earlier reads may observe a different database state from later reads.
+
+Two common approaches are:
+
+Detached state::
+Load entities in a request-scoped context, then transfer detached state between requests.
+Use <<pc-merge,`merge()`>> when applying detached entity changes: it copies state to a managed instance and returns that instance; it does not reattach the original object.
+
+Extended persistence context::
+Keep managed entities across several transactions.
+Connection acquisition/release is governed by connection handling, independently of context lifetime.
+An extended context does not automatically select manual flushing; delayed writes require an intentional <<flushing,flush policy>> consistent with transaction participation.
+
+Use <<locking-optimistic,optimistic version checks>> to detect conflicting writes during a conversation.
+Versions detect conflicts rather than reserving exclusive access while a user edits.
+Checks on modified entities do not automatically validate every entity that was only read; request explicit optimistic locking when the operation requires that validation.
+
+[[session-per-application]]
+==== Session-per-application anti-pattern
+
+A stateful context lasting for the entire application accumulates managed state and increases the likelihood of stale data.
+Memory use depends on the workload and retained entities; unrestricted growth can eventually cause an `OutOfMemoryError`.
+A shared session also requires single-threaded access and provides no safe global application context.
+
+Use contexts scoped to units of work and discard an affected context after rollback or persistence failure.
+For large workloads, see <<batch,Batching>> for bounded stateful processing, stateless operations, and set-based mutations.

@@ -1,0 +1,241 @@
+package org.hibernate.bytecode.enhance.internal.bytebuddy;
+
+import jakarta.persistence.Transient;
+import net.bytebuddy.asm.Advice;
+import net.bytebuddy.description.annotation.AnnotationDescription;
+import net.bytebuddy.description.method.MethodDescription;
+import net.bytebuddy.description.modifier.FieldPersistence;
+import net.bytebuddy.description.modifier.ModifierContributor;
+import net.bytebuddy.description.modifier.Visibility;
+import net.bytebuddy.description.modifier.SyntheticState;
+import net.bytebuddy.description.type.TypeDefinition;
+import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.ClassFileLocator;
+import net.bytebuddy.implementation.Implementation;
+import net.bytebuddy.implementation.StubMethod;
+
+import java.io.Serializable;
+import java.util.Collection;
+import java.util.List;
+
+import net.bytebuddy.implementation.bytecode.ByteCodeAppender;
+import net.bytebuddy.jar.asm.Opcodes;
+import net.bytebuddy.jar.asm.Type;
+import net.bytebuddy.matcher.ElementMatcher;
+import org.hibernate.bytecode.enhance.internal.tracker.CompositeOwnerTracker;
+import org.hibernate.bytecode.enhance.internal.tracker.DirtyTracker;
+import org.hibernate.bytecode.enhance.spi.CollectionTracker;
+import org.hibernate.bytecode.enhance.spi.LazyPropertyInitializer;
+import org.hibernate.bytecode.enhance.spi.interceptor.BytecodeLazyAttributeInterceptor;
+import org.hibernate.bytecode.enhance.spi.interceptor.LazyAttributeLoadingInterceptor;
+import org.hibernate.accessor.ValueReader;
+import org.hibernate.accessor.ValueWriter;
+import org.hibernate.engine.spi.CompositeOwner;
+import org.hibernate.engine.spi.CompositeTracker;
+import org.hibernate.engine.spi.EntityEntry;
+import org.hibernate.engine.spi.ExtendedSelfDirtinessTracker;
+import org.hibernate.engine.spi.ManagedComposite;
+import org.hibernate.engine.spi.ManagedEntity;
+import org.hibernate.engine.spi.ManagedMappedSuperclass;
+import org.hibernate.engine.spi.PersistentAttributeInterceptable;
+import org.hibernate.engine.spi.PersistentAttributeInterceptor;
+import org.hibernate.engine.spi.SelfDirtinessTracker;
+import org.hibernate.proxy.ProxyConfiguration;
+
+import static net.bytebuddy.matcher.ElementMatchers.isDefaultFinalizer;
+
+/**
+ * Extracts constants used by {@link EnhancerImpl}.
+ * This allows integrators to choose between reusing this state for multiple enhancement processes,
+ * as these are fairly expensive to initialize, or rather choose to free memory by not retaining.
+ */
+public final class EnhancerImplConstants {
+
+	//This locator is used to load all "advice", and apparently won't benefit from any caches:
+	final ClassFileLocator adviceLocator;
+
+	final Implementation implementationTrackChange;
+	final Implementation implementationGetDirtyAttributesWithoutCollections;
+	final Implementation implementationAreFieldsDirtyWithoutCollections;
+	final Implementation implementationClearDirtyAttributesWithoutCollections;
+	final Implementation implementationSuspendDirtyTracking;
+	final Implementation implementationGetDirtyAttributes;
+	final Implementation implementationAreFieldsDirty;
+	final Implementation implementationGetCollectionTrackerWithoutCollections;
+	final Implementation implementationClearDirtyAttributes;
+	//In this case we just extract the Advice:
+	final Advice adviceInitializeLazyAttributeLoadingInterceptor;
+	final Implementation implementationSetOwner;
+	final Implementation implementationClearOwner;
+	final Implementation implementationSetPersistenceInfo;
+	final Implementation implementationDefaultConstructor;
+
+	//Frequently used Modifiers:
+	final int modifierPUBLIC = ModifierContributor.Resolver.of( List.of( Visibility.PUBLIC ) ).resolve();
+	public final int modifierPRIVATE = ModifierContributor.Resolver.of( List.of( Visibility.PRIVATE ) ).resolve();
+	final int modifierPRIVATE_TRANSIENT = ModifierContributor.Resolver.of( List.of( FieldPersistence.TRANSIENT, Visibility.PRIVATE, SyntheticState.SYNTHETIC ) ).resolve();
+
+	//Frequently used annotations, declared as collections as otherwise they get wrapped into them over and over again:
+	final Collection<? extends AnnotationDescription> TRANSIENT_ANNOTATION = List.of(
+			AnnotationDescription.Builder.ofType( Transient.class ).build() );
+
+	//Frequently used Types for method signatures:
+	final TypeDefinition TypeVoid = TypeDescription.ForLoadedType.of( void.class );
+	final TypeDefinition TypeBooleanPrimitive = TypeDescription.ForLoadedType.of( boolean.class );
+	final TypeDefinition TypeIntegerPrimitive = TypeDescription.ForLoadedType.of( int.class );
+	public final TypeDefinition TypeProxyConfiguration_Interceptor = TypeDescription.ForLoadedType.of( ProxyConfiguration.Interceptor.class );
+	final TypeDefinition TypeManagedEntity = TypeDescription.ForLoadedType.of( ManagedEntity.class );
+	final TypeDefinition TypeEntityEntry = TypeDescription.ForLoadedType.of( EntityEntry.class );
+	final TypeDefinition TypePersistentAttributeInterceptor = TypeDescription.ForLoadedType.of( PersistentAttributeInterceptor.class );
+	public final TypeDefinition TypeObject = TypeDescription.ForLoadedType.of( Object.class );
+	final TypeDefinition TypeString = TypeDescription.ForLoadedType.of( String.class );
+	final TypeDefinition Type_Array_String = TypeDescription.ForLoadedType.of( String[].class );
+	final TypeDefinition TypeCollectionTracker = TypeDescription.ForLoadedType.of( CollectionTracker.class );
+	final TypeDefinition Type_Array_Object = TypeDescription.ForLoadedType.of( Object[].class );
+	final TypeDefinition TypeLazyAttributeLoadingInterceptor = TypeDescription.ForLoadedType.of(
+			LazyAttributeLoadingInterceptor.class );
+	final TypeDefinition TypeBytecodeLazyAttributeInterceptor = TypeDescription.ForLoadedType.of(
+			BytecodeLazyAttributeInterceptor.class );
+	final TypeDefinition TypeCompositeOwnerTracker = TypeDescription.ForLoadedType.of( CompositeOwnerTracker.class );
+
+	//Careful with the following types being used: the ByteBuddy receiver often supports overloading, and using
+	//one of the other specific types in the declaration might lead to unexpectedly invoking a different method.
+	final List<TypeDefinition> INTERFACES_for_PersistentAttributeInterceptor = List.of( TypePersistentAttributeInterceptor );
+	public final Collection<? extends TypeDefinition> INTERFACES_for_SelfDirtinessTracker = List.of(
+			TypeDescription.ForLoadedType.of( SelfDirtinessTracker.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_ExtendedSelfDirtinessTracker = List.of(
+			TypeDescription.ForLoadedType.of( ExtendedSelfDirtinessTracker.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_ManagedComposite = List.of(
+			TypeDescription.ForLoadedType.of( ManagedComposite.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_ManagedMappedSuperclass = List.of(
+			TypeDescription.ForLoadedType.of( ManagedMappedSuperclass.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_CompositeOwner = List.of(
+			TypeDescription.ForLoadedType.of( CompositeOwner.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_CompositeTracker = List.of(
+			TypeDescription.ForLoadedType.of( CompositeTracker.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_PersistentAttributeInterceptable = List.of(
+			TypeDescription.ForLoadedType.of( PersistentAttributeInterceptable.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_ProxyConfiguration = List.of(
+			TypeDescription.ForLoadedType.of( ProxyConfiguration.class )
+	);
+	public final Collection<? extends TypeDefinition> INTERFACES_for_ManagedEntity = List.of( TypeManagedEntity	);
+
+	//Frequently used ElementMatchers:
+	final ElementMatcher.Junction<MethodDescription> DEFAULT_FINALIZER = isDefaultFinalizer();
+
+	//Frequently used types for field definitions:
+	final TypeDescription.Generic DirtyTrackerTypeDescription = TypeDefinition.Sort.describe( DirtyTracker.class );
+
+	//Internal names:
+	final String internalName_CompositeTracker = Type.getInternalName( CompositeTracker.class );
+	final String internalName_LazyPropertyInitializer = Type.getInternalName( LazyPropertyInitializer.class );
+	final String internalName_Object = Type.getInternalName( Object.class );
+	final String internalName_String = Type.getInternalName( String.class );
+	final String internalName_BytecodeLazyAttributeInterceptor = Type.getInternalName( BytecodeLazyAttributeInterceptor.class );
+	final String internalName_LazyAttributeLoadingInterceptor = Type.getInternalName(
+			LazyAttributeLoadingInterceptor.class );
+	final String internalName_PersistentAttributeInterceptor = Type.getInternalName(
+			PersistentAttributeInterceptor.class );
+	final String internalName_HibernateAccessorValueReader = Type.getInternalName(
+			ValueReader.class );
+	final String internalName_HibernateAccessorValueWriter = Type.getInternalName(
+			ValueWriter.class );
+	final String descriptor_HibernateAccessorValueReader = Type.getDescriptor(
+			ValueReader.class );
+	final String descriptor_HibernateAccessorValueWriter = Type.getDescriptor(
+			ValueWriter.class );
+
+	//Method Descriptors:
+	final String methodDescriptor_SetOwner = Type.getMethodDescriptor(
+			Type.getType( void.class ),
+			Type.getType( String.class ),
+			Type.getType( CompositeOwner.class )
+	);
+	final String methodDescriptor_getInterceptor = Type.getMethodDescriptor(
+			Type.getType( PersistentAttributeInterceptor.class )
+	);
+	final String methodDescriptor_attributeInitialized = Type.getMethodDescriptor(
+			Type.getType( void.class ),
+			Type.getType( String.class )
+	);
+	final String methodDescriptor_isAttributeLoaded = Type.getMethodDescriptor(
+			Type.getType( boolean.class ),
+			Type.getType( String.class )
+	);
+	final String methodDescriptor_ValueReader_get = Type.getMethodDescriptor(
+			Type.getType( Object.class ),
+			Type.getType( Object.class )
+	);
+	final String methodDescriptor_ValueWriter_set = Type.getMethodDescriptor(
+			Type.getType( void.class ),
+			Type.getType( Object.class ),
+			Type.getType( Object.class )
+	);
+
+	//Others :
+	final String Serializable_TYPE_DESCRIPTOR = Type.getDescriptor( Serializable.class );
+
+	public EnhancerImplConstants() {
+		adviceLocator = ClassFileLocator.ForClassLoader.of( CodeTemplates.class.getClassLoader() );
+		implementationTrackChange = Advice.to( CodeTemplates.TrackChange.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		implementationGetDirtyAttributesWithoutCollections = Advice.to(
+				CodeTemplates.GetDirtyAttributesWithoutCollections.class,
+				adviceLocator
+		).wrap( StubMethod.INSTANCE );
+		implementationAreFieldsDirtyWithoutCollections = Advice.to(
+				CodeTemplates.AreFieldsDirtyWithoutCollections.class,
+				adviceLocator
+		).wrap( StubMethod.INSTANCE );
+		implementationClearDirtyAttributesWithoutCollections = Advice.to(
+				CodeTemplates.ClearDirtyAttributesWithoutCollections.class,
+				adviceLocator
+		).wrap( StubMethod.INSTANCE );
+		implementationSuspendDirtyTracking = Advice.to( CodeTemplates.SuspendDirtyTracking.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		implementationGetDirtyAttributes = Advice.to( CodeTemplates.GetDirtyAttributes.class, adviceLocator ).wrap(
+				StubMethod.INSTANCE );
+		implementationAreFieldsDirty = Advice.to( CodeTemplates.AreFieldsDirty.class, adviceLocator ).wrap(
+				StubMethod.INSTANCE );
+		implementationGetCollectionTrackerWithoutCollections = Advice.to(
+				CodeTemplates.GetCollectionTrackerWithoutCollections.class,
+				adviceLocator
+		).wrap( StubMethod.INSTANCE );
+		implementationClearDirtyAttributes = Advice.to( CodeTemplates.ClearDirtyAttributes.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		//In this case we just extract the Advice:
+		adviceInitializeLazyAttributeLoadingInterceptor = Advice.to(
+				CodeTemplates.InitializeLazyAttributeLoadingInterceptor.class,
+				adviceLocator
+		);
+		implementationSetOwner = Advice.to( CodeTemplates.SetOwner.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		implementationClearOwner = Advice.to( CodeTemplates.ClearOwner.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		implementationSetPersistenceInfo = Advice.to( CodeTemplates.SetPersistenceInfo.class, adviceLocator )
+				.wrap( StubMethod.INSTANCE );
+		implementationDefaultConstructor = new Implementation.Simple(
+				(methodVisitor, implementationContext, instrumentedMethod) -> {
+					methodVisitor.visitVarInsn( Opcodes.ALOAD, 0 );
+					methodVisitor.visitMethodInsn( Opcodes.INVOKESPECIAL,
+							instrumentedMethod.getDeclaringType().getSuperClass().asErasure().getInternalName(),
+							"<init>",
+							"()V",
+							false );
+					methodVisitor.visitInsn( Opcodes.RETURN );
+					return new ByteCodeAppender.Size( 1, 1 );
+				} );
+	}
+
+	public ElementMatcher<? super MethodDescription> defaultFinalizer() {
+		return DEFAULT_FINALIZER;
+	}
+
+}

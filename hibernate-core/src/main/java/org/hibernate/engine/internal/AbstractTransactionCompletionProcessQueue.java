@@ -1,0 +1,37 @@
+package org.hibernate.engine.internal;
+
+import jakarta.annotation.Nullable;
+import org.hibernate.engine.spi.SharedSessionContractImplementor;
+import org.hibernate.engine.spi.TransactionCompletionCallbacks.CompletionCallback;
+
+import java.util.concurrent.ConcurrentLinkedQueue;
+
+/**
+ * Collection of transaction completion {@linkplain CompletionCallback callbacks}.
+ *
+ * @author Steve Ebersole
+ */
+abstract class AbstractTransactionCompletionProcessQueue<T extends CompletionCallback> {
+	SharedSessionContractImplementor session;
+	// Concurrency handling required when the transaction completion process
+	// is dynamically registered inside an event listener (HHH-7478).
+	ConcurrentLinkedQueue<T> processes = new ConcurrentLinkedQueue<>();
+
+	AbstractTransactionCompletionProcessQueue(SharedSessionContractImplementor session) {
+		this.session = session;
+	}
+
+	void register(@Nullable T process) {
+		if ( process != null ) {
+			processes.add( process );
+		}
+	}
+
+	boolean hasActions() {
+		return !processes.isEmpty();
+	}
+
+	void clear(){
+		processes.clear();
+	}
+}
