@@ -1,0 +1,11 @@
+{
+  "id": "483dab51-331d-4f20-b443-a54f38415216",
+  "requestHash": "f0d311b4c320427726b3c84351de087fac15c6dabefca7b2b75ad46272d883db",
+  "runId": "43948864385",
+  "runAttempt": "2",
+  "head": "a0c627aa8f153354b029a4c89e1454b524b02248",
+  "resultHead": "a0c627aa8f153354b029a4c89e1454b524b02248",
+  "changedPaths": [],
+  "status": "blocked",
+  "stdout": "Blocked before completion: the expanded Explore prompt at pinned tool ea49ce07c6e46b192303eb806f3dc6b0bd2617ce selects only the shared standards profile (digest 039e0531fff002f9b922f34a3d776869e9ea01eae6688ab16ba73c910eeede2d), omitting Java and Hibernate standards for xfocus3/hibernate-work. Source diagnosis: agent-explore-target.yml scopes GH_REPO to List batch but supplies neither GH_REPO nor SANDCASTLE_UPSTREAM_REPOSITORY to Run explore agent; review-standards.ts reads these variables, while its fallback Java detection does not recognize the Hibernate multi-module root. explore.ts loads the standards before the producer invocation; extraction does not load another profile. Correct target identity propagation and verify a fresh request includes shared, java, hibernate before continuing implementation. Read-only findings at target a0c627aa8f153354b029a4c89e1454b524b02248: AbstractSqlAstTranslator.visitFilterPredicate joins fragments with AND and visitFilterFragmentPredicate emits both parameterized and parameter-free SQL without added grouping. FilterHelper.generateFilterPredicate passes rendered fragments without added grouping; its StringBuilder render path also joins with AND. These observations support investigating HHH-21130 but are not executable reproduction evidence. Preserve the public report attribution to Gavin King and the credited AI discovery. No tests, compilation, format checks, source edits, or implementation were performed; no claim of Explore success or RED/GREEN evidence is made."
+}
