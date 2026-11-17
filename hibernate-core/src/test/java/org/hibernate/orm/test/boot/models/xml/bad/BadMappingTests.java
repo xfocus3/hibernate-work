@@ -43,11 +43,22 @@ public class BadMappingTests {
 			// expected outcome
 		}
 	}
+
 	@Test
 	@ServiceRegistry
 	void testDuplicateEntityClass(ServiceRegistryScope registryScope) {
 		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
 				.addResource( "mappings/models/bad/duplicate-entity-class.xml" );
+		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
+		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
+	}
+
+	@Test
+	@ServiceRegistry
+	void testDuplicateEntityClassAcrossDocuments(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-second.xml" );
 		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
 		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
 	}
