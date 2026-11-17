@@ -1,0 +1,35 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java b/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
+index 76e13fa6..037baf37 100644
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
+@@ -143,6 +143,30 @@ void ofTypeRejectsIncompatibleNativeResultSetMapping(SessionFactoryScope factory
+ 						.ofType( Integer.class ) ) );
+ 	}
+ 
++	@Test
++	void ofTypeRejectsUnmappedNativeEntityResult(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			assertThat( session.createNativeQuery( "select id, name from Publisher" )
++					.getSingleResult() ).isInstanceOf( Object[].class );
++			assertThatIllegalArgumentException().isThrownBy( () -> session
++					.createNativeQuery( "select id, name from Publisher" )
++					.ofType( Publisher.class ) );
++		} );
++	}
++
++	@Test
++	void ofTypePreservesMappedNativeEntityAndParameters(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			final var query = session.createNativeQuery(
++					"select id, name from Publisher where id = :id", Publisher.class );
++			query.setParameter( "id", 1 );
++			query.setMaxResults( 1 );
++			final var typedQuery = query.ofType( Publisher.class );
++			assertThat( typedQuery.getMaxResults() ).isEqualTo( 1 );
++			assertThat( typedQuery.getSingleResult().name ).isEqualTo( "Me" );
++		} );
++	}
++
+ 	@Test
+ 	void incompatibleGraphPreservesHibernateException(SessionFactoryScope factoryScope) {
+ 		factoryScope.inTransaction( (session) -> {
