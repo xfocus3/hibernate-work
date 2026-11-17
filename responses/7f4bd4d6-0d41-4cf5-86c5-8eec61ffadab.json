@@ -1,0 +1,11 @@
+{
+  "id": "7f4bd4d6-0d41-4cf5-86c5-8eec61ffadab",
+  "requestHash": "b9c37076039762cf8e4bdefede0aa02eb63bfe274812022d5a30597e6e0587f7",
+  "runId": "44076871925",
+  "runAttempt": "1",
+  "head": "6f534fb454af8a85488075073f069a048f1fc163",
+  "resultHead": "6f534fb454af8a85488075073f069a048f1fc163",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"Re-reviewed unchanged head `6f534fb454af8a85488075073f069a048f1fc163`. No further code changes are warranted. The per-fragment grouping fix preserves alias handling and parameter binding, and the guarded bulk-update regression added in the prior review closes the identified mutation-coverage gap. No actionable correctness or privacy findings or unresolved human review threads remain.\\n\\nThe [configured exact-head PR verification](https://github.com/xfocus3/hibernate-work/actions/runs/44075900477) now passes: 153 tests passed, zero failures/errors, two existing dialect-restricted skips; all 11 regression cases passed without skips. Compilation, repository formatting and the current-head guard passed. Tested tree `7555711299df20b5549cbe0765b331a0b5f27def` matches the source with no formatter changes. The [current-head Actions-linter workflow](https://github.com/xfocus3/hibernate-work/actions/runs/44075635773) also completed successfully after normal approval; actual lint execution was appropriately skipped because no workflow files changed.\\n\\nThis remains focused JDK 25/H2 validation of the filter and filtered-mutation suites, not a full clean build or database/JDK matrix. The earlier ready-state guard failure's transient cause was not logged; this recovery leaves the guard intact and uses the verified, unchanged head.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
