@@ -64,13 +64,16 @@ public class BadMappingTests {
 		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
 		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
 	}
+
 	@Test
 	@ServiceRegistry
 	void testRepeatedNamedEntityMapping(ServiceRegistryScope registryScope) {
 		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
 				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
 				.addResource( "mappings/models/bad/duplicate-entity-first.xml" );
-		assertDoesNotThrow( metadataSources::buildMetadata );
+		assertDoesNotThrow( () -> {
+			return metadataSources.buildMetadata();
+		} );
 	}
 
 	@Test
@@ -79,7 +82,9 @@ public class BadMappingTests {
 		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
 				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" )
 				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" );
-		assertDoesNotThrow( metadataSources::buildMetadata );
+		assertDoesNotThrow( () -> {
+			return metadataSources.buildMetadata();
+		} );
 	}
 
 	@Test
@@ -88,7 +93,9 @@ public class BadMappingTests {
 		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
 				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" )
 				.addResource( "mappings/models/bad/duplicate-entity-first.xml" );
-		assertDoesNotThrow( metadataSources::buildMetadata );
+		assertDoesNotThrow( () -> {
+			return metadataSources.buildMetadata();
+		} );
 	}
 
 	@Test
@@ -101,13 +108,16 @@ public class BadMappingTests {
 		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
 		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
 	}
+
 	@Test
 	@ServiceRegistry
 	void testNamedAndUnnamedEntityMappings(ServiceRegistryScope registryScope) {
 		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
 				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
 				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" );
-		assertDoesNotThrow( metadataSources::buildMetadata );
+		assertDoesNotThrow( () -> {
+			return metadataSources.buildMetadata();
+		} );
 	}
 
 	@Test
@@ -117,7 +127,9 @@ public class BadMappingTests {
 				.addAnnotatedClass( NamedEntity.class )
 				.addResource( "mappings/models/bad/repeated-unnamed-entity.xml" )
 				.addResource( "mappings/models/bad/repeated-unnamed-entity.xml" );
-		final var metadata = assertDoesNotThrow( metadataSources::buildMetadata );
+		final var metadata = assertDoesNotThrow( () -> {
+			return metadataSources.buildMetadata();
+		} );
 		assertEquals( "CustomEntityName", metadata.getEntityBinding( NamedEntity.class.getName() ).getJpaEntityName() );
 	}
 
