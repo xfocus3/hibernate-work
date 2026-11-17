@@ -7,6 +7,8 @@ import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.ServiceRegistryScope;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -61,5 +63,67 @@ public class BadMappingTests {
 				.addResource( "mappings/models/bad/duplicate-entity-second.xml" );
 		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
 		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
+	}
+	@Test
+	@ServiceRegistry
+	void testRepeatedNamedEntityMapping(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" );
+		assertDoesNotThrow( metadataSources::buildMetadata );
+	}
+
+	@Test
+	@ServiceRegistry
+	void testRepeatedUnnamedEntityMapping(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" );
+		assertDoesNotThrow( metadataSources::buildMetadata );
+	}
+
+	@Test
+	@ServiceRegistry
+	void testUnnamedAndNamedEntityMappings(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" );
+		assertDoesNotThrow( metadataSources::buildMetadata );
+	}
+
+	@Test
+	@ServiceRegistry
+	void testUnnamedMappingDoesNotHideConflictingNames(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-second.xml" );
+		final MappingException exception = assertThrows( MappingException.class, metadataSources::buildMetadata );
+		assertTrue( exception.getMessage().contains( "org.hibernate.orm.test.boot.models.xml.SimpleEntity" ) );
+	}
+	@Test
+	@ServiceRegistry
+	void testNamedAndUnnamedEntityMappings(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addResource( "mappings/models/bad/duplicate-entity-first.xml" )
+				.addResource( "mappings/models/bad/duplicate-entity-unnamed.xml" );
+		assertDoesNotThrow( metadataSources::buildMetadata );
+	}
+
+	@Test
+	@ServiceRegistry
+	void testAnnotatedNameWithRepeatedUnnamedMappings(ServiceRegistryScope registryScope) {
+		final MetadataSources metadataSources = new MetadataSources( registryScope.getRegistry() )
+				.addAnnotatedClass( NamedEntity.class )
+				.addResource( "mappings/models/bad/repeated-unnamed-entity.xml" )
+				.addResource( "mappings/models/bad/repeated-unnamed-entity.xml" );
+		final var metadata = assertDoesNotThrow( metadataSources::buildMetadata );
+		assertEquals( "CustomEntityName", metadata.getEntityBinding( NamedEntity.class.getName() ).getJpaEntityName() );
+	}
+
+	@jakarta.persistence.Entity(name = "CustomEntityName")
+	public static class NamedEntity {
+		@jakarta.persistence.Id
+		private Integer id;
 	}
 }
