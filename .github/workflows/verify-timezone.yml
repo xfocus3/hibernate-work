@@ -6,6 +6,10 @@ on:
         description: Exact xfocus3/hibernate-orm commit
         type: string
         required: true
+      full_build:
+        description: Run clean build and formatting instead of focused tests
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -40,10 +44,18 @@ jobs:
           printf 'base=%s\ntree=%s\n' "$TARGET_SHA" "$(git rev-parse HEAD^{tree})" > ../verification.txt
       - name: Run timezone regression tests
         working-directory: target
-        run: ./gradlew --no-daemon hibernate-core:test --tests org.hibernate.orm.test.mapping.basic.TimeZoneStoragePropertyAccessTest --tests org.hibernate.orm.test.mapping.basic.TimeZoneStorageMappingTests -Pdb=h2
+        env:
+          FULL_BUILD: ${{ inputs.full_build }}
+        run: |
+          set -euo pipefail
+          if [ "$FULL_BUILD" = "true" ]; then
+            ./gradlew --no-daemon clean build formatChecks -Pdb=h2
+          else
+            ./gradlew --no-daemon hibernate-core:test --tests org.hibernate.orm.test.mapping.basic.TimeZoneStoragePropertyAccessTest --tests org.hibernate.orm.test.mapping.basic.TimeZoneStorageMappingTests -Pdb=h2
+          fi
       - name: Require test outputs
         working-directory: target
-        run: test -n "$(find . -path '*/target/test-results/*/TEST-*.xml' -print -quit)"
+        run: test -s hibernate-core/target/test-results/test/TEST-org.hibernate.orm.test.mapping.basic.TimeZoneStoragePropertyAccessTest.xml
       - name: Capture tested source
         if: always()
         working-directory: target
