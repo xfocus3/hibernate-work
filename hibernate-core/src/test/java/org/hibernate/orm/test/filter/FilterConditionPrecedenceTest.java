@@ -1,7 +1,12 @@
 package org.hibernate.orm.test.filter;
 
+import java.util.List;
+
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 
 import org.hibernate.annotations.Filter;
@@ -19,16 +24,23 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@DomainModel(annotatedClasses = FilterConditionPrecedenceTest.Item.class)
+@DomainModel(annotatedClasses = {
+		FilterConditionPrecedenceTest.Item.class,
+		FilterConditionPrecedenceTest.Owner.class
+})
 @SessionFactory
 @JiraKey("HHH-21130")
 class FilterConditionPrecedenceTest {
 	@BeforeEach
 	void prepare(SessionFactoryScope scope) {
 		scope.inTransaction( session -> {
-			session.persist( new Item( 1, false ) );
-			session.persist( new Item( 2, false ) );
-			session.persist( new Item( 3, true ) );
+			Owner owner = new Owner( 1 );
+			Owner otherOwner = new Owner( 2 );
+			session.persist( owner );
+			session.persist( otherOwner );
+			session.persist( new Item( 1, false, otherOwner ) );
+			session.persist( new Item( 2, false, owner ) );
+			session.persist( new Item( 3, true, owner ) );
 		} );
 	}
 
@@ -48,6 +60,17 @@ class FilterConditionPrecedenceTest {
 		} );
 	}
 
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void collectionRetainsOwnerRestriction(boolean includeDeleted, SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.enableFilter( "visible" ).setParameter( "includeDeleted", includeDeleted );
+			Owner owner = session.find( Owner.class, 1 );
+			assertThat( owner.items ).extracting( item -> item.id )
+					.containsExactlyInAnyOrderElementsOf( includeDeleted ? List.of( 2, 3 ) : List.of( 2 ) );
+		} );
+	}
+
 	@Entity(name = "FilterItem")
 	@Table(name = "filter_item")
 	@FilterDef(
@@ -61,12 +84,34 @@ class FilterConditionPrecedenceTest {
 		Integer id;
 		boolean deleted;
 
+		@ManyToOne(fetch = FetchType.LAZY)
+		Owner owner;
+
 		Item() {
 		}
 
-		Item(Integer id, boolean deleted) {
+		Item(Integer id, boolean deleted, Owner owner) {
 			this.id = id;
 			this.deleted = deleted;
+			this.owner = owner;
+		}
+	}
+
+	@Entity(name = "FilterOwner")
+	@Table(name = "filter_owner")
+	static class Owner {
+		@Id
+		Integer id;
+
+		@OneToMany(mappedBy = "owner")
+		@Filter(name = "visible")
+		List<Item> items;
+
+		Owner() {
+		}
+
+		Owner(Integer id) {
+			this.id = id;
 		}
 	}
 }
