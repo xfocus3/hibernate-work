@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:cleanTest",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.boot.models.xml.*",
+    "hibernate-core:testClasses",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21119 rejects repeated Java entity-class declarations within an XML resource batch before earlier metadata is silently replaced. Run both new public MetadataSources bootstrap regressions and the full boot.models.xml package, including dynamic name-only entities, distinct mapped classes and annotation/XML override controls, compilation and root formatting checks on the exact PR head. Unchanged-production runs44100931769 and44103178620 independently reproduced same-document override and cross-document metadata-complete failures. Final candidate41a504fd passed83 tests in34 suites with zero failures, errors or skips in44103838415; tested tree matched exactly with no formatter changes. This plan reruns checks for the PR verification gate. Identical declarations/repeated resource registration also become errors. Validation is per resource batch, not across independent additional-mapping contributor batches. No full clean build or live database matrix is claimed."
+}
