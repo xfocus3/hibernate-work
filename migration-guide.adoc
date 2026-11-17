@@ -75,6 +75,15 @@ XML mapping documents are now validated against their schema by default, as docu
 Previously, validation was disabled when this setting was absent, allowing invalid attributes to be silently ignored.
 Applications with invalid `orm.xml` or `hbm.xml` documents must correct their mappings or explicitly set `hibernate.validate_xml=false` to disable validation.
 
+[[duplicate-xml-entity-mappings]]
+=== Duplicate entity-class mappings in XML
+
+Mapping XML now rejects multiple `<entity>` declarations for the same Java class within the same batch of mapping resources, instead of silently retaining the last declaration.
+This includes declarations in different mapping documents, identical entity names, and repeated registration of the same mapping resource.
+Relative class names are resolved against the mapping package before detecting duplicates.
+Remove duplicate declarations or consolidate them into one entity mapping per class, and register each mapping resource only once.
+This check does not add support for mapping one class under multiple entity names.
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // XSD changes
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
