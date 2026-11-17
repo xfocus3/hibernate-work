@@ -1,0 +1,78 @@
+name: Verify Hibernate fork H2
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: Exact xfocus3/hibernate-orm commit
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Validate requested revision
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: xfocus3/hibernate-orm
+          ref: ${{ inputs.target_sha }}
+          path: target
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Verify exact source
+        working-directory: target
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          printf 'base=%s\ntree=%s\n' "$TARGET_SHA" "$(git rev-parse HEAD^{tree})" > ../verification.txt
+      - name: Clean H2 build and migration rendering
+        working-directory: target
+        run: ./gradlew --no-daemon clean build formatChecks documentation:renderMigrationGuide -Pdb=h2
+      - name: Require test and migration outputs
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test -n "$(find . -path '*/build/test-results/*/TEST-*.xml' -print -quit)"
+          test -s documentation/build/asciidoc/migration-guide/index.html
+          grep -q 'native-query-entity-type-casts' documentation/build/asciidoc/migration-guide/index.html
+      - name: Capture tested source
+        if: always()
+        working-directory: target
+        env:
+          TARGET_SHA: ${{ inputs.target_sha }}
+        run: |
+          set -euo pipefail
+          printf 'final_head=%s\n' "$(git rev-parse HEAD)" >> ../verification.txt
+          git ls-files --others --exclude-standard > ../untracked.txt
+          git diff --binary HEAD > ../verified.patch
+          git add -u
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test ! -s ../untracked.txt
+          git diff --cached --exit-code
+      - name: Save verification reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fork-h2-verification-${{ github.run_id }}
+          path: |
+            verification.txt
+            verified.patch
+            untracked.txt
+            target/**/build/test-results/**/TEST-*.xml
+            target/documentation/build/asciidoc/migration-guide/**
+          retention-days: 7
+          if-no-files-found: error
