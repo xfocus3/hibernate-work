@@ -1,0 +1,11 @@
+{
+  "id": "79fd1f14-ddaa-416e-a592-c14afdb5040e",
+  "requestHash": "8cd4b4aff9086b5ad3498c57c883650f1df1b0b090859e73031c83b4ea646585",
+  "runId": "44072888455",
+  "runAttempt": "1",
+  "head": "6f534fb454af8a85488075073f069a048f1fc163",
+  "resultHead": "6f534fb454af8a85488075073f069a048f1fc163",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"The per-fragment parentheses fix is appropriately scoped and preserves alias handling and parameter binding. Review identified one concrete coverage gap in bulk mutation callers, so I added a guarded public-API UPDATE regression: exactly one row must change, and a fresh unfiltered transaction verifies the other row remains unchanged. Unchanged-production [RED verification](https://github.com/xfocus3/hibernate-work/actions/runs/44074006213) reproduced two affected rows instead of one. No further production change was needed, and independent review found no remaining actionable correctness or privacy issue.\\n\\n[Exact-head verification](https://github.com/xfocus3/hibernate-work/actions/runs/44074571474) for `6f534fb454af8a85488075073f069a048f1fc163` passed the filter package, both filtered-mutation neighbor suites, compilation and repository formatting checks on JDK 25/H2: 153 passed, zero failures/errors, two existing dialect-restricted skips. All 11 new regression cases passed without skips. Tested tree `7555711299df20b5549cbe0765b331a0b5f27def` matches the published source with no formatter changes. Lazy collection cases are compatibility controls; entity, fetch-join, parameter-free, multiple-filter and bulk-update failures were reproduced on unchanged production.\\n\\nThis is focused validation, not a full clean build or database/JDK matrix. The configured PR-level verification must be rerun for the changed head, and the separate Actions-linter approval gate remains to be completed. No human review threads required replies.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>"
+}
