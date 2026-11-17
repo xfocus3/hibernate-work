@@ -19,6 +19,7 @@ import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -71,6 +72,51 @@ class FilterConditionPrecedenceTest {
 		} );
 	}
 
+	@Test
+	void parameterlessFilterRetainsIdRestriction(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.enableFilter( "parameterless" );
+			assertThat( session.createQuery(
+					"select i.id from FilterItem i where i.id = :id", Integer.class )
+					.setParameter( "id", 2 ).getResultList() ).containsExactly( 2 );
+		} );
+	}
+
+	@Test
+	void enabledFiltersAreCombinedWithAnd(SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.enableFilter( "visible" ).setParameter( "includeDeleted", false );
+			session.enableFilter( "selectedIds" );
+			assertThat( session.createQuery(
+					"select i.id from FilterItem i", Integer.class ).getResultList() )
+					.containsExactly( 2 );
+		} );
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "parenthesized", "nonOr" })
+	void existingConditionFormsRetainIdRestriction(String filterName, SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.enableFilter( filterName );
+			assertThat( session.createQuery(
+					"select i.id from FilterItem i where i.id = :id", Integer.class )
+					.setParameter( "id", 2 ).getResultList() ).containsExactly( 2 );
+		} );
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = { false, true })
+	void fetchedCollectionRetainsOwnerRestriction(boolean includeDeleted, SessionFactoryScope scope) {
+		scope.inTransaction( session -> {
+			session.enableFilter( "visible" ).setParameter( "includeDeleted", includeDeleted );
+			Owner owner = session.createQuery(
+					"select o from FilterOwner o left join fetch o.items where o.id = :id", Owner.class )
+					.setParameter( "id", 1 ).getSingleResult();
+			assertThat( owner.items ).extracting( item -> item.id )
+					.containsExactlyInAnyOrderElementsOf( includeDeleted ? List.of( 2, 3 ) : List.of( 2 ) );
+		} );
+	}
+
 	@Entity(name = "FilterItem")
 	@Table(name = "filter_item")
 	@FilterDef(
@@ -78,7 +124,15 @@ class FilterConditionPrecedenceTest {
 			defaultCondition = ":includeDeleted = true or deleted = false",
 			parameters = @ParamDef(name = "includeDeleted", type = Boolean.class)
 	)
+	@FilterDef(name = "parameterless", defaultCondition = "id = 1 or deleted = false")
+	@FilterDef(name = "selectedIds", defaultCondition = "id = 2 or id = 3")
+	@FilterDef(name = "parenthesized", defaultCondition = "(id = 1 or deleted = false)")
+	@FilterDef(name = "nonOr", defaultCondition = "deleted = false")
 	@Filter(name = "visible")
+	@Filter(name = "parameterless")
+	@Filter(name = "selectedIds")
+	@Filter(name = "parenthesized")
+	@Filter(name = "nonOr")
 	static class Item {
 		@Id
 		Integer id;
