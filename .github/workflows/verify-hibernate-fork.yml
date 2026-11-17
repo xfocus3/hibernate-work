@@ -45,9 +45,12 @@ jobs:
         working-directory: target
         run: |
           set -euo pipefail
-          test -n "$(find . -path '*/build/test-results/*/TEST-*.xml' -print -quit)"
-          test -s documentation/build/asciidoc/migration-guide/index.html
-          grep -q 'native-query-entity-type-casts' documentation/build/asciidoc/migration-guide/index.html
+          test -n "$(find . -path '*/target/test-results/*/TEST-*.xml' -print -quit)"
+          rendered=$(find documentation/target/asciidoc/migration-guide -name index.html -type f -print -quit)
+          test -n "$rendered"
+          test -s "$rendered"
+          grep -q 'native-query-entity-type-casts' "$rendered"
+          printf 'rendered=%s\n' "$rendered" >> ../verification.txt
       - name: Capture tested source
         if: always()
         working-directory: target
@@ -72,7 +75,7 @@ jobs:
             verification.txt
             verified.patch
             untracked.txt
-            target/**/build/test-results/**/TEST-*.xml
-            target/documentation/build/asciidoc/migration-guide/**
+            target/**/target/test-results/**/TEST-*.xml
+            target/documentation/target/asciidoc/migration-guide/**
           retention-days: 7
           if-no-files-found: error
