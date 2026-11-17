@@ -1,0 +1,80 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/query/sql/internal/NativeQueryImpl.java b/hibernate-core/src/main/java/org/hibernate/query/sql/internal/NativeQueryImpl.java
+index 8fbbcc0b..9ad581ca 100644
+--- a/hibernate-core/src/main/java/org/hibernate/query/sql/internal/NativeQueryImpl.java
++++ b/hibernate-core/src/main/java/org/hibernate/query/sql/internal/NativeQueryImpl.java
+@@ -643,7 +643,16 @@ public NativeQueryImplementor<R> asSelectionQuery() {
+ 	@Nonnull
+ 	public <X> NativeQueryImplementor<X> asSelectionQuery(@Nonnull Class<X> type) {
+ 		errorIfNotSelectForSure();
+-		checkResultType( type, resultSetMapping() );
++		final var mapping = resultSetMapping();
++		// A type cast does not add an entity mapping to implicit JDBC results.
++		if ( mapping.getNumberOfResultBuilders() == 0
++				&& getMappingMetamodel().isEntityClass( type )
++				&& queryOptions.getTupleTransformer() == null
++				&& queryOptions.getResultListTransformer() == null ) {
++			throw new IllegalArgumentException( "Native query has no result set mapping for entity '"
++					+ type.getName() + "'" );
++		}
++		checkResultType( type, mapping );
+ 		//noinspection unchecked
+ 		return (NativeQueryImplementor<X>) this;
+ 	}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java b/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
+index 76e13fa6..e74531d2 100644
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/query/graph/QueryWithGraphTests.java
+@@ -143,6 +143,53 @@ void ofTypeRejectsIncompatibleNativeResultSetMapping(SessionFactoryScope factory
+ 						.ofType( Integer.class ) ) );
+ 	}
+ 
++	@Test
++	void ofTypeRejectsUnmappedNativeEntityResult(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			assertThat( session.createNativeQuery( "select id, name from Publisher" )
++					.getSingleResult() ).isInstanceOf( Object[].class );
++			assertThatIllegalArgumentException().isThrownBy( () -> session
++					.createNativeQuery( "select id, name from Publisher" )
++					.ofType( Publisher.class ) );
++		} );
++	}
++
++	@Test
++	void ofTypePreservesMappedNativeEntityAndParameters(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			final var query = session.createNativeQuery(
++					"select id, name from Publisher where id = :id", Publisher.class );
++			query.setParameter( "id", 1 );
++			query.setMaxResults( 1 );
++			final var typedQuery = query.ofType( Publisher.class );
++			assertThat( typedQuery.getMaxResults() ).isEqualTo( 1 );
++			assertThat( typedQuery.getSingleResult().name ).isEqualTo( "Me" );
++			assertThat( query.ofType( Object.class ).getSingleResult() ).isInstanceOf( Publisher.class );
++		} );
++	}
++
++	@Test
++	void ofTypePreservesImplicitNativeResults(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			assertThat( session.createNativeQuery( "select name from Publisher" )
++					.ofType( String.class ).getSingleResult() ).isEqualTo( "Me" );
++			assertThat( session.createNativeQuery( "select id, name from Publisher" )
++					.ofType( Object[].class ).getSingleResult() ).containsExactly( 1, "Me" );
++			assertThat( session.createNativeQuery( "select id, name from Publisher" )
++					.ofType( Object.class ).getSingleResult() ).isInstanceOf( Object[].class );
++		} );
++	}
++
++	@Test
++	void ofTypePreservesTransformedNativeEntity(SessionFactoryScope factoryScope) {
++		factoryScope.inTransaction( session -> {
++			final var publisher = session.find( Publisher.class, 1 );
++			assertThat( session.createNativeQuery( "select id, name from Publisher" )
++					.setTupleTransformer( (tuple, aliases) -> publisher )
++					.ofType( Publisher.class ).getSingleResult() ).isSameAs( publisher );
++		} );
++	}
++
+ 	@Test
+ 	void incompatibleGraphPreservesHibernateException(SessionFactoryScope factoryScope) {
+ 		factoryScope.inTransaction( (session) -> {
