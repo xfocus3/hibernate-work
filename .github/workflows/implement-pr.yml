@@ -10,7 +10,8 @@ permissions:
 jobs:
   pipeline:
     if: (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:implement')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@68818332e38b9f7407bf1d480dca63e744e347fb
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@0f8992ecd2bd51340b87787fd2ac0d782927f46f
     with:
+      upstream_repository: hibernate/hibernate-orm
       mode: implement-pr
       pr_number: ${{ github.event.pull_request.number || 0 }}

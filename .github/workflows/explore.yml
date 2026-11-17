@@ -21,9 +21,9 @@ jobs:
       baseline_branch: upstream-main
   explore:
     needs: sync
-    uses: xfocus3/sandcastle/.github/workflows/agent-explore-target.yml@ea49ce07c6e46b192303eb806f3dc6b0bd2617ce
+    uses: xfocus3/sandcastle/.github/workflows/agent-explore-target.yml@7ce687487802788866b8ecdadac41b0d4e41dcc2
     with:
       upstream_repository: ${{ github.repository }}
       target_ref: ${{ needs.sync.outputs.sha }}
-      tool_ref: ea49ce07c6e46b192303eb806f3dc6b0bd2617ce
+      tool_ref: 7ce687487802788866b8ecdadac41b0d4e41dcc2
       dry_run: false
