@@ -1,0 +1,11 @@
+{
+  "id": "db41bd2b-254b-40a7-bd08-104953f17540",
+  "requestHash": "54660fa31ac4cb815c0c5119f4f5fdbf9aa1ee0ef83768b8c8d45a196c3884fd",
+  "runId": "44108164070",
+  "runAttempt": "1",
+  "head": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+  "resultHead": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed exact head `41a504fd7699419aea235f7d5e08f88c79cfa07e`. No code changes warranted and no unresolved human review threads require replies. The small entity-only registry rejects duplicate XML class declarations before metadata is overwritten, using existing class-name normalization without changing public APIs or XML schemas. Public-bootstrap regressions cover same-document overrides and cross-document metadata-complete mappings.\\n\\nBoth test-only RED runs failed because the expected `MappingException` was not thrown. [Exact-head verification](https://github.com/xfocus3/hibernate-work/actions/runs/44105978264) passed 83 tests across 34 XML suites with zero failures, errors or skips, including both regressions and dynamic, distinct-class and annotation-override controls. Compilation, root `formatChecks` and source-header checks passed. Tested tree `2bb5bbedc6c10392ebe5ef324c4de76502a5793b` exactly matches the source tree; the formatter patch is empty.\\n\\nScope: focused H2 verification, not a full build or database matrix. Identical-name declarations and repeated registration of the same mapping resource now also fail. Detection spans documents within each resource batch, not independent additional-mapping contributor batches.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
