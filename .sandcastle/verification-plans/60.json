@@ -7,9 +7,13 @@
     "hibernate-core:test",
     "--tests",
     "org.hibernate.orm.test.filter.*",
+    "--tests",
+    "org.hibernate.orm.test.query.mutationquery.MutationQueriesFilterTest",
+    "--tests",
+    "org.hibernate.orm.test.query.mutationquery.MutationQueriesWhereAndFilterTest",
     "hibernate-core:testClasses",
     "formatChecks",
     "-Pdb=h2"
   ],
-  "reason": "HHH-21130 groups each enabled filter condition before combining it with query or join restrictions. Run all filter-package tests, including the 10-case entity-query, fetch-join owner-isolation, parameter-free OR, multiple-filter and compatibility regression, plus compilation and repository formatting checks on the exact PR head. Unchanged-production run 44069473951 reproduced five behavioral failures; exact-head run 44070595647 passed 128 cases with two existing H2-inapplicable skips. This plan reruns the tests for the PR verification gate. The full clean build and other database profiles remain for wider CI."
+  "reason": "HHH-21130 groups each enabled filter condition before combining it with query, join or mutation restrictions. Run the filter package, including the entity-query, fetch-join owner-isolation, parameter-free OR, multiple-filter and guarded bulk-update regression, plus existing filtered mutation neighbors, compilation and repository formatting checks on the exact PR head. Unchanged-production run 44069473951 reproduced five query/join failures; run 44074006213 independently reproduced a bulk update affecting two rows instead of one. Lazy collection and already-parenthesized/non-OR cases are compatibility controls. This plan reruns the checks for the PR verification gate. The full clean build and other database profiles remain for wider CI."
 }
