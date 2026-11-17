@@ -1,0 +1,99 @@
+{
+  "issue": "HHH-21119",
+  "work_issue": "https://github.com/xfocus3/hibernate-work/issues/61",
+  "work_pr": "https://github.com/xfocus3/hibernate-work/pull/62",
+  "base": "8e082cd46c15217618404b1b8b666d21f64518a1",
+  "reviewed_head": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+  "tested_tree": "2bb5bbedc6c10392ebe5ef324c4de76502a5793b",
+  "tool_revision": "5455b93cf72b9fde2fb87be4e1fca5149595aca3",
+  "standards_profiles": [
+    "shared",
+    "java",
+    "hibernate"
+  ],
+  "standards_sha256": "eb9108d94cc41ae84ec8f8570d3fbbd955ae733e4077c9130a29f4a8db5cf1da",
+  "explore_run": 44097955699,
+  "implementation_run": 44099746554,
+  "review_run": 44108164070,
+  "verification_runs": [
+    {
+      "run": 44100931769,
+      "head": "ff8bb1e4edc6d2dab76f620d0ab1f0c5310f1d23",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "expected": "MappingException was not thrown; unchanged production"
+    },
+    {
+      "run": 44102065489,
+      "head": "21cefcd8d07429bfcce4141f3732842c82b5880d",
+      "tests": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "run": 44103178620,
+      "head": "7166292e737c791e94f6e8720bd7b4d4f4d09d32",
+      "tests": 1,
+      "failures": 1,
+      "errors": 0,
+      "skipped": 0,
+      "expected": "MappingException was not thrown; unchanged production"
+    },
+    {
+      "run": 44103838415,
+      "head": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+      "tests": 83,
+      "suites": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "formatter_patch_empty": true
+    },
+    {
+      "run": 44105978264,
+      "head": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+      "tests": 83,
+      "suites": 34,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "formatter_patch_empty": true
+    }
+  ],
+  "handoffs": [
+    {
+      "request": "7ef81c73-de02-4c80-88b0-2d144aa7411d",
+      "response_commit": "5a69d822027e810e42dfb01fb209642d253effce"
+    },
+    {
+      "request": "13bfa99a-52f2-484e-8a8f-97e8eca52ad9",
+      "response_commit": "b9f151937b48f6c7af5b4c8e21d9d76a39617b67"
+    },
+    {
+      "request": "98971682-5d3d-4759-8ff0-c67fc3c33e07",
+      "response_commit": "903da0066e462399ad09afebb50d7cb0d069ff6e"
+    },
+    {
+      "request": "8ac93815-4d00-424d-b1bb-52c1e2415dee",
+      "response_commit": "07bea04865b98a0fe0518e648f9154307a56f608"
+    },
+    {
+      "request": "db41bd2b-254b-40a7-bd08-104953f17540",
+      "response_commit": "f2ed2f9341b7614b6dde5cc0a4acc3208083142d"
+    }
+  ],
+  "review": "https://github.com/xfocus3/hibernate-work/pull/62#pullrequestreview-5940948183",
+  "work_pr_ready": true,
+  "labels_cleared": true,
+  "linter": {
+    "run": 44104908720,
+    "attempt": 2,
+    "workflow": "success",
+    "detector": "success",
+    "lint_execution": "skipped: no workflow changes"
+  },
+  "scope": "Focused H2 XML-package verification, compilation and root formatChecks. Not a full clean build or database matrix. Duplicate identical-name declarations and repeated resource registration also rejected. Per-resource-batch detection, not global contributor-batch validation."
+}
