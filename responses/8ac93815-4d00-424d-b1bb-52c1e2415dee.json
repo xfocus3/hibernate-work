@@ -1,0 +1,11 @@
+{
+  "id": "8ac93815-4d00-424d-b1bb-52c1e2415dee",
+  "requestHash": "a085c9fda3dea810482050b428b15b3347bba7f674edd0d23f1880b2580ee183",
+  "runId": "44108164070",
+  "runAttempt": "1",
+  "head": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+  "resultHead": "41a504fd7699419aea235f7d5e08f88c79cfa07e",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Review approved at 41a504fd7699419aea235f7d5e08f88c79cfa07e. No changes warranted; no commit made. No unresolved human review threads require replies.\n\nThe five-file change correctly rejects duplicate XML entity classes before metadata is overwritten. It uses existing class-name normalization, preserves name-only dynamic entities, and avoids unrelated API or schema changes. Tests exercise public bootstrap for same-document overrides and cross-document metadata-complete declarations.\n\nVerification inspected:\n- Both test-only RED reports fail because the expected MappingException was not thrown (runs44100931769 and44103178620).\n- Final gate https://github.com/xfocus3/hibernate-work/actions/runs/44105978264 succeeded.\n- Fresh XML-package reports contain83 tests across34 suites, zero failures, errors or skips, including both regressions and dynamic, distinct-class and annotation-override controls.\n- hibernate-core:testClasses, root formatChecks and source-header checks succeeded.\n- Tested tree2bb5bbedc6c10392ebe5ef324c4de76502a5793b matches the source tree; formatter patch is empty.\n\nLimits: focused H2 verification, not a full build/database matrix. Duplicate registration, including identical names, now fails. Detection is per resource batch, not global across separate contributor batches.\n\n<promise>COMPLETE</promise>"
+}
