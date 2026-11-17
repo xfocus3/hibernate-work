@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:cleanTest",
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.filter.*",
+    "hibernate-core:testClasses",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21130 groups each enabled filter condition before combining it with query or join restrictions. Run all filter-package tests, including the 10-case entity-query, fetch-join owner-isolation, parameter-free OR, multiple-filter and compatibility regression, plus compilation and repository formatting checks on the exact PR head. Unchanged-production run 44069473951 reproduced five behavioral failures; exact-head run 44070595647 passed 128 cases with two existing H2-inapplicable skips. This plan reruns the tests for the PR verification gate. The full clean build and other database profiles remain for wider CI."
+}
