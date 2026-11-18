@@ -53,6 +53,12 @@ jobs:
           else
             ./gradlew --no-daemon hibernate-core:test --tests org.hibernate.orm.test.mapping.basic.TimeZoneStoragePropertyAccessTest --tests org.hibernate.orm.test.mapping.basic.TimeZoneStorageMappingTests -Pdb=h2
           fi
+      - name: Render migration guide and check formatting
+        working-directory: target
+        run: |
+          ./gradlew --no-daemon formatChecks :documentation:renderMigrationGuide
+          test -s documentation/target/asciidoc/migration-guide/index.html
+          grep -q 'timezone-storage-property-access' documentation/target/asciidoc/migration-guide/index.html
       - name: Require test outputs
         working-directory: target
         run: test -s hibernate-core/target/test-results/test/TEST-org.hibernate.orm.test.mapping.basic.TimeZoneStoragePropertyAccessTest.xml
@@ -80,6 +86,7 @@ jobs:
             verification.txt
             verified.patch
             untracked.txt
+            target/documentation/target/asciidoc/migration-guide/index.html
             target/**/target/test-results/**/TEST-*.xml
           retention-days: 7
           if-no-files-found: error
