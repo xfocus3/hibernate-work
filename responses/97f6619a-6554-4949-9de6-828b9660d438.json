@@ -1,0 +1,14 @@
+{
+  "id": "97f6619a-6554-4949-9de6-828b9660d438",
+  "requestHash": "fbc89f7ca331d5f17604e000a82336f1329064c09826fa88bbf5b2ed3d3ef2e8",
+  "runId": "44500039814",
+  "runAttempt": "1",
+  "head": "5f093106971c39f16c79409d58ef6ffe5036172e",
+  "resultHead": "a92ad1682aa87566001255be9ce8f78a1d24e592",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sql/internal/NativeQueryImpl.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/jpa/ql/NamedNativeQueryTest.java"
+  ],
+  "status": "completed",
+  "stdout": "HHH-21187: reject conversion of recognized native SELECT queries to mutation statements.\n\n- asMutationQuery() now uses the mutation-side guard. That guard raises IllegalMutationQueryException, so the existing asStatement() wrapper translates it to IllegalStateException.\n- Existing known-selection classification is unchanged. Unknown native SQL and recognized-selection detection keep their existing behavior. No HQL paths or SQL parser changes.\n- Two regressions verify the plain native SELECT and mapped native SELECT conversions reject before execution; the JPA wrapper test also checks the exception cause.\n\nEvidence (JDK 25/H2):\n- RED 5c1a3c2ea5578ca45e1bc51f9224b37909ba6066 is a test-only descendant of 5f093106971c39f16c79409d58ef6ffe5036172e. Actions run 44501442391 compiled and failed exactly the two new assertions (10 tests, 2 failed).\n- GREEN Actions run 44503885829 checked out a92ad1682aa87566001255be9ce8f78a1d24e592 and passed NamedNativeQueryTest, BasicMutationQueryTests, test compilation and formatChecks. Independent source review compared the exact source chain and found no blocking issue.\n- Run logs and remote diffs were verified; the archived formatter/tested-tree records were not verified. Reconcile exact tested tree before official publication. Full build and dialect matrix were not run.\n\n<promise>COMPLETE</promise>\n"
+}
