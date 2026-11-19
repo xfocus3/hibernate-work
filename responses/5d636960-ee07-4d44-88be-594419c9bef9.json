@@ -1,0 +1,11 @@
+{
+  "id": "5d636960-ee07-4d44-88be-594419c9bef9",
+  "requestHash": "5a4924c1347497bcc9a2841fa708b913d7725e924e88101a7a60391e666c6862",
+  "runId": "44507852259",
+  "runAttempt": "1",
+  "head": "a92ad1682aa87566001255be9ce8f78a1d24e592",
+  "resultHead": "a92ad1682aa87566001255be9ce8f78a1d24e592",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"No changes needed. The reviewed fix rejects only native selections Hibernate already recognizes and uses IllegalMutationQueryException, which asStatement() translates to IllegalStateException. It leaves unknown native SQL, the classification heuristic and HQL paths unchanged. The two new tests cover plain and explicitly mapped selections; existing named native DML and HQL mutation tests provide controls. No unresolved human review threads were present.\\n\\nThe two new assertions fail on unchanged production code (RED run 44501442391). Scoped run 44506457135 passed 18 focused H2 tests, test compilation and formatting at a92ad168; the tested tree matches the commit and the formatter diff is empty. No full build or cross-dialect run was performed for this verification.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
