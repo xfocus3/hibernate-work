@@ -1,0 +1,11 @@
+{
+  "id": "4078c7da-aa24-48f0-bc01-7c6e2af31404",
+  "requestHash": "76bbd0d2b0954911d39ac18709e75f547eb282b6a9ac9a486cc133c6ef7f014f",
+  "runId": "44507852259",
+  "runAttempt": "1",
+  "head": "a92ad1682aa87566001255be9ce8f78a1d24e592",
+  "resultHead": "a92ad1682aa87566001255be9ce8f78a1d24e592",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed #66 at a92ad1682aa87566001255be9ce8f78a1d24e592. No blocking findings, unresolved human threads, or changes needed.\n\n- The mutation-side guard rejects only Boolean.TRUE. Unknown native SQL and valid DML still follow the existing handling. No HQL or SQL-classification code changes.\n- IllegalMutationQueryException is the documented Hibernate conversion exception; asStatement() already wraps it in IllegalStateException. The shared memento caller now reports the mutation exception as its cause while retaining its existing outer IllegalArgumentException.\n- The two tests cover prefix recognition and explicit result mapping, and assert rejection before SQL execution. Named native DML and neighboring mutation tests provide controls. A direct memento regression or an additional unknown-SQL control is optional follow-up, not required to widen this fix.\n\nChecked execution evidence: test-only baseline run 44501442391 failed both expected assertions and no others; its tested tree equals the committed test-only tree. Exact-head Scoped run 44506457135 passed 18 H2 tests with no skips or failures, test compilation and formatChecks. Its tested tree c5975132cfdadac23f7cd2fb7f63977108d1ef89 matches the reviewed source and the formatter patch is empty. Full build and other dialects were not run.\n\nNo additional commit.\n\n<promise>COMPLETE</promise>\n"
+}
