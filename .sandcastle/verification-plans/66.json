@@ -1,0 +1,17 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    ":hibernate-core:cleanTest",
+    ":hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.jpa.ql.NamedNativeQueryTest",
+    "--tests",
+    "org.hibernate.orm.test.query.sqm.mutation.BasicMutationQueryTests",
+    ":hibernate-core:testClasses",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21187: verify native SELECT conversion rejection, neighboring HQL and native mutation controls, compilation, and formatting on draft PR #66."
+}
