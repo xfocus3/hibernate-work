@@ -1,7 +1,5 @@
 package org.hibernate.temporal;
 
-import java.time.Instant;
-
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -20,7 +18,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.hibernate.cfg.StateManagementSettings.CHANGESET_ID_SUPPLIER;
 import static org.hibernate.cfg.StateManagementSettings.TEMPORAL_TABLE_STRATEGY;
-import static org.hibernate.testing.orm.junit.DialectContext.awaitTimestampTick;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
@@ -58,12 +55,9 @@ class TemporalIdentityTest {
 		} );
 		assertNotNull( id );
 
-		awaitTimestampTick();
-		final var beforeUpdate = Instant.now();
-		awaitTimestampTick();
 		scope.inTransaction( session -> session.find( Item.class, id ).name = "b" );
 		scope.inSession( session -> assertEquals( "b", session.find( Item.class, id ).name ) );
-		try ( var session = scope.getSessionFactory().withOptions().asOf( beforeUpdate ).open() ) {
+		try ( var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).open() ) {
 			session.inTransaction( tx -> assertEquals( "a", session.find( Item.class, id ).name ) );
 		}
 	}
