@@ -1,0 +1,11 @@
+{
+  "id": "7aa03099-748f-4c10-b23f-f6532641ca1c",
+  "requestHash": "394be3709c90654d7ddc5a0506f28efedf4b40b5fa72ded47831792cdef2a41e",
+  "runId": "44886215900",
+  "runAttempt": "1",
+  "head": "12bb9125b06c7d1fdb5228068d3daf0210207272",
+  "resultHead": "12bb9125b06c7d1fdb5228068d3daf0210207272",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"No further code changes were needed. The previous review’s historical-read regression is present on this head, and the configured exact-head gate now passed, including the separate current-head check. Both temporal strategies passed on H2. Wider dialects were not verified in this gate.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>\n"
+}
