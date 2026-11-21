@@ -1,0 +1,11 @@
+{
+  "id": "d7d9f3df-bf8d-4020-9cca-2d93389756f6",
+  "requestHash": "dc5bd938f021b70448d9b0869105c0d477b3a536a6e9420e0a9041651b9ef21f",
+  "runId": "44881379000",
+  "runAttempt": "1",
+  "head": "0a6ed12c1169397f2b9ca9fc2d3dc03cec60dfe3",
+  "resultHead": "0a6ed12c1169397f2b9ca9fc2d3dc03cec60dfe3",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "### #67 / HHH-21221\n\n**easy-call**: A temporal update must reuse the identifier assigned by the original IDENTITY insert. #67 is a group of one; no duplicates to close.\n\n**Two-way door.** This affects core mutation planning and its tests, with no public API or schema change. Keep initial IDENTITY insertion and existing temporal mapping behavior unchanged.\n\nOn pinned main, the SINGLE_TABLE replacement passes the existing ID to EntityInsertMutationPlanner, which forces key binding but still selects the identity insert delegate for the identifier table. The replacement contributor then expects the graph table adapter. Follow the explicit-ID builder precedent in InsertCoordinatorStandard. Check GeneratedValuesCollector and executor delegate selection separately so a replacement never regenerates the logical ID and other generated values still work.\n\nThe HISTORY_TABLE contributor builds a standard copied-key INSERT using the original persister, whose identity delegate is still visible. Its history adapter has the identifier-table flag, and PreparableMutationOperation.canBeBatched asserts against a delegate in that case. Verify the adapter and key ordering semantics before changing metadata; do not suppress the assertion or disable batching globally.\n\nThese are source findings, not executed test results. First reproduce both Jira cases on unchanged code with JVM assertions enabled. Then verify on H2 that the original insert generates an ID, a later transaction can flush an update without changing that ID, and current and historical reads return the new and old values respectively for each strategy. Include existing assigned-ID temporal and ordinary IDENTITY insert controls, and cover with and without batching if the history path branches on it. Record the tested commits and formatting.\n\n<promise>COMPLETE</promise>\n"
+}
