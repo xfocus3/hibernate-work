@@ -1,0 +1,11 @@
+{
+  "id": "1505fd70-01f4-4fb1-bd25-d29dd1ec5cda",
+  "requestHash": "6eacd4d6f9411b246f0e3f3966f9852ca4ee956d5867310a1ab6eae415ca9dfd",
+  "runId": "44886215900",
+  "runAttempt": "1",
+  "head": "12bb9125b06c7d1fdb5228068d3daf0210207272",
+  "resultHead": "12bb9125b06c7d1fdb5228068d3daf0210207272",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Rechecked the exact reviewed head 12bb9125b06c7d1fdb5228068d3daf0210207272 without changing it. The temporal IDENTITY patch retains the known identifier on updates, uses the ordinary identity path on the initial persist, and uses the auxiliary history-table mapping without requesting generated identifiers. The reporter’s two tests now confirm the generated ID and current and historical values. Existing scoped gate #48 passed on this exact head, including the current-head check and H2 temporal suite, test compilation and formatting. No broader dialect verification claimed. No new human thread required a reply. The pinned shared/java/Hibernate profiles include the new review rules; this diff does not change shared-session locking or XML replacement.\n\n<promise>COMPLETE</promise>\n"
+}
