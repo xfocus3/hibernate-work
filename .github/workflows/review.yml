@@ -23,7 +23,7 @@ permissions:
 jobs:
   pipeline:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request_target' && github.event.label.name == 'agent:review') || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
-    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@6c96419a4e8e144df72a4c65811b94a8aa09eae1
+    uses: xfocus3/sandcastle/.github/workflows/agent-pr-queue.yml@9745466b7e7e509877a114fd387a8f0ae51ec3e9
     with:
       upstream_repository: hibernate/hibernate-orm
       verification_workflows: '[{"path":".github/workflows/scoped-java.yml","source":"target-sha","ref":"main"}]'
