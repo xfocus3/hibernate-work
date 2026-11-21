@@ -75,7 +75,7 @@ class TemporalIdentityTest {
 	static class Item {
 		@Id
 		@GeneratedValue(strategy = GenerationType.IDENTITY)
-		Integer id;
+		Long id;
 		String name;
 	}
 }
