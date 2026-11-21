@@ -71,7 +71,7 @@ public class HistoryEntityMutationPlanContributor implements EntityMutationPlanC
 		this.historyTableMapping = new TableDescriptorAsTableMapping(
 				historyTableDescriptor,
 				historyTableDescriptor.relativePosition(),
-				true,
+				historyTableDescriptor.isIdentifierTable(),
 				false
 		);
 		this.staticHistoryInsert = buildHistoryInsert( entityPersister.getPropertyInsertability(), null, null );
@@ -235,10 +235,11 @@ public class HistoryEntityMutationPlanContributor implements EntityMutationPlanC
 		columns.add( ColumnDescriptor.from( temporalMapping.getStartingColumnMapping() ) );
 		columns.add( ColumnDescriptor.from( temporalMapping.getEndingColumnMapping() ) );
 
+		// The history table stores an existing identifier, never generates it.
 		return new EntityTableDescriptor(
 				temporalMapping.getTableName(),
 				identifierTable.relativePosition(),
-				true,
+				false,
 				false,
 				false,
 				identifierTable.isSelfReferential(),
