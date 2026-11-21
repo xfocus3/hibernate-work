@@ -1,0 +1,13 @@
+{
+  "id": "e6699833-930c-48f8-ab34-d37d9ccf8a98",
+  "requestHash": "118b16203bcbbb48f3281259730d834401ebb7e0e597e64ef20455035526e19c",
+  "runId": "44884178935",
+  "runAttempt": "1",
+  "head": "8e422d35a846752b44950c152b5f5c24e49be47a",
+  "resultHead": "12bb9125b06c7d1fdb5228068d3daf0210207272",
+  "changedPaths": [
+    "hibernate-core/src/test/java/org/hibernate/temporal/TemporalIdentityTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Reviewed work PR #68 and changed only TemporalIdentityTest. Both strategies now assert that IDENTITY assigned an ID, the current row is found under that ID after the later update, and the original value is still visible at the fixture’s first integer changeset. No production edits in review. The existing single-table planner preserves ordinary IDENTITY inserts; the history descriptor describes the auxiliary table without a generator. No unresolved human review threads were in this work PR.\n\nExact result 12bb9125b06c7d1fdb5228068d3daf0210207272: H2 temporal suite 407 passed, six skipped (including both strengthened tests passing), test compilation and repository formatting passed in run 44885155244. Artifact records an unchanged tested tree bb71a02568e292f05c238473200960cf45c801af. Wider dialect and arbitrary non-ID generated-property coverage are not established.\n\n<promise>COMPLETE</promise>\n"
+}
