@@ -1,8 +1,12 @@
 package org.hibernate.temporal;
+
+import java.time.Instant;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+
 import org.hibernate.SharedSessionContract;
 import org.hibernate.annotations.Temporal;
 import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
@@ -11,12 +15,18 @@ import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
+
 import org.junit.jupiter.api.Test;
+
 import static org.hibernate.cfg.StateManagementSettings.CHANGESET_ID_SUPPLIER;
 import static org.hibernate.cfg.StateManagementSettings.TEMPORAL_TABLE_STRATEGY;
+import static org.hibernate.testing.orm.junit.DialectContext.awaitTimestampTick;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+
 class TemporalIdentityTest {
 	private static final String SUPPLIER = "org.hibernate.temporal.TemporalIdentityTest$Changesets";
+
 	@Test
 	@SessionFactory
 	@DomainModel(annotatedClasses = Item.class)
@@ -27,6 +37,7 @@ class TemporalIdentityTest {
 	void singleTable(SessionFactoryScope scope) {
 		persistThenUpdate( scope );
 	}
+
 	@Test
 	@SessionFactory
 	@DomainModel(annotatedClasses = Item.class)
@@ -37,6 +48,7 @@ class TemporalIdentityTest {
 	void historyTable(SessionFactoryScope scope) {
 		persistThenUpdate( scope );
 	}
+
 	private void persistThenUpdate(SessionFactoryScope scope) {
 		final var id = scope.fromTransaction( session -> {
 			final var item = new Item();
@@ -44,9 +56,18 @@ class TemporalIdentityTest {
 			session.persist( item );
 			return item.id;
 		} );
+		assertNotNull( id );
+
+		awaitTimestampTick();
+		final var beforeUpdate = Instant.now();
+		awaitTimestampTick();
 		scope.inTransaction( session -> session.find( Item.class, id ).name = "b" );
 		scope.inSession( session -> assertEquals( "b", session.find( Item.class, id ).name ) );
+		try ( var session = scope.getSessionFactory().withOptions().asOf( beforeUpdate ).open() ) {
+			session.inTransaction( tx -> assertEquals( "a", session.find( Item.class, id ).name ) );
+		}
 	}
+
 	public static class Changesets implements ChangesetIdentifierSupplier<Integer> {
 		private int next;
 		@Override
@@ -54,6 +75,7 @@ class TemporalIdentityTest {
 			return ++next;
 		}
 	}
+
 	@Entity(name = "Item")
 	@Temporal
 	static class Item {
