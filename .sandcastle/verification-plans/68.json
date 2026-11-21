@@ -1,0 +1,15 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    ":hibernate-core:cleanTest",
+    ":hibernate-core:test",
+    "--tests",
+    "org.hibernate.temporal.*",
+    ":hibernate-core:testClasses",
+    "formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21221: verify both temporal IDENTITY update strategies, neighboring temporal tests, compilation and formatting on work PR #68."
+}
