@@ -1,0 +1,17 @@
+{
+  "id": "ce3bc325-6d97-4661-b695-95de9c6d4b3d",
+  "requestHash": "115d2f4698b2c1337ae7954842e9f43a3cd41e89a9b099194dd958eb6d2e37df",
+  "runId": "44881891898",
+  "runAttempt": "1",
+  "head": "0a6ed12c1169397f2b9ca9fc2d3dc03cec60dfe3",
+  "resultHead": "8e422d35a846752b44950c152b5f5c24e49be47a",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/EntityInsertMutationPlanner.java",
+    "hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/HistoryEntityMutationPlanContributor.java",
+    "hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/TemporalEntityMutationPlanContributor.java",
+    "hibernate-core/src/main/java/org/hibernate/action/queue/spi/bind/GeneratedValuesCollector.java",
+    "hibernate-core/src/test/java/org/hibernate/temporal/TemporalIdentityTest.java"
+  ],
+  "status": "completed",
+  "stdout": "HHH-21221: Preserve IDENTITY-generated identifiers on temporal updates.\n\nSingle-table replacement inserts bind the existing ID, use the canonical graph table descriptors and avoid the identity-only delegate. The collector excludes the existing simple ID when an arbitrary-value delegate is needed for other values. History-table inserts copy the existing key and mark the history table as auxiliary to avoid the identifier-table batching assertion. Ordinary identity insertion stays on its existing path.\n\nThe reporter’s two regressions failed on unchanged main 0a6ed12 with the expected ClassCastException and canBeBatched assertion (H2 #140, 44882193733). Both passed on 8e422d35; the focused H2 temporal package ran 413 tests, 407 passed and 6 skipped, and hibernate-core formatChecks passed (#141, 44882727219). Artifact confirmed the tested source tree 95d93a549b040254a367c217b21e31451d4d2dc1 was unchanged. No full dialect matrix run for this handoff; a generated non-ID property case is not covered by the reporter fixture.\n\n<promise>COMPLETE</promise>\n"
+}
