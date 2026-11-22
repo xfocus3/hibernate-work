@@ -1,0 +1,11 @@
+{
+  "id": "7af252d5-6595-4fc0-b117-232cb6bee159",
+  "requestHash": "020a29fc204361bf84aea58ea81e541430685d1afbff2915be5df24b401e5b21",
+  "runId": "45071809425",
+  "runAttempt": "1",
+  "head": "59c484464f1494be0df3b2e94ae7697297edcb33",
+  "resultHead": "59c484464f1494be0df3b2e94ae7697297edcb33",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"summary\": \"No further code changes were needed. The detach path uses the captured changeset only to choose the proxy eviction key; it preserves the ordinary entity path and the fallback for other initializer implementations. The same fixture demonstrates both historical proxy defects on unchanged production code and passes with the fix in both audit strategies, while ordinary proxy and entity detach are unchanged. The rerun of the exact-head check passed all 424 H2 audit tests, compilation, the module formatter, and the separate current-head verification. Broader dialects are not covered by this result.\",\n  \"inlineComments\": [],\n  \"replies\": []\n}\n</output>\n"
+}
