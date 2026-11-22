@@ -1,0 +1,11 @@
+{
+  "id": "71e95bfb-4e1b-45f5-ba42-639c1ae1e019",
+  "requestHash": "671177c7fd86859719458bc104e3c50b89f1b261a73303ed0cf49932667eb6f7",
+  "runId": "45067726647",
+  "runAttempt": "1",
+  "head": "66ed02db673cdccaeda2cbaae01a6b52034418b3",
+  "resultHead": "66ed02db673cdccaeda2cbaae01a6b52034418b3",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "**easy-call**: Detaching a historical proxy must remove its own persistence-context entry, not the current entity with the same ID. #69 is a group of one; no duplicate to close.\n\n**Two-way door.** Scope the change to core proxy eviction and a focused regression; no public API or schema change is needed.\n\nOn the pinned source, `DefaultEvictEventListener` computes the proxy key from the session's ambient temporal context. In `ALL_CHANGESETS`, `generateEntityKey` returns an ordinary key, and `StatefulPersistenceContext.detachEntity` removes the holder before checking whether the proxy was initialized. The ordinary non-proxy path already uses its entry's key.\n\n`AbstractLazyInitializer` captures the proxy's changeset and already uses `withCapturedTemporalIdentifier` when loading it. Evaluate reusing that helper only for eviction key generation, preserving the fallback for other `LazyInitializer` implementations and leaving the ambient context unchanged. Do not initialize a proxy to discover its key.\n\nThese are source findings, not executed test results. Run Gavin King's Jira fixture on unchanged main first. Then check that detaching an initialized historical proxy detaches its target while the current same-ID instance stays managed. Cover an uninitialized historical proxy that remains uninitialized and an ordinary detach control. Record exact test and formatting results.\n\n<promise>COMPLETE</promise>\n"
+}
