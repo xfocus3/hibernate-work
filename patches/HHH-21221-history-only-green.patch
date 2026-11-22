@@ -1,0 +1,97 @@
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalIdentityHistoryUpdateTest.java
+@@ -0,0 +1,70 @@
++package org.hibernate.temporal;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.GeneratedValue;
++import jakarta.persistence.GenerationType;
++import jakarta.persistence.Id;
++
++import org.hibernate.SharedSessionContract;
++import org.hibernate.annotations.Temporal;
++import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++
++import org.junit.jupiter.api.Test;
++
++import static org.hibernate.cfg.StateManagementSettings.CHANGESET_ID_SUPPLIER;
++import static org.hibernate.cfg.StateManagementSettings.TEMPORAL_TABLE_STRATEGY;
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++
++class TemporalIdentityHistoryUpdateTest {
++	private static final String SUPPLIER = "org.hibernate.temporal.TemporalIdentityHistoryUpdateTest$Changesets";
++
++	@Test
++	@SessionFactory
++	@DomainModel(annotatedClasses = Item.class)
++	@ServiceRegistry(settings = {
++			@Setting(name = TEMPORAL_TABLE_STRATEGY, value = "HISTORY_TABLE"),
++			@Setting(name = CHANGESET_ID_SUPPLIER, value = SUPPLIER)
++	})
++	void historyTable(SessionFactoryScope scope) {
++		persistThenUpdate( scope );
++	}
++
++	private void persistThenUpdate(SessionFactoryScope scope) {
++		final var id = scope.fromTransaction( session -> {
++			final var item = new Item();
++			item.name = "a";
++			session.persist( item );
++			return item.id;
++		} );
++		assertNotNull( id );
++
++		scope.inTransaction( session -> session.find( Item.class, id ).name = "b" );
++		scope.inSession( session -> assertEquals( "b", session.find( Item.class, id ).name ) );
++		try ( var session = scope.getSessionFactory().withOptions().atChangeset( 1 ).open() ) {
++			session.inTransaction( tx -> assertEquals( "a", session.find( Item.class, id ).name ) );
++		}
++	}
++
++	public static class Changesets implements ChangesetIdentifierSupplier<Integer> {
++		private int next;
++		@Override
++		public Integer generateIdentifier(SharedSessionContract session) {
++			return ++next;
++		}
++	}
++
++	@Entity(name = "Item")
++	@Temporal
++	static class Item {
++		@Id
++		@GeneratedValue(strategy = GenerationType.IDENTITY)
++		Integer id;
++		String name;
++	}
++}
+--- a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/HistoryEntityMutationPlanContributor.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/HistoryEntityMutationPlanContributor.java
+@@ -71,7 +71,7 @@
+ 		this.historyTableMapping = new TableDescriptorAsTableMapping(
+ 				historyTableDescriptor,
+ 				historyTableDescriptor.relativePosition(),
+-				true,
++				historyTableDescriptor.isIdentifierTable(),
+ 				false
+ 		);
+ 		this.staticHistoryInsert = buildHistoryInsert( entityPersister.getPropertyInsertability(), null, null );
+@@ -235,10 +235,11 @@
+ 		columns.add( ColumnDescriptor.from( temporalMapping.getStartingColumnMapping() ) );
+ 		columns.add( ColumnDescriptor.from( temporalMapping.getEndingColumnMapping() ) );
+ 
++		// The history table stores an existing identifier, never generates it.
+ 		return new EntityTableDescriptor(
+ 				temporalMapping.getTableName(),
+ 				identifierTable.relativePosition(),
+-				true,
++				false,
+ 				false,
+ 				false,
+ 				identifierTable.isSelfReferential(),
