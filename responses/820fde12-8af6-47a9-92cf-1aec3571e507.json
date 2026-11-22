@@ -1,0 +1,11 @@
+{
+  "id": "820fde12-8af6-47a9-92cf-1aec3571e507",
+  "requestHash": "447603f1617f9acce4041234525575c8c42be490769aaadcf3347e3c3a99abd2",
+  "runId": "45071809425",
+  "runAttempt": "1",
+  "head": "59c484464f1494be0df3b2e94ae7697297edcb33",
+  "resultHead": "59c484464f1494be0df3b2e94ae7697297edcb33",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Reviewed exact head 59c484464f1494be0df3b2e94ae7697297edcb33 without changing it. Using the existing captured-changeset helper only around proxy key selection leaves the ordinary entity path and fallback for other LazyInitializer implementations unchanged. No proxy initialization is needed to detach. The identical test fixture fails only the initialized and uninitialized historical cases on unchanged production code, in both audit strategies; the ordinary controls pass. The exact-head scoped check passed all 424 H2 audit tests including all eight fixture executions, compilation, module formatting, and the separate current-head check. This is not a full-suite or dialect-matrix result. No available reviewer thread required a reply. Applied the pinned shared, Java, and Hibernate standards; no unrelated code or formatting changes were warranted.\n\n<promise>COMPLETE</promise>\n"
+}
