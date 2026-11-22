@@ -1,0 +1,14 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    ":hibernate-core:test",
+    "--tests",
+    "org.hibernate.temporal.audit.*",
+    ":hibernate-core:testClasses",
+    ":hibernate-core:formatChecks",
+    "-Pdb=h2"
+  ],
+  "reason": "HHH-21231: verify historical and ordinary proxy detachment across both audit strategies, the H2 temporal audit package, compilation, and formatting on work PR #70."
+}
