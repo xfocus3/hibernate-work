@@ -1,0 +1,11 @@
+{
+  "id": "1da4dd2b-13ac-4f32-86f4-754ac9eec228",
+  "requestHash": "66827ddb29dc779a6eea9a95b0afa20ae2271c3460148dad38439cb63c005792",
+  "runId": 45085028223,
+  "runAttempt": 1,
+  "head": "4e6d3a058a285058ab53e26a9976af14b66f02ef",
+  "resultHead": "4e6d3a058a285058ab53e26a9976af14b66f02ef",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Issue #71 (HHH-21227): easy-call. No duplicate; sole issue in batch. Two-way: a targeted Hibernate Core history-snapshot correction, no public API or schema change. At pinned 4e6d3a0, HistoryEntityMutationPlanContributor closes the previous interval and passes the current state array into a separate history insert. HistoryInsertBindPlan decomposes each insertable slot directly; ordinary EntityUpdateBindPlan skips UNFETCHED_PROPERTY. Thus a title-only update can carry the untouched lazy String sentinel into JDBC binding for the new history version. The adjacent descriptor refactor and historical-read fix do not replace this code path. Runtime confirmation is still pending. First run Gavin King’s unmodified enhanced HISTORY_TABLE H2 reporter on the unchanged pinned production tree. Then preserve concrete current values (including explicitly set null) and resolve only missing insertable lazy basic slots for the new history snapshot, before JDBC binding and without initializing the managed entity or changing dirty state. Reuse mapped read support and preserve tenant, identifier, and batch ordering semantics. Verify current lookup and title/body projections at actual creation and update changesets, plus focused controls and formatting.\n<promise>COMPLETE</promise>"
+}
