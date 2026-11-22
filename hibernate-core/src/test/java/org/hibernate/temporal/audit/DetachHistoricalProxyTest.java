@@ -3,21 +3,20 @@ package org.hibernate.temporal.audit;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.ManyToOne;
+
 import org.hibernate.Hibernate;
 import org.hibernate.Session;
 import org.hibernate.SharedSessionContract;
 import org.hibernate.annotations.Audited;
-import org.hibernate.engine.spi.SessionImplementor;
 import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
 import org.hibernate.testing.orm.junit.AuditedTest;
-import org.hibernate.testing.orm.junit.BeforeClassTemplate;
 import org.hibernate.testing.orm.junit.DomainModel;
 import org.hibernate.testing.orm.junit.JiraKey;
 import org.hibernate.testing.orm.junit.ServiceRegistry;
 import org.hibernate.testing.orm.junit.SessionFactory;
 import org.hibernate.testing.orm.junit.SessionFactoryScope;
 import org.hibernate.testing.orm.junit.Setting;
-import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static jakarta.persistence.FetchType.LAZY;
@@ -40,8 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ServiceRegistry(settings = @Setting(name = CHANGESET_ID_SUPPLIER,
 		value = "org.hibernate.temporal.audit.DetachHistoricalProxyTest$Ids"))
 class DetachHistoricalProxyTest {
-	@BeforeClassTemplate
+	@BeforeEach
 	void setUp(SessionFactoryScope scope) {
+		scope.getSessionFactory().getSchemaManager().truncate();
 		scope.inTransaction( session -> {
 			var book = new Book();
 			book.title = "old";
@@ -60,14 +60,9 @@ class DetachHistoricalProxyTest {
 		} );
 	}
 
-	@AfterAll
-	void cleanup(SessionFactoryScope scope) {
-		scope.getSessionFactory().getSchemaManager().truncate();
-	}
-
 	@Test
 	void detachInitializedHistoricalProxy(SessionFactoryScope scope) {
-		try ( var session = scope.getSessionFactory().withOptions().atChangeset( ALL_CHANGESETS ).openSession() ) {
+		try (var session = scope.getSessionFactory().withOptions().atChangeset( ALL_CHANGESETS ).openSession()) {
 			var current = findCurrentBook( session );
 			var oldProxy = findHistoricalBook( session );
 			assertFalse( Hibernate.isInitialized( oldProxy ) );
@@ -89,21 +84,20 @@ class DetachHistoricalProxyTest {
 
 	@Test
 	void detachUninitializedHistoricalProxy(SessionFactoryScope scope) {
-		try ( var session = scope.getSessionFactory().withOptions().atChangeset( ALL_CHANGESETS ).openSession() ) {
+		try (var session = scope.getSessionFactory().withOptions().atChangeset( ALL_CHANGESETS ).openSession()) {
 			var current = findCurrentBook( session );
 			var oldProxy = findHistoricalBook( session );
 			assertNotSame( current, oldProxy );
 			assertFalse( Hibernate.isInitialized( oldProxy ) );
 			assertTrue( session.contains( oldProxy ) );
-			var persistenceContext = session.unwrap( SessionImplementor.class ).getPersistenceContextInternal();
-			var currentKey = persistenceContext.getEntry( current ).getEntityKey();
+			assertSame( current, session.getReference( Book.class, 1 ) );
 
 			session.detach( oldProxy );
 
 			assertFalse( Hibernate.isInitialized( oldProxy ) );
 			assertFalse( session.contains( oldProxy ) );
 			assertTrue( session.contains( current ) );
-			assertSame( current, persistenceContext.getEntity( currentKey ) );
+			assertSame( current, session.getReference( Book.class, 1 ) );
 			assertSame( current, findCurrentBook( session ) );
 		}
 	}
