@@ -1,0 +1,14 @@
+{
+  "id": "9f3d0ad6-c935-42f3-b1f6-8e7c81aadf53",
+  "requestHash": "1f8a332b8ec387e1a9c259490a7cb75d781fa1200cf990459ccde3ebc8b9ef4e",
+  "runId": "45068148880",
+  "runAttempt": "1",
+  "head": "66ed02db673cdccaeda2cbaae01a6b52034418b3",
+  "resultHead": "59c484464f1494be0df3b2e94ae7697297edcb33",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/event/internal/DefaultEvictEventListener.java",
+    "hibernate-core/src/test/java/org/hibernate/temporal/audit/DetachHistoricalProxyTest.java"
+  ],
+  "status": "completed",
+  "stdout": "HHH-21231: Resolve the eviction key for a built-in proxy at its captured changeset. Limit the scope to key generation and leave other LazyInitializer implementations and ordinary entity eviction unchanged. Historical proxy detachment should not disturb the current instance with the same ID. The regression is based on Gavin King’s Jira reproducer, with initialized and uninitialized historical proxies and ordinary proxy/entity controls for both audit strategies.\n\nRED: tests-only 0c204c6025366508052e44cc4a5cfa1dcf805e27 on exact upstream 66ed02d. Both historical behaviors fail in both strategies; all four ordinary controls pass. See https://github.com/xfocus3/hibernate-work/actions/runs/45068978929.\n\nGREEN: exact 59c484464f1494be0df3b2e94ae7697297edcb33, tested tree e2ffd0eee75bf011e75f47da8d57b42a67f09cdd. All 424 focused H2 temporal audit tests pass, including all eight named fixture executions; module formatChecks passes. See https://github.com/xfocus3/hibernate-work/actions/runs/45069333506. The full suite and cross-dialect matrix were not run.\n\n<promise>COMPLETE</promise>\n"
+}
