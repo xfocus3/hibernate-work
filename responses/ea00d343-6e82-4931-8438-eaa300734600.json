@@ -1,0 +1,11 @@
+{
+  "id": "ea00d343-6e82-4931-8438-eaa300734600",
+  "requestHash": "c6abc2bc177235a88da173ecdc9b1b50729cd3187a967f46bf6af145d1c15d56",
+  "runId": "45167982327",
+  "runAttempt": "1",
+  "head": "0be159d4767d8d050e8ecfe47edb5eeeaa8601d2",
+  "resultHead": "0be159d4767d8d050e8ecfe47edb5eeeaa8601d2",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 71,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"**easy-call.** Preserve the stored lazy body when a title-only edit creates a new HISTORY_TABLE revision. Two-way, scoped to the Hibernate Core history snapshot, with no proposed public API or schema change.\\n\\nAt 0be159d, `HistoryEntityMutationPlanContributor` ends the old interval and creates a separate insert from the update state. `HistoryInsertBindPlan` decomposes each insertable slot, while ordinary update binding skips `UNFETCHED_PROPERTY`. This explains a source path for the reported JDBC binding failure; unchanged-production H2 reproduction is still pending.\\n\\nFirst run Gavin King’s enhanced HISTORY_TABLE reproducer. Restore only missing insertable lazy basic values before history binding, retain explicit edits and null, and leave the managed instance and dirty state intact. Assert titles and body at the actual creation and update changesets and keep the ordinary lookup. Check mapped loading, tenant and identifier routing, and batching in the implementation. No duplicate; exact read path remains an implementation question.\"\n    }\n  ]\n}\n</output>"
+}
