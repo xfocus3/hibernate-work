@@ -1,0 +1,11 @@
+{
+  "id": "8953fc97-4e02-47e4-a7dc-f3b01ecd21e7",
+  "requestHash": "f29b700476b237c9e84d6e2fd19718cade779c6c651895cae626ece0fe0cc251",
+  "runId": "45247185045",
+  "runAttempt": "1",
+  "head": "54aaaf2558315a921a496d1cf2402e0c613b5376",
+  "resultHead": "54aaaf2558315a921a496d1cf2402e0c613b5376",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>\n{\n  \"issues\": [\n    {\n      \"number\": 72,\n      \"tag\": \"easy-call\",\n      \"duplicate_of\": null,\n      \"comment\": \"**easy-call (narrow scope).** Investigate the nullable cascading self-reference on a JOINED subtype. Two-way: scoped to Hibernate Core delete planning; no public API or schema change proposed.\\n\\nAt `54aaaf2`, `DeleteCoordinatorStandard` and `DeleteDecomposerStandard` both visit mutable tables in reverse order. The root-table association FK is distinct from the subclass PK-to-root FK. Legacy self-reference nullification is presently gated on the dialect workaround. Related HHH-21133 preserves the MySQL/MariaDB path and does not verify H2. No duplicate found.\\n\\nFirst run the Jira `JoinedSelfReferenceCascadeDeleteTest` on unchanged production and verify the reported SQLState 23503 is from the subclass DELETE, not setup or cleanup. If confirmed, investigate a narrow nullable-reference handling change without globally reordering tables or altering dialect capabilities. On the candidate, assert both joined rows are absent after commit in legacy and graph queues; preserve MySQL/MariaDB controls and check PostgreSQL via Hibernate if shared logic changes. Non-nullable cycles remain outside this proposal. No runtime result yet.\"\n    }\n  ]\n}\n</output>"
+}
