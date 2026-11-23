@@ -1,0 +1,11 @@
+{
+  "id": "71f683a9-b33c-4e1b-91ed-1bf67a3de5d2",
+  "requestHash": "ab88362a4fbf1ca57e53f7c262c40615bb0db736636be7ee200f14ff950fffab",
+  "runId": "45247185045",
+  "runAttempt": "1",
+  "head": "54aaaf2558315a921a496d1cf2402e0c613b5376",
+  "resultHead": "54aaaf2558315a921a496d1cf2402e0c613b5376",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "Issue #72 (HHH-21191): easy-call for a narrowly scoped nullable self-reference fix, subject to reproducing the reported H2 failure. Sole issue in verified batch, no duplicate. Two-way: Hibernate Core delete planning only, no public API or persisted schema change proposed.\n\nStatic source at the pinned head: DeleteCoordinatorStandard and DeleteDecomposerStandard visit mutable tables in reverse order and skip only mappings marked cascade-delete-enabled. The root-table association FK is distinct from the subclass primary-key FK back to the root. DefaultDeleteEventListener calls ForeignKeys.Nullifier for the legacy path; self-reference nullification is currently dialect-workaround-gated. Related HHH-21133 preserves the MySQL/MariaDB nullable-reference workaround and does not verify H2. Investigate reusing a narrowly selected nullable-reference break in both paths; do not globally reorder deletes or change dialect support flags. Non-nullable cyclic relationships are out of this scope.\n\nFirst run the public Jira fixture on unchanged pinned production code; require the reported 23503 at subclass deletion, not a fixture skip or setup failure. Then assert that both physical rows are gone after commit, exercise legacy and graph queues, and preserve adjacent MySQL/MariaDB controls. Check PostgreSQL via Hibernate if shared deletion logic changes. No test was run in Explore and no change was made.\n\n<promise>COMPLETE</promise>"
+}
