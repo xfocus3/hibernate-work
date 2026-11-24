@@ -1,0 +1,144 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/engine/internal/ForeignKeys.java b/hibernate-core/src/main/java/org/hibernate/engine/internal/ForeignKeys.java
+--- a/hibernate-core/src/main/java/org/hibernate/engine/internal/ForeignKeys.java
++++ b/hibernate-core/src/main/java/org/hibernate/engine/internal/ForeignKeys.java
+@@ -9,7 +9,11 @@
+ import org.hibernate.engine.spi.PersistenceContext;
+ import org.hibernate.engine.spi.SelfDirtinessTracker;
+ import org.hibernate.engine.spi.SharedSessionContractImplementor;
++import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
++import org.hibernate.metamodel.mapping.internal.SimpleForeignKeyDescriptor;
++import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
+ import org.hibernate.persister.entity.EntityPersister;
++import org.hibernate.persister.entity.JoinedSubclassEntityPersister;
+ import org.hibernate.proxy.LazyInitializer;
+ import org.hibernate.type.AnyType;
+ import org.hibernate.type.ComponentType;
+@@ -184,6 +188,9 @@
+ 					// The uninitialized value was initialized to null
+ 					return null;
+ 				}
++				else if ( isDelete && value == self && hasJoinedSelfDeleteCycle( propertyName ) ) {
++					return null;
++				}
+ 				else {
+ 					// If the value is not nullifiable, make sure that the
+ 					// possibly initialized value is returned.
+@@ -194,6 +201,25 @@
+ 			}
+ 		}
+ 
++		private boolean hasJoinedSelfDeleteCycle(String propertyName) {
++			if ( !( persister instanceof JoinedSubclassEntityPersister joined )
++					|| joined.getRootTableName().equals( joined.getTableName() )
++					|| !( joined.findAttributeMapping( propertyName ) instanceof ToOneAttributeMapping toOne )
++					|| !toOne.isNullable()
++					|| joined.getPropertyOnDeleteActions()[toOne.getStateArrayPosition()] != CASCADE
++					|| toOne.getSideNature() != ForeignKeyDescriptor.Nature.KEY
++					|| !( toOne.getForeignKeyDescriptor() instanceof SimpleForeignKeyDescriptor foreignKey )
++					|| !foreignKey.hasConstraint()
++					|| !foreignKey.getKeyTable().equals( joined.getRootTableName() )
++					|| !foreignKey.getTargetTable().equals( joined.getTableName() ) ) {
++				return false;
++			}
++
++			// Deleting the child would cascade back to the root while the child still references it.
++			final var selectable = foreignKey.getSelectable( 0 );
++			return !selectable.isFormula() && selectable.isNullable() && selectable.isUpdateable();
++		}
++
+ 		private Object initializeIfNecessary(final Object value, final String propertyName, final Type type) {
+ 			if ( initializationIsNecessary( value,  type ) ) {
+ 				// IMPLEMENTATION NOTE: If cascade-remove was mapped for the attribute,
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+@@ -0,0 +1,88 @@
++package org.hibernate.orm.test.ondelete.toone;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
++import jakarta.persistence.ManyToOne;
++
++import org.hibernate.annotations.OnDelete;
++import org.hibernate.annotations.OnDeleteAction;
++import org.hibernate.event.spi.EventSource;
++
++import org.hibernate.testing.orm.junit.DialectFeatureChecks;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.RequiresDialectFeature;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@DomainModel(annotatedClasses = {
++		JoinedSelfReferenceCascadeDeleteTest.Base.class,
++		JoinedSelfReferenceCascadeDeleteTest.Child.class
++})
++@SessionFactory
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCascadeDeleteCheck.class)
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCircularCascadeDeleteCheck.class)
++public class JoinedSelfReferenceCascadeDeleteTest {
++
++	@AfterEach
++	void cleanup(SessionFactoryScope scope) {
++		scope.getSessionFactory().getSchemaManager().truncate();
++	}
++
++	@Test
++	void removeEntityReferencingItself(SessionFactoryScope scope) {
++		persistSelfReference( scope );
++		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		assertBothRowsDeleted( scope );
++	}
++
++	@Test
++	void removeEntityReferencingItselfBeforeUpdates(SessionFactoryScope scope) {
++		persistSelfReference( scope );
++		scope.inTransaction( s -> {
++			final var child = s.find( Child.class, 1 );
++			( (EventSource) s ).removeOrphanBeforeUpdates( s.getEntityName( child ), child );
++		} );
++		assertBothRowsDeleted( scope );
++	}
++
++	private static void persistSelfReference(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			var node = new Child();
++			node.id = 1;
++			s.persist( node );
++			s.flush();
++			node.self = node;
++		} );
++	}
++
++	private static void assertBothRowsDeleted(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			assertEquals( 0L, s.createNativeQuery( "select count(*) from JoinedSelfBase", Long.class ).getSingleResult() );
++			assertEquals( 0L, s.createNativeQuery( "select count(*) from JoinedSelfChild", Long.class ).getSingleResult() );
++		} );
++	}
++
++	@Entity(name = "JoinedSelfBase")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	public static class Base {
++		@Id
++		Integer id;
++		@ManyToOne
++		@OnDelete(action = OnDeleteAction.CASCADE)
++		Child self;
++	}
++
++	@Entity(name = "JoinedSelfChild")
++	public static class Child extends Base {
++		String description;
++	}
++}
