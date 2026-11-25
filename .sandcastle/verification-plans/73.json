@@ -1,0 +1,24 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.JoinedSelfReferenceCascadeDeleteTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.JoinedSelfReferenceCascadeDeleteVetoTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.JoinedSelfReferenceCustomDeleteTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.JoinedSelfReferencePreDeleteMutationTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.SelfReferencingCascadeDeleteTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.ToOneOnDeleteTest",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.OnDeleteTest",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify the joined-table H2 cascade fix with seven affected cases (including veto, listener-mutated physical self-reference, custom DELETE and batching) and 22 adjacent cases on the exact work PR head."
+}
