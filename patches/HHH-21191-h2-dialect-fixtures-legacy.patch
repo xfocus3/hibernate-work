@@ -1,0 +1,741 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/internal/EntityDeleteAction.java b/hibernate-core/src/main/java/org/hibernate/action/internal/EntityDeleteAction.java
+index ccb157ff..7b4b84f7 100644
+--- a/hibernate-core/src/main/java/org/hibernate/action/internal/EntityDeleteAction.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/internal/EntityDeleteAction.java
+@@ -142,6 +142,9 @@ public void execute() {
+ 			final var event = eventMonitor.beginEntityDeleteEvent();
+ 			boolean success = false;
+ 			try {
++				if ( isInstanceLoaded() ) {
++					JoinedSelfReferenceDeleteCleanup.execute( persister, id, session );
++				}
+ 				persister.getDeleteCoordinator().delete( instance, id, version, session );
+ 				success = true;
+ 			}
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java b/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java
+@@ -0,0 +1,106 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * Copyright Red Hat Inc. and Hibernate Authors
++ */
++package org.hibernate.action.internal;
++
++import java.sql.SQLException;
++
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.engine.spi.SharedSessionContractImplementor;
++import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
++import org.hibernate.metamodel.mapping.SelectableMapping;
++import org.hibernate.metamodel.mapping.internal.SimpleForeignKeyDescriptor;
++import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
++import org.hibernate.persister.entity.EntityPersister;
++import org.hibernate.persister.entity.JoinedSubclassEntityPersister;
++import org.hibernate.sql.Update;
++
++import static org.hibernate.annotations.OnDeleteAction.CASCADE;
++
++/// A delete prerequisite for a nullable self-reference from the root to a joined table.
++public final class JoinedSelfReferenceDeleteCleanup {
++	private JoinedSelfReferenceDeleteCleanup() {
++	}
++
++	public static boolean isEligible(JoinedSubclassEntityPersister joined) {
++		return joined.getFactory().getJdbcServices().getDialect() instanceof H2Dialect
++			&& !joined.getRootTableName().equals( joined.getTableName() )
++			&& !joined.isVersioned()
++			&& !joined.optimisticLockStyle().isAllOrDirty()
++			&& !joined.hasPartitionedSelectionMapping()
++			&& joined.getTenantIdMapping() == null
++			&& joined.getSoftDeleteMapping() == null
++			&& joined.getRootTableKeyColumnNames().length == 1
++			&& !hasCustomDelete( joined );
++	}
++
++	private static boolean hasCustomDelete(JoinedSubclassEntityPersister joined) {
++		for ( final var table : joined.getTableMappings() ) {
++			if ( !table.isInverse() && table.getDeleteCustomSql() != null ) {
++				return true;
++			}
++		}
++		return false;
++	}
++
++	private static boolean eligibleColumn(SelectableMapping selectable) {
++		return !selectable.isFormula() && selectable.isNullable() && selectable.isUpdateable();
++	}
++
++	public static SelectableMapping cleanupColumn(
++			JoinedSubclassEntityPersister joined, String propertyName) {
++		final var onDeleteActions = joined.getPropertyOnDeleteActions();
++		if ( joined.findAttributeMapping( propertyName ) instanceof ToOneAttributeMapping toOne
++				&& toOne.isNullable()
++				&& toOne.isReferenceToPrimaryKey()
++				&& onDeleteActions[toOne.getStateArrayPosition()] == CASCADE
++				&& toOne.getSideNature() == ForeignKeyDescriptor.Nature.KEY
++				&& toOne.getForeignKeyDescriptor() instanceof SimpleForeignKeyDescriptor foreignKey
++				&& foreignKey.hasConstraint()
++				&& foreignKey.getKeyTable().equals( joined.getRootTableName() )
++				&& foreignKey.getTargetTable().equals( joined.getTableName() ) ) {
++			final var selectable = foreignKey.getSelectable( 0 );
++			return eligibleColumn( selectable ) ? selectable : null;
++		}
++		return null;
++	}
++
++	public static void execute(
++			EntityPersister persister,
++			Object id,
++			SharedSessionContractImplementor session) {
++		if ( !( persister instanceof JoinedSubclassEntityPersister joined ) || !isEligible( joined ) ) {
++			return;
++		}
++		final String[] keyColumns = joined.getRootTableKeyColumnNames();
++		for ( final var name : joined.getPropertyNames() ) {
++			final var selectable = cleanupColumn( joined, name );
++			if ( selectable != null ) {
++				// Only clear the edge if the stored FK points back to this same entity.
++				final String fkColumn = selectable.getSelectionExpression();
++				final String sql = new Update( session.getFactory() )
++						.setTableName( joined.getRootTableName() )
++						.addAssignment( fkColumn, "null" )
++						.addRestriction( keyColumns[0] )
++						.addRestriction( fkColumn, keyColumns[0] )
++						.toStatementString();
++				final var jdbcCoordinator = session.getJdbcCoordinator();
++				jdbcCoordinator.executeBatch();
++				final var statement = jdbcCoordinator.getStatementPreparer().prepareStatement( sql );
++				try {
++					joined.getIdentifierType().nullSafeSet( statement, id, 1, session );
++					jdbcCoordinator.getResultSetReturn().executeUpdate( statement, sql );
++				}
++				catch (SQLException e) {
++					throw session.getJdbcServices().getSqlExceptionHelper()
++							.convert( e, "Could not clear the joined self-reference before deletion", sql );
++				}
++				finally {
++					jdbcCoordinator.getLogicalConnection().getResourceRegistry().release( statement );
++					jdbcCoordinator.afterStatementExecution();
++				}
++			}
++		}
++	}
++}
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/cyclebreak/FixupJdbcUpdate.java b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/cyclebreak/FixupJdbcUpdate.java
+index 718dd5b7..30a7d12a 100644
+--- a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/cyclebreak/FixupJdbcUpdate.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/cyclebreak/FixupJdbcUpdate.java
+@@ -42,10 +42,19 @@ public FixupJdbcUpdate(
+ 			TableDescriptor tableDescriptor,
+ 			EntityPersister entityPersister,
+ 			Map<String, JdbcValueDescriptor> jdbcValueDescriptorMap) {
++		this( sql, tableDescriptor, entityPersister, jdbcValueDescriptorMap, Expectation.RowCount.INSTANCE );
++	}
++
++	public FixupJdbcUpdate(
++			String sql,
++			TableDescriptor tableDescriptor,
++			EntityPersister entityPersister,
++			Map<String, JdbcValueDescriptor> jdbcValueDescriptorMap,
++			Expectation expectation) {
+ 		this.sql = sql;
+ 		this.tableDescriptor = tableDescriptor;
+ 		this.entityPersister = entityPersister;
+-		this.expectation = Expectation.RowCount.INSTANCE;
++		this.expectation = expectation;
+ 
+ 		this.jdbcValueDescriptorMap = jdbcValueDescriptorMap;
+ 		this.parameterBinders = CollectionHelper.arrayList( jdbcValueDescriptorMap.size() );
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
+index 9194d982..659fdc92 100644
+--- a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
+@@ -8,6 +8,12 @@
+ import org.hibernate.action.queue.spi.decompose.entity.CancelledInsertPostDeleteHandling;
+ 
+ import org.hibernate.action.internal.EntityDeleteAction;
++import org.hibernate.action.internal.JoinedSelfReferenceDeleteCleanup;
++import org.hibernate.action.queue.internal.cyclebreak.FixupJdbcUpdate;
++import org.hibernate.engine.jdbc.mutation.ParameterUsage;
++import org.hibernate.jdbc.Expectation;
++import org.hibernate.persister.entity.JoinedSubclassEntityPersister;
++import org.hibernate.sql.Update;
+ import org.hibernate.action.queue.spi.MutationKind;
+ import org.hibernate.action.queue.spi.StatementShapeKey;
+ import org.hibernate.action.queue.spi.bind.PostExecutionCallback;
+@@ -148,6 +154,9 @@ public void decompose(
+ 			return;
+ 		}
+ 
++		final var cleanupOperations = createSelfReferenceCleanupOperations( ordinalBase, action, preDeleteHandling );
++		cleanupOperations.forEach( operationConsumer );
++
+ 		final var definedOptimisticLockStyle = definedOptimisticLockStyle();
+ 
+ 		// Match AbstractDeleteCoordinator pattern for obtaining loadedState and rowId
+@@ -176,6 +185,7 @@ public void decompose(
+ 					getUpdatedAttributeIndexesForDeletedEntity( decompositionContext, action ),
+ 					definedOptimisticLockStyle,
+ 					postDeleteHandling,
++					cleanupOperations,
+ 					session,
+ 					operationConsumer
+ 			);
+@@ -193,6 +203,7 @@ public void decompose(
+ 					getUpdatedAttributeIndexesForDeletedEntity( decompositionContext, action ),
+ 					definedOptimisticLockStyle,
+ 					postDeleteHandling,
++					cleanupOperations,
+ 					session,
+ 					operationConsumer
+ 			);
+@@ -276,6 +287,57 @@ private static int[] getUpdatedAttributeIndexesForDeletedEntity(
+ 				: decompositionContext.getUpdatedAttributeIndexesForDeletedEntity( action.getInstance() );
+ 	}
+ 
++	private List<FlushOperation> createSelfReferenceCleanupOperations(
++			int ordinalBase, EntityDeleteAction action, PreDeleteHandling preDeleteHandling) {
++		if ( action.getInstance() == null
++				|| !(entityPersister instanceof JoinedSubclassEntityPersister joined)
++				|| !JoinedSelfReferenceDeleteCleanup.isEligible( joined ) ) {
++			return List.of();
++		}
++
++		for ( var root : joined.getTableDescriptors() ) {
++			if ( root.name().equals( joined.getRootTableName() ) ) {
++				final var key = root.keyDescriptor().columns().get( 0 );
++				final var operations = new ArrayList<FlushOperation>();
++				for ( var name : joined.getPropertyNames() ) {
++					final var selectable = JoinedSelfReferenceDeleteCleanup.cleanupColumn( joined, name );
++					if ( selectable == null ) {
++						continue;
++					}
++					final String sql = new Update( sessionFactory )
++							.setTableName( root.name() )
++							.addAssignment( selectable.getSelectionExpression(), "null" )
++							.addRestriction( key.name() )
++							.addRestriction( selectable.getSelectionExpression(), key.name() )
++							.toStatementString();
++					final var mutation = new FixupJdbcUpdate(
++							sql,
++							root,
++							joined,
++							Map.of( key.name(), key.createValueDescriptor( ParameterUsage.RESTRICT, 1 ) ),
++							Expectation.None.INSTANCE
++					);
++					final var cleanup = new FlushOperation(
++							root,
++							MutationKind.UPDATE,
++							mutation,
++							(bindings, operation, session) -> joined.getIdentifierMapping().breakDownJdbcValues(
++									action.getId(),
++									(i, value, mapping) -> bindings.bindValue( value, key.name(), ParameterUsage.RESTRICT ),
++									session
++							),
++							ordinalBase * 1_000 + operations.size(),
++							origin + " [joined self-reference cleanup]"
++					);
++					cleanup.setPreExecutionCallback( preDeleteHandling );
++					operations.add( cleanup );
++				}
++				return operations;
++			}
++		}
++		return List.of();
++	}
++
+ 	private FlushOperation decomposeDynamicDelete(
+ 			int ordinalBase,
+ 			Object instance,
+@@ -287,6 +349,7 @@ private FlushOperation decomposeDynamicDelete(
+ 			int[] sameFlushUpdatedAttributeIndexes,
+ 			OptimisticLockStyle optimisticLockStyle,
+ 			PostDeleteHandling postDeleteHandling,
++			List<FlushOperation> cleanupOperations,
+ 			SharedSessionContractImplementor session,
+ 			Consumer<FlushOperation> operationConsumer) {
+ 		final var dynamicMutations =
+@@ -318,6 +381,7 @@ private FlushOperation decomposeDynamicDelete(
+ 					null
+ 			);
+ 			op.setPreExecutionCallback( postDeleteHandling.getPreDeleteHandling() );
++			cleanupOperations.forEach( op::addExecutionPrerequisite );
+ 
+ 			if ( previousOperation != null ) {
+ 				operationConsumer.accept( previousOperation );
+@@ -339,6 +403,7 @@ private FlushOperation decomposeStaticDelete(
+ 			int[] sameFlushUpdatedAttributeIndexes,
+ 			OptimisticLockStyle optimisticLockStyle,
+ 			PostDeleteHandling postDeleteHandling,
++			List<FlushOperation> cleanupOperations,
+ 			SharedSessionContractImplementor session,
+ 			Consumer<FlushOperation> operationConsumer) {
+ 		final boolean applyVersion;
+@@ -384,6 +449,7 @@ private FlushOperation decomposeStaticDelete(
+ 					shapeKey
+ 			);
+ 			op.setPreExecutionCallback( postDeleteHandling.getPreDeleteHandling() );
++			cleanupOperations.forEach( op::addExecutionPrerequisite );
+ 
+ 			if ( previousOperation != null ) {
+ 				operationConsumer.accept( previousOperation );
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+@@ -0,0 +1,174 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * Copyright Red Hat Inc. and Hibernate Authors
++ */
++package org.hibernate.orm.test.ondelete.toone;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.OneToOne;
++
++import org.hibernate.annotations.OnDelete;
++import org.hibernate.annotations.OnDeleteAction;
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.event.spi.EventSource;
++
++import org.hibernate.testing.orm.junit.DialectFeatureChecks;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.RequiresDialect;
++import org.hibernate.testing.orm.junit.RequiresDialectFeature;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.Setting;
++import org.hibernate.type.ForeignKeyDirection;
++import org.hibernate.type.OneToOneType;
++import org.junit.jupiter.api.AfterEach;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++import static org.junit.jupiter.api.Assertions.assertInstanceOf;
++import static org.junit.jupiter.api.Assertions.assertNotNull;
++
++@DomainModel(annotatedClasses = {
++		JoinedSelfReferenceCascadeDeleteTest.Base.class,
++		JoinedSelfReferenceCascadeDeleteTest.Child.class,
++		JoinedSelfReferenceCascadeDeleteTest.Owner.class
++})
++@SessionFactory
++@ServiceRegistry(settings = {
++		@Setting(name = "hibernate.flush.queue.type", value = "legacy"),
++		@Setting(name = "hibernate.jdbc.batch_size", value = "5")
++})
++@RequiresDialect(H2Dialect.class)
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCascadeDeleteCheck.class)
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCircularCascadeDeleteCheck.class)
++public class JoinedSelfReferenceCascadeDeleteTest {
++
++	@AfterEach
++	void cleanup(SessionFactoryScope scope) {
++		scope.getSessionFactory().getSchemaManager().truncate();
++	}
++
++	@Test
++	void removeEntityReferencingItself(SessionFactoryScope scope) {
++		persistSelfReference( scope, false );
++		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		assertBothRowsDeleted( scope );
++	}
++
++	@Test
++	void removeSelfReferencingOrphanBeforeUpdates(SessionFactoryScope scope) {
++		persistSelfReference( scope, true );
++		scope.inTransaction( s -> {
++			final var owner = s.find( Owner.class, 1 );
++			assertNotNull( owner.child );
++			final var persister = ( (EventSource) s ).getEntityPersister( null, owner );
++			final var associationType = assertInstanceOf( OneToOneType.class, persister.getPropertyTypes()[0] );
++			assertEquals( ForeignKeyDirection.TO_PARENT, associationType.getForeignKeyDirection() );
++			// Clear the inverse side so the managed owner orphans the previously loaded child on flush.
++			owner.child = null;
++		} );
++		assertBothRowsDeleted( scope );
++		scope.inTransaction( s -> assertEquals(
++				1L,
++				s.createNativeQuery( "select count(*) from JoinedSelfOwner", Long.class ).getSingleResult()
++		) );
++	}
++
++	@Test
++	void removeReferrerWithoutChangingItsDistinctTarget(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			final var referrer = new Child();
++			referrer.id = 1;
++			final var target = new Child();
++			target.id = 2;
++			s.persist( referrer );
++			s.persist( target );
++			s.flush();
++			referrer.self = target;
++			target.self = target;
++		} );
++		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		scope.inTransaction( s -> {
++			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfBase", Long.class ).getSingleResult() );
++			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfChild", Long.class ).getSingleResult() );
++			assertEquals( 2, s.createNativeQuery(
++					"select self_id from JoinedSelfBase where id = 2", Integer.class ).getSingleResult() );
++		} );
++	}
++
++	@Test
++	void removeMultipleSelfReferencesWithBatching(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			final var first = new Child();
++			first.id = 1;
++			final var second = new Child();
++			second.id = 2;
++			s.persist( first );
++			s.persist( second );
++			s.flush();
++			first.self = first;
++			second.self = second;
++		} );
++		scope.inTransaction( s -> {
++			final var first = s.find( Child.class, 1 );
++			final var second = s.find( Child.class, 2 );
++			s.remove( first );
++			s.remove( second );
++		} );
++		assertBothRowsDeleted( scope );
++	}
++
++	private static void persistSelfReference(SessionFactoryScope scope, boolean withOwner) {
++		scope.inTransaction( s -> {
++			var node = new Child();
++			node.id = 1;
++			if ( withOwner ) {
++				final var owner = new Owner();
++				owner.id = 1;
++				owner.child = node;
++				node.owner = owner;
++				s.persist( owner );
++			}
++			s.persist( node );
++			s.flush();
++			node.self = node;
++		} );
++	}
++
++	private static void assertBothRowsDeleted(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			assertEquals( 0L, s.createNativeQuery( "select count(*) from JoinedSelfBase", Long.class ).getSingleResult() );
++			assertEquals( 0L, s.createNativeQuery( "select count(*) from JoinedSelfChild", Long.class ).getSingleResult() );
++		} );
++	}
++
++	@Entity(name = "JoinedSelfBase")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	public static class Base {
++		@Id
++		Integer id;
++		@ManyToOne
++		@OnDelete(action = OnDeleteAction.CASCADE)
++		Child self;
++	}
++
++	@Entity(name = "JoinedSelfChild")
++	public static class Child extends Base {
++		String description;
++		@OneToOne
++		Owner owner;
++	}
++
++	@Entity(name = "JoinedSelfOwner")
++	public static class Owner {
++		@Id
++		Integer id;
++		@OneToOne(mappedBy = "owner", orphanRemoval = true)
++		Child child;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java
+@@ -0,0 +1,91 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * Copyright Red Hat Inc. and Hibernate Authors
++ */
++package org.hibernate.orm.test.ondelete.toone;
++
++import java.util.concurrent.atomic.AtomicInteger;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++
++import org.hibernate.annotations.OnDelete;
++import org.hibernate.annotations.OnDeleteAction;
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.event.spi.EventType;
++import org.hibernate.testing.orm.junit.DialectFeatureChecks;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.RequiresDialect;
++import org.hibernate.testing.orm.junit.RequiresDialectFeature;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@DomainModel(annotatedClasses = {
++		JoinedSelfReferenceCascadeDeleteVetoTest.Base.class,
++		JoinedSelfReferenceCascadeDeleteVetoTest.Child.class
++})
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
++@SessionFactory
++@RequiresDialect(H2Dialect.class)
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCascadeDeleteCheck.class)
++@RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCircularCascadeDeleteCheck.class)
++public class JoinedSelfReferenceCascadeDeleteVetoTest {
++	@Test
++	void vetoedDeleteKeepsRowsAndSelfReference(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var child = new Child();
++			child.id = 1;
++			session.persist( child );
++			session.flush();
++			child.self = child;
++		} );
++
++		final var vetoCount = new AtomicInteger();
++		scope.getSessionFactory().getEventListenerRegistry().appendListeners( EventType.PRE_DELETE, event -> {
++			if ( event.getEntity() instanceof Child && Integer.valueOf( 1 ).equals( event.getId() ) ) {
++				vetoCount.incrementAndGet();
++				return true;
++			}
++			return false;
++		} );
++
++		scope.inTransaction( session -> session.remove( session.find( Child.class, 1 ) ) );
++		assertEquals( 1, vetoCount.get() );
++		scope.inTransaction( session -> {
++			assertEquals( 1L, session.createNativeQuery(
++					"select count(*) from JoinedVetoBase where id = 1", Long.class
++			).getSingleResult() );
++			assertEquals( 1L, session.createNativeQuery(
++					"select count(*) from JoinedVetoChild where id = 1", Long.class
++			).getSingleResult() );
++			assertEquals( 1, session.createNativeQuery(
++					"select self_id from JoinedVetoBase where id = 1", Integer.class
++			).getSingleResult() );
++		} );
++	}
++
++	@Entity(name = "JoinedVetoBase")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	public static class Base {
++		@Id
++		Integer id;
++		@ManyToOne
++		@JoinColumn(name = "self_id")
++		@OnDelete(action = OnDeleteAction.CASCADE)
++		Child self;
++	}
++
++	@Entity(name = "JoinedVetoChild")
++	public static class Child extends Base {
++		String description;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java
+@@ -0,0 +1,85 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * Copyright Red Hat Inc. and Hibernate Authors
++ */
++package org.hibernate.orm.test.ondelete.toone;
++
++import jakarta.persistence.Column;
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++import jakarta.persistence.Table;
++
++import org.hibernate.annotations.OnDelete;
++import org.hibernate.annotations.OnDeleteAction;
++import org.hibernate.annotations.SQLDelete;
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.RequiresDialect;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@DomainModel(annotatedClasses = {
++		JoinedSelfReferenceCustomDeleteTest.Base.class,
++		JoinedSelfReferenceCustomDeleteTest.Child.class
++})
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
++@SessionFactory
++@RequiresDialect(H2Dialect.class)
++public class JoinedSelfReferenceCustomDeleteTest {
++	@Test
++	void customDeleteKeepsRowsAndSelfReference(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var child = new Child();
++			child.id = 1;
++			session.persist( child );
++			session.flush();
++			child.self = child;
++		} );
++
++		scope.inTransaction( session -> session.remove( session.find( Child.class, 1 ) ) );
++
++		scope.inTransaction( session -> {
++			assertEquals( 1, session.createNativeQuery(
++					"select self_id from joined_custom_base where id = 1", Integer.class
++			).getSingleResult() );
++			assertEquals( 1, session.createNativeQuery(
++					"select base_deleted from joined_custom_base where id = 1", Integer.class
++			).getSingleResult() );
++			assertEquals( 1, session.createNativeQuery(
++					"select child_deleted from joined_custom_child where id = 1", Integer.class
++			).getSingleResult() );
++		} );
++	}
++
++	@Entity(name = "JoinedCustomBase")
++	@Table(name = "joined_custom_base")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	@SQLDelete(sql = "update joined_custom_base set base_deleted = 1 where id = ?")
++	public static class Base {
++		@Id
++		Integer id;
++		@Column(name = "base_deleted")
++		int baseDeleted;
++		@ManyToOne
++		@JoinColumn(name = "self_id")
++		@OnDelete(action = OnDeleteAction.CASCADE)
++		Child self;
++	}
++
++	@Entity(name = "JoinedCustomChild")
++	@Table(name = "joined_custom_child")
++	@SQLDelete(sql = "update joined_custom_child set child_deleted = 1 where id = ?")
++	public static class Child extends Base {
++		@Column(name = "child_deleted")
++		int childDeleted;
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java
+@@ -0,0 +1,88 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * Copyright Red Hat Inc. and Hibernate Authors
++ */
++package org.hibernate.orm.test.ondelete.toone;
++
++import java.util.concurrent.atomic.AtomicInteger;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++import jakarta.persistence.Inheritance;
++import jakarta.persistence.InheritanceType;
++import jakarta.persistence.JoinColumn;
++import jakarta.persistence.ManyToOne;
++
++import org.hibernate.annotations.OnDelete;
++import org.hibernate.annotations.OnDeleteAction;
++import org.hibernate.dialect.H2Dialect;
++import org.hibernate.event.spi.EventType;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.RequiresDialect;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@DomainModel(annotatedClasses = {
++		JoinedSelfReferencePreDeleteMutationTest.Base.class,
++		JoinedSelfReferencePreDeleteMutationTest.Child.class
++})
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
++@SessionFactory
++@RequiresDialect(H2Dialect.class)
++public class JoinedSelfReferencePreDeleteMutationTest {
++	@Test
++	void removeAfterPreDeleteListenerCreatesPhysicalSelfReference(SessionFactoryScope scope) {
++		scope.inTransaction( session -> {
++			final var child = new Child();
++			child.id = 1;
++			session.persist( child );
++		} );
++
++		final var listenerCount = new AtomicInteger();
++		scope.getSessionFactory().getEventListenerRegistry().appendListeners( EventType.PRE_DELETE, event -> {
++			if ( event.getEntity() instanceof Child && Integer.valueOf( 1 ).equals( event.getId() ) ) {
++				event.getSession().doWork( connection -> {
++					try (var statement = connection.prepareStatement(
++							"update JoinedPreDeleteBase set self_id = id where id = ?" )) {
++						statement.setInt( 1, 1 );
++						assertEquals( 1, statement.executeUpdate() );
++					}
++				} );
++				listenerCount.incrementAndGet();
++			}
++			return false;
++		} );
++
++		scope.inTransaction( session -> session.remove( session.find( Child.class, 1 ) ) );
++		assertEquals( 1, listenerCount.get() );
++		scope.inTransaction( session -> {
++			assertEquals( 0L, session.createNativeQuery(
++					"select count(*) from JoinedPreDeleteBase", Long.class
++			).getSingleResult() );
++			assertEquals( 0L, session.createNativeQuery(
++					"select count(*) from JoinedPreDeleteChild", Long.class
++			).getSingleResult() );
++		} );
++	}
++
++	@Entity(name = "JoinedPreDeleteBase")
++	@Inheritance(strategy = InheritanceType.JOINED)
++	public static class Base {
++		@Id
++		Integer id;
++		@ManyToOne
++		@JoinColumn(name = "self_id")
++		@OnDelete(action = OnDeleteAction.CASCADE)
++		Child self;
++	}
++
++	@Entity(name = "JoinedPreDeleteChild")
++	public static class Child extends Base {
++		String description;
++	}
++}
