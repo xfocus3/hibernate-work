@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "mysql",
+  "setup_script": "ci/database-start.sh",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.SelfReferencingCascadeDeleteNullificationTest.joinedSelfReferencePreservesExistingDeletionBehavior",
+    "-Pdb=mysql"
+  ],
+  "reason": "Verify the existing joined self-reference nullification on mysql still emits one UPDATE followed by two DELETEs."
+}
