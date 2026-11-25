@@ -1,0 +1,13 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "mariadb",
+  "setup_script": "ci/database-start.sh",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.ondelete.toone.SelfReferencingCascadeDeleteNullificationTest.joinedSelfReferencePreservesExistingDeletionBehavior",
+    "-Pdb=mariadb"
+  ],
+  "reason": "Verify the existing joined self-reference nullification on mariadb still emits one UPDATE followed by two DELETEs."
+}
