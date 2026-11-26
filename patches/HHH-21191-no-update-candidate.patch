@@ -1,0 +1,63 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+@@ -1,4 +1,7 @@
+ package org.hibernate.orm.test.ondelete.toone;
++
++import java.util.List;
++import java.util.Locale;
+ 
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
+@@ -34,7 +37,7 @@
+ 		JoinedSelfReferenceCascadeDeleteTest.Child.class,
+ 		JoinedSelfReferenceCascadeDeleteTest.Owner.class
+ })
+-@SessionFactory
++@SessionFactory(useCollectingStatementObserver = true)
+ @ServiceRegistry(settings = {
+ 		@Setting(name = "hibernate.flush.queue.type", value = "graph"),
+ 		@Setting(name = "hibernate.jdbc.batch_size", value = "5")
+@@ -76,6 +79,17 @@
+ 	}
+ 
+ 	@Test
++	void removeWithNullReferenceWithoutAnUpdate(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			final var child = new Child();
++			child.id = 1;
++			s.persist( child );
++		} );
++		removeChildWithoutUpdate( scope, 1 );
++		assertBothRowsDeleted( scope );
++	}
++
++	@Test
+ 	void removeReferrerWithoutChangingItsDistinctTarget(SessionFactoryScope scope) {
+ 		scope.inTransaction( s -> {
+ 			final var referrer = new Child();
+@@ -88,7 +102,7 @@
+ 			referrer.self = target;
+ 			target.self = target;
+ 		} );
+-		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		removeChildWithoutUpdate( scope, 1 );
+ 		scope.inTransaction( s -> {
+ 			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfBase", Long.class ).getSingleResult() );
+ 			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfChild", Long.class ).getSingleResult() );
+@@ -117,6 +131,15 @@
+ 			s.remove( second );
+ 		} );
+ 		assertBothRowsDeleted( scope );
++	}
++
++	private static void removeChildWithoutUpdate(SessionFactoryScope scope, int id) {
++		final var observer = scope.getCollectingStatementObserver();
++		observer.clear();
++		scope.inTransaction( s -> s.remove( s.find( Child.class, id ) ) );
++		assertEquals( List.of(), observer.getSqlQueries().stream()
++				.filter( sql -> sql.stripLeading().toLowerCase( Locale.ROOT ).startsWith( "update " ) )
++				.toList() );
+ 	}
+ 
+ 	private static void persistSelfReference(SessionFactoryScope scope, boolean withOwner) {
