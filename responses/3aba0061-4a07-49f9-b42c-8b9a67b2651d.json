@@ -1,0 +1,11 @@
+{
+  "id": "3aba0061-4a07-49f9-b42c-8b9a67b2651d",
+  "requestHash": "5f43f759ee97538c1b83d5113f09bbccb5503bf86c62686088a6040e3429e96a",
+  "runId": "45726253882",
+  "runAttempt": "1",
+  "head": "ced6d764b5a0426caab6ad978e3340da70860e0f",
+  "resultHead": "ced6d764b5a0426caab6ad978e3340da70860e0f",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\": \"Reviewed the H2 cleanup against the exact work PR head. The SQL only clears a root FK that still points to the row being deleted; it does not null a reference to a different ID. The direct path executes after PRE_DELETE accepts, and the graph path shares its veto callback and declares the cleanup as a prerequisite of the table deletes. The custom DELETE, listener-mutation, and mapped-by orphan tests cover ordering and side effects. Existing cycle break operations keep their row-count expectation; only the guarded H2 cleanup allows zero affected rows.\\n\\nThe exact Work PR head passed 29 H2 tests, two MySQL cases and two MariaDB cases, with no skipped tests. The latter use the existing nullification regression. This retains a guarded UPDATE for eligible associations even when the stored edge is absent; the batch fixture is not a general performance finding. Unloaded proxies and mappings excluded by the guard are outside this change. The fork candidate on the newer base is tracked separately. No files changed in this review.\", \"inlineComments\": [], \"replies\": []}</output>"
+}
