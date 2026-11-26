@@ -1,0 +1,11 @@
+{
+  "id": "79ba15f0-d838-42d2-be09-ddbdc17df03b",
+  "requestHash": "5dea03d828650e6b18961fb9709c4ed9eb80fda16c04802d212a6cc23625b2cf",
+  "runId": "45740115374",
+  "runAttempt": "1",
+  "head": "2b6691953d563a52c28ec361315460061cd7f063",
+  "resultHead": "2b6691953d563a52c28ec361315460061cd7f063",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed exact head 2b6691953d563a52c28ec361315460061cd7f063. The pagination rewriter preserves the rendered collection filter predicates and their existing parameter objects while still rewriting structured references to absorbed owner columns. This is an opt-in in the collection-fetch rewriter; the shared replacement walker's filter defaults and unrelated paths are unchanged. No changes or blocking findings.\\n\\nUnchanged current main reproduced the exception only for the positive filtered case; the control stayed green. The canonical run on this exact PR head passed all 16 H2 tests, with no skips: explicit child alias, both Boolean bindings and the same parent page, nested pagination edge controls, and the parameterized join-table filter applied to both the selected root page and fetched book. The independent alias review's additional inner-join case is included. This evidence covers the H2 cases exercised; no broader database pass is implied.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
