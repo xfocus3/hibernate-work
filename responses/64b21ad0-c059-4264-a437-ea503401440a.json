@@ -1,0 +1,11 @@
+{
+  "id": "64b21ad0-c059-4264-a437-ea503401440a",
+  "requestHash": "bae4c7be8b0d5f832cdf5c5fb69a74ba8feaa77d486a841c91a0111478a39fd9",
+  "runId": "45732974409",
+  "runAttempt": "1",
+  "head": "ba46726a2c66419e8175d6f55a6dd51375dff22b",
+  "resultHead": "ba46726a2c66419e8175d6f55a6dd51375dff22b",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "<output>{\"summary\":\"Reviewed ba46726a2c66419e8175d6f55a6dd51375dff22b, including the change that addresses the earlier unconditional UPDATE. No focused row-correctness blocker found.\\n\\nThe root-table probe runs after the accepted PRE_DELETE callback, and the guarded UPDATE only runs when the physical foreign key equals the root PK. The graph dependency still ensures cleanup precedes both deletes. Veto, custom DELETE exclusion, physical listener mutation, mapped-by orphan removal, multiple removals, NULL and distinct references have targeted coverage. The direct regression asserts that H2 renders FOR UPDATE on the root. H2 has 30 passing tests in each queue mode and 30 passing tests on this exact graph head through the canonical gate. The exact-head MySQL and MariaDB checks each passed 2 existing joined-deletion cases.\\n\\nThere is one additional SELECT per eligible FK and a statement-level SELECT trigger can observe that probe. The exact paired H2 2.5.252 SQL confirmed that both existing DELETE statements already require SELECT permission, and that SELECT+DELETE suffices without UPDATE rights for nonmatching rows. The graph callback drains its pending cleanup batch before a subsequent probe, so cleanup UPDATEs do not group in this case. These trade-offs are limited to H2 mappings eligible for this path. The pre-existing concurrent first-edge race after a negative probe is outside scope; this is not a general cross-transaction guarantee.\",\"inlineComments\":[],\"replies\":[]}</output>"
+}
