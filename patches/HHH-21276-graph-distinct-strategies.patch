@@ -1,0 +1,210 @@
+diff --git a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveSingleTableTest.java b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveSingleTableTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveSingleTableTest.java
+@@ -0,0 +1,100 @@
++package org.hibernate.temporal;
++
++import java.util.List;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++
++import org.hibernate.SharedSessionContract;
++import org.hibernate.annotations.Temporal;
++import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.Test;
++
++import static org.hibernate.cfg.StateManagementSettings.CHANGESET_ID_SUPPLIER;
++import static org.hibernate.cfg.StateManagementSettings.TEMPORAL_TABLE_STRATEGY;
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@JiraKey("HHH-21276")
++@ServiceRegistry(settings = {
++		@Setting(name = TEMPORAL_TABLE_STRATEGY, value = "SINGLE_TABLE"),
++		@Setting(name = CHANGESET_ID_SUPPLIER, value = "org.hibernate.temporal.TemporalFlushThenRemoveSingleTableTest$Sequence"),
++		@Setting(name = "hibernate.flush.queue.type", value = "graph")
++})
++@DomainModel(annotatedClasses = TemporalFlushThenRemoveSingleTableTest.Item.class)
++@SessionFactory
++class TemporalFlushThenRemoveSingleTableTest {
++	@Test
++	void updateFlushRemove(SessionFactoryScope scope) {
++		verifyHistoryAfterUpdate( scope );
++	}
++
++	@Test
++	void persistFlushRemove(SessionFactoryScope scope) {
++		verifyNoHistoryAfterInsert( scope );
++	}
++
++	private static void verifyHistoryAfterUpdate(SessionFactoryScope scope) {
++		final var original = scope.fromTransaction( session -> {
++			session.persist( new Item( 1, "original" ) );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		final var removal = scope.fromTransaction( session -> {
++			final var item = session.find( Item.class, 1 );
++			item.name = "new";
++			session.flush();
++			session.remove( item );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		assertEquals( List.of( "original" ), namesAt( scope, original ) );
++		assertEquals( List.of(), namesAt( scope, removal ) );
++	}
++
++	private static void verifyNoHistoryAfterInsert(SessionFactoryScope scope) {
++		final var removal = scope.fromTransaction( session -> {
++			final var item = new Item( 1, "transient version" );
++			session.persist( item );
++			session.flush();
++			session.remove( item );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		assertEquals( List.of(), namesAt( scope, removal ) );
++	}
++
++	private static List<String> namesAt(SessionFactoryScope scope, Object changeset) {
++		try (var session = scope.getSessionFactory().withOptions().atChangeset( changeset ).openSession()) {
++			return session.createSelectionQuery( "select i.name from FlushRemovalSingleTableItem i order by i.id", String.class ).list();
++		}
++	}
++
++	public static class Sequence implements ChangesetIdentifierSupplier<Integer> {
++		private int next;
++
++		@Override
++		public Integer generateIdentifier(SharedSessionContract session) {
++			return ++next;
++		}
++	}
++
++	@Entity(name = "FlushRemovalSingleTableItem")
++	@Temporal
++	static class Item {
++		@Id
++		int id;
++
++		String name;
++
++		Item() {
++		}
++
++		Item(int id, String name) {
++			this.id = id;
++			this.name = name;
++		}
++	}
++}
+diff --git a/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveHistoryTableTest.java b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveHistoryTableTest.java
+new file mode 100644
+--- /dev/null
++++ b/hibernate-core/src/test/java/org/hibernate/temporal/TemporalFlushThenRemoveHistoryTableTest.java
+@@ -0,0 +1,100 @@
++package org.hibernate.temporal;
++
++import java.util.List;
++
++import jakarta.persistence.Entity;
++import jakarta.persistence.Id;
++
++import org.hibernate.SharedSessionContract;
++import org.hibernate.annotations.Temporal;
++import org.hibernate.temporal.spi.ChangesetIdentifierSupplier;
++import org.hibernate.testing.orm.junit.DomainModel;
++import org.hibernate.testing.orm.junit.JiraKey;
++import org.hibernate.testing.orm.junit.ServiceRegistry;
++import org.hibernate.testing.orm.junit.SessionFactory;
++import org.hibernate.testing.orm.junit.SessionFactoryScope;
++import org.hibernate.testing.orm.junit.Setting;
++import org.junit.jupiter.api.Test;
++
++import static org.hibernate.cfg.StateManagementSettings.CHANGESET_ID_SUPPLIER;
++import static org.hibernate.cfg.StateManagementSettings.TEMPORAL_TABLE_STRATEGY;
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++@JiraKey("HHH-21276")
++@ServiceRegistry(settings = {
++		@Setting(name = TEMPORAL_TABLE_STRATEGY, value = "HISTORY_TABLE"),
++		@Setting(name = CHANGESET_ID_SUPPLIER, value = "org.hibernate.temporal.TemporalFlushThenRemoveHistoryTableTest$Sequence"),
++		@Setting(name = "hibernate.flush.queue.type", value = "graph")
++})
++@DomainModel(annotatedClasses = TemporalFlushThenRemoveHistoryTableTest.Item.class)
++@SessionFactory
++class TemporalFlushThenRemoveHistoryTableTest {
++	@Test
++	void updateFlushRemove(SessionFactoryScope scope) {
++		verifyHistoryAfterUpdate( scope );
++	}
++
++	@Test
++	void persistFlushRemove(SessionFactoryScope scope) {
++		verifyNoHistoryAfterInsert( scope );
++	}
++
++	private static void verifyHistoryAfterUpdate(SessionFactoryScope scope) {
++		final var original = scope.fromTransaction( session -> {
++			session.persist( new Item( 1, "original" ) );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		final var removal = scope.fromTransaction( session -> {
++			final var item = session.find( Item.class, 1 );
++			item.name = "new";
++			session.flush();
++			session.remove( item );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		assertEquals( List.of( "original" ), namesAt( scope, original ) );
++		assertEquals( List.of(), namesAt( scope, removal ) );
++	}
++
++	private static void verifyNoHistoryAfterInsert(SessionFactoryScope scope) {
++		final var removal = scope.fromTransaction( session -> {
++			final var item = new Item( 1, "transient version" );
++			session.persist( item );
++			session.flush();
++			session.remove( item );
++			return session.getCurrentChangesetIdentifier();
++		} );
++		assertEquals( List.of(), namesAt( scope, removal ) );
++	}
++
++	private static List<String> namesAt(SessionFactoryScope scope, Object changeset) {
++		try (var session = scope.getSessionFactory().withOptions().atChangeset( changeset ).openSession()) {
++			return session.createSelectionQuery( "select i.name from FlushRemovalHistoryTableItem i order by i.id", String.class ).list();
++		}
++	}
++
++	public static class Sequence implements ChangesetIdentifierSupplier<Integer> {
++		private int next;
++
++		@Override
++		public Integer generateIdentifier(SharedSessionContract session) {
++			return ++next;
++		}
++	}
++
++	@Entity(name = "FlushRemovalHistoryTableItem")
++	@Temporal
++	static class Item {
++		@Id
++		int id;
++
++		String name;
++
++		Item() {
++		}
++
++		Item(int id, String name) {
++			this.id = id;
++			this.name = name;
++		}
++	}
++}
