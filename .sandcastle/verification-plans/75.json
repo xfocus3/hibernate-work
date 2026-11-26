@@ -1,0 +1,18 @@
+{
+  "build_tool": "gradle",
+  "java_version": "25",
+  "database": "h2",
+  "arguments": [
+    "hibernate-core:test",
+    "--tests",
+    "org.hibernate.orm.test.pagination.CollectionFetchFilterPaginationTest",
+    "--tests",
+    "org.hibernate.orm.test.pagination.CollectionFetchPaginationAdvancedTest",
+    "--tests",
+    "org.hibernate.orm.test.pagination.CollectionFetchPaginationEdgeCasesTest",
+    "--tests",
+    "org.hibernate.orm.test.pagination.CollectionFetchPaginationManyToManyTest",
+    "-Pdb=h2"
+  ],
+  "reason": "Verify collection filter aliases and both parameter values, unfiltered pagination, and the inner many-to-many join-table filter plus adjacent pagination cases on the exact PR head."
+}
