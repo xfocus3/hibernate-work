@@ -1,0 +1,11 @@
+{
+  "id": "b00f5805-730d-463b-9c46-489eed654038",
+  "requestHash": "3e8c0153e91ef06de993eb48001d0588d610242db38155da6715949b3cda0fe4",
+  "runId": "45738219626",
+  "runAttempt": "1",
+  "head": "9f06537941a2e875b0e4657edb8fb9fc880c7e46",
+  "resultHead": "9f06537941a2e875b0e4657edb8fb9fc880c7e46",
+  "changedPaths": [],
+  "status": "completed",
+  "stdout": "`easy-call`: preserve collection filters when the fetch join is reattached outside the pagination subquery.\n\nThe failure is in `CollectionFetchPaginationQueryTransformer` and `ExpressionReplacementWalker`: the rewritten join predicate contains a rendered `FilterPredicate`, whose generic visitor rejects it. The fetched table group moves with the aliases referenced by its collection filters. Keep those rendered predicates and their original JDBC bindings in the pagination-specific rewriter and continue rewriting structured owner column references. Leave the default filter visitors unchanged for other SQL AST transformations.\n\nTwo-way. This changes query-plan construction only; there is no public API, schema, or mapping change. No duplicate in the batch.\n\n- [Baseline](https://github.com/xfocus3/hibernate-work/actions/runs/45732075076): parameterized filter fails with the reported exception; the unfiltered control passes.\n- [Focused candidate](https://github.com/xfocus3/hibernate-work/actions/runs/45735159948): 16 H2 tests pass, without skips. Covers explicit child alias, both Boolean values and stable parent pagination, and an inner many-to-many link filter affecting page membership and fetched children.\n\nReapply the minimal candidate on the synchronized base, rerun exact-source compile/format and focused pagination tests, and verify changes before a Work PR.\n\n<promise>COMPLETE</promise>\n"
+}
