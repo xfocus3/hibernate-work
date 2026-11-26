@@ -1,0 +1,16 @@
+{
+  "id": "04a78ef4-13fd-4433-b2db-a8453852e3a3",
+  "requestHash": "96bd00d58698650c40d71214dd0e6ee3a6a35b84fdd15425eb01691bc49a5b8d",
+  "runId": "45738711657",
+  "runAttempt": "1",
+  "head": "9f06537941a2e875b0e4657edb8fb9fc880c7e46",
+  "resultHead": "2b6691953d563a52c28ec361315460061cd7f063",
+  "changedPaths": [
+    "hibernate-core/src/main/java/org/hibernate/query/sqm/sql/internal/CollectionFetchPaginationQueryTransformer.java",
+    "hibernate-core/src/main/java/org/hibernate/sql/ast/spi/transform/ExpressionReplacementWalker.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchFilterPaginationTest.java",
+    "hibernate-core/src/test/java/org/hibernate/orm/test/pagination/CollectionFetchPaginationManyToManyTest.java"
+  ],
+  "status": "completed",
+  "stdout": "Implemented HHH-21273 on the exact synchronized baseline as one commit. The collection-fetch pagination rewriter preserves the existing rendered filter predicates and JDBC bindings, while the default walker behavior and structured owner column rewrites are unchanged.\n\nVerified on 9f065379: unchanged production fails only the filtered regression with UnsupportedOperationException in visitFilterPredicate; the unfiltered control passed (run 45738759368). Candidate H2 run 45738749830 compiled and passed all 16 tests across four suites, including the explicit alias and both values, and the inner many-to-many join-table filter. No failures, errors, skips or formatting drift in the tested candidate tree. The result commit is a direct descendant and has exactly the tested tree.\n\n<promise>COMPLETE</promise>\n"
+}
