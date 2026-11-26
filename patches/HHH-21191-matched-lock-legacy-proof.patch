@@ -1,0 +1,229 @@
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java b/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java
+--- a/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/internal/JoinedSelfReferenceDeleteCleanup.java
+@@ -2,6 +2,7 @@
+ 
+ import java.sql.SQLException;
+ 
++import org.hibernate.LockMode;
+ import org.hibernate.dialect.H2Dialect;
+ import org.hibernate.engine.spi.SharedSessionContractImplementor;
+ import org.hibernate.metamodel.mapping.ForeignKeyDescriptor;
+@@ -10,9 +11,11 @@
+ import org.hibernate.metamodel.mapping.internal.ToOneAttributeMapping;
+ import org.hibernate.persister.entity.EntityPersister;
+ import org.hibernate.persister.entity.JoinedSubclassEntityPersister;
++import org.hibernate.sql.SimpleSelect;
+ import org.hibernate.sql.Update;
+ 
+ import static org.hibernate.annotations.OnDeleteAction.CASCADE;
++import static org.hibernate.sql.ComparisonRestriction.Operator.EQ;
+ 
+ /// A delete prerequisite for a nullable self-reference from the root to a joined table.
+ public final class JoinedSelfReferenceDeleteCleanup {
+@@ -62,6 +65,44 @@
+ 		return null;
+ 	}
+ 
++	/// Read the physical FK after pre-delete callbacks. Even a zero-row H2 UPDATE
++	/// would require UPDATE permission and fire statement-level triggers.
++	/// Lock only an existing self-edge to keep its state stable until the UPDATE.
++	public static boolean hasPhysicalSelfReference(
++			JoinedSubclassEntityPersister joined,
++			Object id,
++			String keyColumn,
++			String fkColumn,
++			SharedSessionContractImplementor session) {
++		final String sql = new SimpleSelect( session.getFactory() )
++				.setTableName( joined.getRootTableName() )
++				.addColumn( keyColumn )
++				.addRestriction( keyColumn )
++				.addRestriction( fkColumn, EQ, keyColumn )
++				.setLockMode( LockMode.PESSIMISTIC_WRITE )
++				.toStatementString();
++		final var jdbc = session.getJdbcCoordinator();
++		final var statement = jdbc.getStatementPreparer().prepareStatement( sql );
++		try {
++			joined.getIdentifierType().nullSafeSet( statement, id, 1, session );
++			final var result = jdbc.getResultSetReturn().extract( statement, sql );
++			try {
++				return result.next();
++			}
++			finally {
++				jdbc.getLogicalConnection().getResourceRegistry().release( result, statement );
++			}
++		}
++		catch (SQLException e) {
++			throw session.getJdbcServices().getSqlExceptionHelper()
++					.convert( e, "Could not read the joined self-reference before deletion", sql );
++		}
++		finally {
++			jdbc.getLogicalConnection().getResourceRegistry().release( statement );
++			jdbc.afterStatementExecution();
++		}
++	}
++
+ 	public static void execute(
+ 			EntityPersister persister,
+ 			Object id,
+@@ -75,6 +116,9 @@
+ 			if ( selectable != null ) {
+ 				// Only clear the edge if the stored FK points back to this same entity.
+ 				final String fkColumn = selectable.getSelectionExpression();
++				if ( !hasPhysicalSelfReference( joined, id, keyColumns[0], fkColumn, session ) ) {
++					continue;
++				}
+ 				final String sql = new Update( session.getFactory() )
+ 						.setTableName( joined.getRootTableName() )
+ 						.addAssignment( fkColumn, "null" )
+@@ -82,7 +126,6 @@
+ 						.addRestriction( fkColumn, keyColumns[0] )
+ 						.toStatementString();
+ 				final var jdbcCoordinator = session.getJdbcCoordinator();
+-				jdbcCoordinator.executeBatch();
+ 				final var statement = jdbcCoordinator.getStatementPreparer().prepareStatement( sql );
+ 				try {
+ 					joined.getIdentifierType().nullSafeSet( statement, id, 1, session );
+diff --git a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
+--- a/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
++++ b/hibernate-core/src/main/java/org/hibernate/action/queue/internal/decompose/entity/DeleteDecomposerStandard.java
+@@ -329,7 +329,15 @@
+ 							ordinalBase * 1_000 + operations.size(),
+ 							origin + " [joined self-reference cleanup]"
+ 					);
+-					cleanup.setPreExecutionCallback( preDeleteHandling );
++					cleanup.setPreExecutionCallback( preDeleteHandling.and(
++							session -> JoinedSelfReferenceDeleteCleanup.hasPhysicalSelfReference(
++									joined,
++									action.getId(),
++									key.name(),
++									selectable.getSelectionExpression(),
++									session
++							)
++					) );
+ 					operations.add( cleanup );
+ 				}
+ 				return operations;
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteTest.java
+@@ -1,4 +1,7 @@
+ package org.hibernate.orm.test.ondelete.toone;
++
++import java.util.List;
++import java.util.Locale;
+ 
+ import jakarta.persistence.Entity;
+ import jakarta.persistence.Id;
+@@ -28,15 +31,16 @@
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
++import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+ @DomainModel(annotatedClasses = {
+ 		JoinedSelfReferenceCascadeDeleteTest.Base.class,
+ 		JoinedSelfReferenceCascadeDeleteTest.Child.class,
+ 		JoinedSelfReferenceCascadeDeleteTest.Owner.class
+ })
+-@SessionFactory
++@SessionFactory(useCollectingStatementObserver = true)
+ @ServiceRegistry(settings = {
+-		@Setting(name = "hibernate.flush.queue.type", value = "graph"),
++		@Setting(name = "hibernate.flush.queue.type", value = "legacy"),
+ 		@Setting(name = "hibernate.jdbc.batch_size", value = "5")
+ })
+ @RequiresDialect(H2Dialect.class)
+@@ -52,7 +56,13 @@
+ 	@Test
+ 	void removeEntityReferencingItself(SessionFactoryScope scope) {
+ 		persistSelfReference( scope, false );
++		final var observer = scope.getCollectingStatementObserver();
++		observer.clear();
+ 		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		assertTrue( observer.getSqlQueries().stream().anyMatch( sql -> {
++			final String lower = sql.toLowerCase( Locale.ROOT );
++			return lower.contains( " for update" ) && lower.contains( "joinedselfbase" );
++		} ), "expected the matching root self-reference check to acquire a lock" );
+ 		assertBothRowsDeleted( scope );
+ 	}
+ 
+@@ -73,6 +83,17 @@
+ 				1L,
+ 				s.createNativeQuery( "select count(*) from JoinedSelfOwner", Long.class ).getSingleResult()
+ 		) );
++	}
++
++	@Test
++	void removeWithNullReferenceWithoutAnUpdate(SessionFactoryScope scope) {
++		scope.inTransaction( s -> {
++			final var child = new Child();
++			child.id = 1;
++			s.persist( child );
++		} );
++		removeChildWithoutUpdate( scope, 1 );
++		assertBothRowsDeleted( scope );
+ 	}
+ 
+ 	@Test
+@@ -88,7 +109,7 @@
+ 			referrer.self = target;
+ 			target.self = target;
+ 		} );
+-		scope.inTransaction( s -> s.remove( s.find( Child.class, 1 ) ) );
++		removeChildWithoutUpdate( scope, 1 );
+ 		scope.inTransaction( s -> {
+ 			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfBase", Long.class ).getSingleResult() );
+ 			assertEquals( 1L, s.createNativeQuery( "select count(*) from JoinedSelfChild", Long.class ).getSingleResult() );
+@@ -117,6 +138,15 @@
+ 			s.remove( second );
+ 		} );
+ 		assertBothRowsDeleted( scope );
++	}
++
++	private static void removeChildWithoutUpdate(SessionFactoryScope scope, int id) {
++		final var observer = scope.getCollectingStatementObserver();
++		observer.clear();
++		scope.inTransaction( s -> s.remove( s.find( Child.class, id ) ) );
++		assertEquals( List.of(), observer.getSqlQueries().stream()
++				.filter( sql -> sql.stripLeading().toLowerCase( Locale.ROOT ).startsWith( "update " ) )
++				.toList() );
+ 	}
+ 
+ 	private static void persistSelfReference(SessionFactoryScope scope, boolean withOwner) {
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCascadeDeleteVetoTest.java
+@@ -29,7 +29,7 @@
+ 		JoinedSelfReferenceCascadeDeleteVetoTest.Base.class,
+ 		JoinedSelfReferenceCascadeDeleteVetoTest.Child.class
+ })
+-@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "graph"))
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
+ @SessionFactory
+ @RequiresDialect(H2Dialect.class)
+ @RequiresDialectFeature(feature = DialectFeatureChecks.SupportsCascadeDeleteCheck.class)
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferencePreDeleteMutationTest.java
+@@ -27,7 +27,7 @@
+ 		JoinedSelfReferencePreDeleteMutationTest.Base.class,
+ 		JoinedSelfReferencePreDeleteMutationTest.Child.class
+ })
+-@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "graph"))
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
+ @SessionFactory
+ @RequiresDialect(H2Dialect.class)
+ public class JoinedSelfReferencePreDeleteMutationTest {
+diff --git a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java
+--- a/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java
++++ b/hibernate-core/src/test/java/org/hibernate/orm/test/ondelete/toone/JoinedSelfReferenceCustomDeleteTest.java
+@@ -27,7 +27,7 @@
+ 		JoinedSelfReferenceCustomDeleteTest.Base.class,
+ 		JoinedSelfReferenceCustomDeleteTest.Child.class
+ })
+-@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "graph"))
++@ServiceRegistry(settings = @Setting(name = "hibernate.flush.queue.type", value = "legacy"))
+ @SessionFactory
+ @RequiresDialect(H2Dialect.class)
+ public class JoinedSelfReferenceCustomDeleteTest {
