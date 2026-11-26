@@ -1,40 +1,58 @@
 name: Verify Java tracer bullet
-on:
-  workflow_dispatch:
-    inputs:
-      target_sha:
-        description: Exact upstream or work commit
-        type: string
-        required: true
-      patch_ref:
-        description: Optional exact commit containing a prepared patch
-        type: string
-        required: false
-      patch_path:
-        description: Optional repository-relative patch path
-        type: string
-        required: false
-      database:
-        description: Test database (match the -Pdb argument)
-        type: choice
-        default: h2
-        options: [h2, oracle, mssql, spanner, spannerpgsql, sybase]
-      arguments:
-        description: Gradle argument JSON array
-        type: string
-        required: true
-        default: '["hibernate-core:test","--tests","org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest","-Pdb=h2"]'
+run-name: HHH-21276 exact upstream H2 reproduction
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
   verify:
-    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
-    with:
-      target_sha: ${{ inputs.target_sha }}
-      patch_ref: ${{ inputs.patch_ref }}
-      patch_path: ${{ inputs.patch_path }}
-      arguments: ${{ inputs.arguments }}
-      database: ${{ inputs.database }}
-      setup_script: ${{ inputs.database != 'h2' && 'ci/database-start.sh' || '' }}
-      java_version: '25'
-      build_tool: gradle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: hibernate/hibernate-orm
+          ref: d6c4ce5099e650f6019ef8bbb648205ca950f956
+          path: target
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 3d2ade11b85c926d50f48d59a8848f647c2a6c66
+          path: request
+          persist-credentials: false
+      - name: Verify source and apply test-only fixture
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d6c4ce5099e650f6019ef8bbb648205ca950f956
+          test "$(git -C ../request rev-parse HEAD)" = 3d2ade11b85c926d50f48d59a8848f647c2a6c66
+          patch=../request/patches/HHH-21276-graph-distinct-strategies.patch
+          echo "b0681a00a2a69fe0176d7e37772552c733b1feaef7a4418e0618e0a7eb86d9ee  $patch" | sha256sum -c
+          git apply --check "$patch"
+          git apply --index "$patch"
+          printf 'base=%s\npatch_commit=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$(git -C ../request rev-parse HEAD)" "$(git write-tree)" > ../verification.txt
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Run focused H2 cases
+        working-directory: target
+        run: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.temporal.TemporalFlushThenRemove*Test' -Pdb=h2
+      - name: Record tested tree
+        if: always()
+        working-directory: target
+        run: |
+          set -euo pipefail
+          test -f ../verification.txt
+          git add -u
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
+      - name: Save verification reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hhh-21276-upstream-red
+          path: |
+            verification.txt
+            target/hibernate-core/target/test-results/**/TEST-*.xml
+          retention-days: 7
+          if-no-files-found: error
