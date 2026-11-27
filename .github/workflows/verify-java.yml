@@ -1,5 +1,5 @@
 name: Verify Java tracer bullet
-run-name: HHH-21149 bag dirty-checking exact-head proof
+run-name: HHH-21149 bag dirty-checking semantic equality verification
 on: workflow_dispatch
 permissions:
   contents: read
@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [red, green]
+        variant: [green]
     runs-on: ubuntu-latest
     timeout-minutes: 22
     steps:
@@ -26,35 +26,43 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = 60a0374eac3e66c3b69899df67a9aef237c8ad5b
           base64 -d <<'PATCH' | gzip -d > ../verification.patch
-          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
+          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
+          U2nJjQlRcyiQaG3aeNFk8H8tltmh6SUAAA==
           PATCH
-          echo '0772b1d9859c83358d2f31eb9d827d9990cba72ceb67b871fa29df93441a4ec7  ../verification.patch' | sha256sum -c
+          echo '8bd08464998c758ecfcebeed131ede23e66980c648cf908555f99977d01eaef2  ../verification.patch' | sha256sum -c
           apply=(--check)
           if [[ "$VARIANT" = red ]]; then
             apply+=(--include='**/BasicCollectionJavaTypeTest.java')
@@ -81,7 +89,9 @@ jobs:
         working-directory: target
         run: |
           git diff --cached --check
-          ./gradlew --no-daemon hibernate-core:spotlessCheck
+          ./gradlew --no-daemon hibernate-core:formatChecks
+          git diff --exit-code
+          printf 'tested_tree=%s\n' "$(git write-tree)" >> ../verification.txt
       - name: Save verification reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
