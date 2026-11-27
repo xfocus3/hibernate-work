@@ -1,5 +1,5 @@
 name: Verify Java tracer bullet
-run-name: HHH-21149 bag dirty-checking semantic equality verification
+run-name: HHH-21149 bag first-match compatibility
 on: workflow_dispatch
 permissions:
   contents: read
@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [green]
+        variant: [red, green]
     runs-on: ubuntu-latest
     timeout-minutes: 22
     steps:
@@ -63,23 +63,54 @@ jobs:
           U2nJjQlRcyiQaG3aeNFk8H8tltmh6SUAAA==
           PATCH
           echo '8bd08464998c758ecfcebeed131ede23e66980c648cf908555f99977d01eaef2  ../verification.patch' | sha256sum -c
+          git apply --index ../verification.patch
+          base64 -d <<'DELTA' | gzip -d > ../delta.patch
+          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
+          DELTA
+          echo 'dbd22ce7e700f2c2b361b05a5f6d84e33d19c15cdb5ef726173340ea3bb60d57  ../delta.patch' | sha256sum -c
           apply=(--check)
           if [[ "$VARIANT" = red ]]; then
             apply+=(--include='**/BasicCollectionJavaTypeTest.java')
           fi
-          git apply "${apply[@]}" ../verification.patch
+          git apply "${apply[@]}" ../delta.patch
           apply[0]=--index
-          git apply "${apply[@]}" ../verification.patch
-          printf 'head=%s\npatch=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$(sha256sum ../verification.patch | cut -d ' ' -f1)" "$(git write-tree)" > ../verification.txt
+          git apply "${apply[@]}" ../delta.patch
+          printf 'delta=%s\n' "$(sha256sum ../delta.patch | cut -d ' ' -f1)" > ../verification.txt
+          printf 'head=%s\npatch=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$(sha256sum ../verification.patch | cut -d ' ' -f1)" "$(git write-tree)" >> ../verification.txt
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
-      - name: Run RED on unchanged production
+      - name: Run RED on v2 grouped semantics
         if: matrix.variant == 'red'
         working-directory: target
-        run: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.type.descriptor.java.BasicCollectionJavaTypeTest.reorderedDuplicateHeavyBagsAreComparedLinearly' -Pdb=h2
+        run: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.type.descriptor.java.BasicCollectionJavaTypeTest.reorderedBagsRetainTheFirstMatchForSerializableValues' -Pdb=h2
       - name: Run GREEN H2 regressions
         if: matrix.variant == 'green'
         working-directory: target
