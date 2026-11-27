@@ -1,40 +1,94 @@
 name: Verify Java tracer bullet
-on:
-  workflow_dispatch:
-    inputs:
-      target_sha:
-        description: Exact upstream or work commit
-        type: string
-        required: true
-      patch_ref:
-        description: Optional exact commit containing a prepared patch
-        type: string
-        required: false
-      patch_path:
-        description: Optional repository-relative patch path
-        type: string
-        required: false
-      database:
-        description: Test database (match the -Pdb argument)
-        type: choice
-        default: h2
-        options: [h2, oracle, mssql, spanner, spannerpgsql, sybase]
-      arguments:
-        description: Gradle argument JSON array
-        type: string
-        required: true
-        default: '["hibernate-core:test","--tests","org.hibernate.orm.test.pagination.CollectionFetchPredicatePaginationTest","-Pdb=h2"]'
+run-name: HHH-21149 bag dirty-checking exact-head proof
+on: workflow_dispatch
 permissions:
   contents: read
 jobs:
   verify:
-    uses: xfocus3/sandcastle/.github/workflows/java-target-check.yml@49c6d695a59a46f3e693555ffe949ea1f0959748
-    with:
-      target_sha: ${{ inputs.target_sha }}
-      patch_ref: ${{ inputs.patch_ref }}
-      patch_path: ${{ inputs.patch_path }}
-      arguments: ${{ inputs.arguments }}
-      database: ${{ inputs.database }}
-      setup_script: ${{ inputs.database != 'h2' && 'ci/database-start.sh' || '' }}
-      java_version: '25'
-      build_tool: gradle
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [red, green]
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: xfocus3/hibernate-orm
+          ref: 60a0374eac3e66c3b69899df67a9aef237c8ad5b
+          path: target
+          persist-credentials: false
+      - name: Apply the pinned HHH-21149 patch
+        working-directory: target
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 60a0374eac3e66c3b69899df67a9aef237c8ad5b
+          base64 -d <<'PATCH' | gzip -d > ../verification.patch
+          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
+          PATCH
+          echo '0772b1d9859c83358d2f31eb9d827d9990cba72ceb67b871fa29df93441a4ec7  ../verification.patch' | sha256sum -c
+          apply=(--check)
+          if [[ "$VARIANT" = red ]]; then
+            apply+=(--include='**/BasicCollectionJavaTypeTest.java')
+          fi
+          git apply "${apply[@]}" ../verification.patch
+          apply[0]=--index
+          git apply "${apply[@]}" ../verification.patch
+          printf 'head=%s\npatch=%s\ntree=%s\n' "$(git rev-parse HEAD)" "$(sha256sum ../verification.patch | cut -d ' ' -f1)" "$(git write-tree)" > ../verification.txt
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+      - name: Run RED on unchanged production
+        if: matrix.variant == 'red'
+        working-directory: target
+        run: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.type.descriptor.java.BasicCollectionJavaTypeTest.reorderedDuplicateHeavyBagsAreComparedLinearly' -Pdb=h2
+      - name: Run GREEN H2 regressions
+        if: matrix.variant == 'green'
+        working-directory: target
+        run: ./gradlew --no-daemon hibernate-core:test --tests 'org.hibernate.orm.test.type.descriptor.java.BasicCollectionJavaTypeTest' --tests 'org.hibernate.orm.test.type.BasicCollectionFlushTest' -Pdb=h2
+      - name: Check style
+        if: matrix.variant == 'green'
+        working-directory: target
+        run: |
+          git diff --cached --check
+          ./gradlew --no-daemon hibernate-core:spotlessCheck
+      - name: Save verification reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hhh-21149-${{ matrix.variant }}
+          path: |
+            verification.txt
+            target/hibernate-core/target/test-results/**/TEST-*.xml
+          retention-days: 7
+          if-no-files-found: error
